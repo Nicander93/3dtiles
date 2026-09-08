@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>OSGB 源数据一览</title>
+  <style>
+    body { font:14px/1.5 system-ui,sans-serif; margin:24px; background:#0f141c; color:#e8eefc; }
+    a { color:#8ec5ff; }
+    table { border-collapse:collapse; width:100%; max-width:900px; }
+    th, td { border-bottom:1px solid #2a3142; padding:8px; text-align:left; }
+    code { background:#2a3142; padding:1px 5px; border-radius:4px; }
+    pre { background:#171d28; padding:12px; overflow:auto; border-radius:8px; max-width:900px; }
+  </style>
+</head>
+<body>
+  <h1>OSGB 源数据一览（公开样例 OSGBny）</h1>
+  <p>原生三维浏览见 UI 计划中的 OSG Viewer；这里先提供瓦片清单与 metadata，便于确认输入数据。</p>
+  <p><a href="./index.html">打开 3D Tiles Cesium 预览</a></p>
+  <div id="sum"></div>
+  <table><thead><tr><th>Tile</th><th>根 OSGB</th><th>文件数</th><th>大小</th></tr></thead><tbody id="tb"></tbody></table>
+  <h2>metadata.xml（截取）</h2>
+  <pre id="meta"></pre>
+  <script>
+    fetch('./osgb_inventory.json').then(r=>r.json()).then(d=>{
+      document.getElementById('sum').textContent = `瓦片块 ${d.tile_count} 个 · 来源 ${d.source}`;
+      const tb=document.getElementById('tb');
+      for (const t of d.tiles) {
+        const tr=document.createElement('tr');
+        tr.innerHTML=`<td><code>${t.name}</code></td><td><code>${t.root_osgb||'-'}</code></td><td>${t.files}</td><td>${(t.bytes/1024).toFixed(1)} KB</td>`;
+        tb.appendChild(tr);
+      }
+      document.getElementById('meta').textContent = d.metadata_xml_head;
+    });
+  </script>
+</body>
+</html>

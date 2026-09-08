@@ -9,3 +9,7 @@
 
 data
 output/target/
+.runtime/
+samples/
+examples/preview/tiles/
+*.zip

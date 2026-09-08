@@ -1,6 +1,6 @@
 # 简介
 
-> **本仓库 Fork 目标（v0）**：[V0 范围说明](./docs/V0_SCOPE.md) · [顶层重建设计](./docs/REBUILD_TOP.md) · [UI 计划](./docs/UI_PLAN.md)  
+> **本仓库 Fork 目标（v0）**：[V0 范围说明](./docs/V0_SCOPE.md) · [顶层重建设计](./docs/REBUILD_TOP.md) · [UI 计划](./docs/UI_PLAN.md) · [可运行指南](./docs/RUN.md)  
 > 在上游 OSGB→3D Tiles（含 KTX2 / Draco / 简化）之上，增加**后处理顶层重建**与**桌面预览 UI**（原生 OSG + Cesium）。  
 > 上游项目：[fanvanzh/3dtiles](https://github.com/fanvanzh/3dtiles)（Apache-2.0）。
 
