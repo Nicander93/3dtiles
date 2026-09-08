@@ -15,3 +15,5 @@ examples/preview/tiles/
 *.zip
 examples/preview/tiles_rebuild/
 .venv/
+__pycache__/
+*.pyc
