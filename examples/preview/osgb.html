@@ -2,35 +2,119 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <title>OSGB 源数据一览</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>公开 OSGB 倾斜模型预览</title>
   <style>
-    body { font:14px/1.5 system-ui,sans-serif; margin:24px; background:#0f141c; color:#e8eefc; }
+    html, body { margin:0; height:100%; background:#0f141c; color:#e8eefc; font:13px/1.45 system-ui,sans-serif; }
+    #c { position:absolute; inset:0; }
+    #hud {
+      position:absolute; left:12px; top:12px; z-index:5; max-width:360px;
+      background:rgba(20,24,32,.9); padding:12px 14px; border-radius:10px;
+    }
+    #hud h1 { font-size:14px; margin:0 0 6px; }
+    select, button { margin-top:8px; width:100%; padding:6px 8px; border-radius:6px; border:1px solid #3a455c; background:#1b2330; color:#e8eefc; }
     a { color:#8ec5ff; }
-    table { border-collapse:collapse; width:100%; max-width:900px; }
-    th, td { border-bottom:1px solid #2a3142; padding:8px; text-align:left; }
-    code { background:#2a3142; padding:1px 5px; border-radius:4px; }
-    pre { background:#171d28; padding:12px; overflow:auto; border-radius:8px; max-width:900px; }
+    .err { color:#ff8b8b; margin-top:8px; }
   </style>
 </head>
 <body>
-  <h1>OSGB 源数据一览（公开样例 OSGBny）</h1>
-  <p>原生三维浏览见 UI 计划中的 OSG Viewer；这里先提供瓦片清单与 metadata，便于确认输入数据。</p>
-  <p><a href="./index.html">打开 3D Tiles Cesium 预览</a></p>
-  <div id="sum"></div>
-  <table><thead><tr><th>Tile</th><th>根 OSGB</th><th>文件数</th><th>大小</th></tr></thead><tbody id="tb"></tbody></table>
-  <h2>metadata.xml（截取）</h2>
-  <pre id="meta"></pre>
-  <script>
-    fetch('./osgb_inventory.json').then(r=>r.json()).then(d=>{
-      document.getElementById('sum').textContent = `瓦片块 ${d.tile_count} 个 · 来源 ${d.source}`;
-      const tb=document.getElementById('tb');
-      for (const t of d.tiles) {
-        const tr=document.createElement('tr');
-        tr.innerHTML=`<td><code>${t.name}</code></td><td><code>${t.root_osgb||'-'}</code></td><td>${t.files}</td><td>${(t.bytes/1024).toFixed(1)} KB</td>`;
-        tb.appendChild(tr);
+  <div id="hud">
+    <h1>公开倾斜 OSGB 预览</h1>
+    <div>样例：OSGBny（issue #336 公开附件）<br/>预览路径：OSGB → GLB → Three.js（保留源瓦片几何）</div>
+    <select id="model"></select>
+    <button id="fit">聚焦当前瓦片</button>
+    <div style="margin-top:8px"><a href="./index.html">3D Tiles 预览</a> · <a href="./osgb_models.json">模型清单</a></div>
+    <div id="status"></div>
+  </div>
+  <canvas id="c"></canvas>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+    const canvas = document.getElementById('c');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setPixelRatio(devicePixelRatio);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0f141c);
+    const camera = new THREE.PerspectiveCamera(50, 2, 0.01, 1e7);
+    camera.position.set(50, 40, 50);
+    const controls = new OrbitControls(camera, canvas);
+    controls.target.set(0, 0, 0);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+    dir.position.set(100, 200, 80);
+    scene.add(dir);
+    scene.add(new THREE.GridHelper(200, 20, 0x334155, 0x1f2937));
+
+    let current = null;
+    const loader = new GLTFLoader();
+    const status = document.getElementById('status');
+    const select = document.getElementById('model');
+
+    function resize() {
+      const w = innerWidth, h = innerHeight;
+      renderer.setSize(w, h, false);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+    }
+    addEventListener('resize', resize); resize();
+
+    function fitObject(obj) {
+      const box = new THREE.Box3().setFromObject(obj);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      const maxSize = Math.max(size.x, size.y, size.z) || 1;
+      const dist = maxSize * 2.2;
+      controls.target.copy(center);
+      camera.position.copy(center).add(new THREE.Vector3(dist, dist * 0.7, dist));
+      camera.near = Math.max(dist / 1000, 0.01);
+      camera.far = dist * 100;
+      camera.updateProjectionMatrix();
+      controls.update();
+    }
+
+    async function loadModel(url, name) {
+      status.textContent = '加载中: ' + name;
+      if (current) { scene.remove(current); current = null; }
+      try {
+        const gltf = await loader.loadAsync(url);
+        current = gltf.scene;
+        scene.add(current);
+        fitObject(current);
+        status.textContent = '已加载: ' + name;
+      } catch (e) {
+        status.innerHTML = '<div class="err">加载失败: ' + e + '</div>';
       }
-      document.getElementById('meta').textContent = d.metadata_xml_head;
-    });
+    }
+
+    const manifest = await fetch('./osgb_models.json').then(r => r.json());
+    for (const m of manifest.models) {
+      const opt = document.createElement('option');
+      opt.value = m.url; opt.textContent = m.name + ' (' + Math.round(m.bytes/1024) + ' KB)';
+      select.appendChild(opt);
+    }
+    select.onchange = () => loadModel(select.value, select.selectedOptions[0].textContent);
+    document.getElementById('fit').onclick = () => current && fitObject(current);
+    if (manifest.models.length) {
+      select.value = manifest.models[0].url;
+      loadModel(manifest.models[0].url, manifest.models[0].name);
+    }
+
+    function frame() {
+      controls.update();
+      renderer.render(scene, camera);
+      requestAnimationFrame(frame);
+    }
+    frame();
   </script>
 </body>
 </html>

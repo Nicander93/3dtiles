@@ -13,3 +13,5 @@ output/target/
 samples/
 examples/preview/tiles/
 *.zip
+examples/preview/tiles_rebuild/
+.venv/

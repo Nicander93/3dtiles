@@ -1,18 +1,18 @@
-//! Post-process top-level reconstruction (`rebuild-top`) CLI surface.
+//! Post-process top-level reconstruction (`rebuild-top`) CLI.
 //!
-//! v0 intentionally stubs the geometry merge; the interface is fixed so the
-//! desktop UI and docs can depend on it.
+//! Dispatches to `tools/rebuild_top/rebuild_top.py` for the v0 merge
+//! implementation (b3dm/GLB merge + tileset rewrite).
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
-use std::path::Path;
-use std::process::ExitCode;
+use std::path::{Path, PathBuf};
+use std::process::{Command as ProcCommand, ExitCode};
 
 /// Build the `rebuild-top` subcommand.
 pub fn command() -> Command {
     Command::new("rebuild-top")
         .about(
             "Post-process top-level reconstruction for an existing 3D Tiles tileset \
-             (after OSGB→3D Tiles conversion). Not implemented yet — scaffold only.",
+             (after OSGB→3D Tiles conversion).",
         )
         .arg(
             Arg::new("input")
@@ -65,59 +65,87 @@ pub fn command() -> Command {
         )
 }
 
-/// Run the stub. Always exits with a controlled non-zero code until implemented.
+fn find_repo_root() -> Option<PathBuf> {
+    if let Ok(exe) = std::env::current_exe() {
+        for ancestor in exe.ancestors().take(8) {
+            let cand = ancestor.join("tools/rebuild_top/rebuild_top.py");
+            if cand.is_file() {
+                return Some(ancestor.to_path_buf());
+            }
+        }
+    }
+    let cwd = std::env::current_dir().ok()?;
+    for ancestor in cwd.ancestors().take(8) {
+        let cand = ancestor.join("tools/rebuild_top/rebuild_top.py");
+        if cand.is_file() {
+            return Some(ancestor.to_path_buf());
+        }
+    }
+    None
+}
+
+fn find_python(repo: &Path) -> PathBuf {
+    let venv = repo.join(".venv/bin/python");
+    if venv.is_file() {
+        return venv;
+    }
+    // workspace fallback used in CI/dev box
+    let alt = PathBuf::from("/workspace/venv-3dtiles/bin/python");
+    if alt.is_file() {
+        return alt;
+    }
+    PathBuf::from("python3")
+}
+
+/// Run rebuild-top by invoking the Python implementation.
 pub fn run(matches: &ArgMatches) -> ExitCode {
-    let input = matches
-        .get_one::<String>("input")
-        .map(String::as_str)
-        .unwrap_or("");
-    let output = matches
-        .get_one::<String>("output")
-        .map(String::as_str)
-        .unwrap_or("");
-    let levels = matches
-        .get_one::<String>("levels")
-        .map(String::as_str)
-        .unwrap_or("1");
-    let simplify = matches
-        .get_one::<String>("simplify")
-        .map(String::as_str)
-        .unwrap_or("0.5");
+    let input = matches.get_one::<String>("input").map(String::as_str).unwrap_or("");
+    let output = matches.get_one::<String>("output").map(String::as_str).unwrap_or("");
+    let levels = matches.get_one::<String>("levels").map(String::as_str).unwrap_or("1");
+    let simplify = matches.get_one::<String>("simplify").map(String::as_str).unwrap_or("0.5");
     let texture_scale = matches
         .get_one::<String>("texture-scale")
         .map(String::as_str)
         .unwrap_or("0.5");
+    let verbose = matches.get_flag("verbose");
 
-    eprintln!("rebuild-top: not implemented yet (v0 scaffold stub)");
-    eprintln!("  planned interface:");
-    eprintln!(
-        "    _3dtile rebuild-top -i <tileset_dir> -o <out_dir> --levels N [--simplify 0.5] [--texture-scale 0.5]"
-    );
-    eprintln!("  received:");
-    eprintln!("    input         = {input}");
-    eprintln!("    output        = {output}");
-    eprintln!("    levels        = {levels}");
-    eprintln!("    simplify      = {simplify}");
-    eprintln!("    texture-scale = {texture_scale}");
-    if matches.get_flag("verbose") {
-        eprintln!("    verbose       = true");
+    let Some(repo) = find_repo_root() else {
+        eprintln!("rebuild-top: cannot find tools/rebuild_top/rebuild_top.py (run from repo checkout)");
+        return ExitCode::from(2);
+    };
+    let script = repo.join("tools/rebuild_top/rebuild_top.py");
+    let python = find_python(&repo);
+
+    let mut cmd = ProcCommand::new(&python);
+    cmd.arg(&script)
+        .arg("-i")
+        .arg(input)
+        .arg("-o")
+        .arg(output)
+        .arg("--levels")
+        .arg(levels)
+        .arg("--simplify")
+        .arg(simplify)
+        .arg("--texture-scale")
+        .arg(texture_scale);
+    if verbose {
+        cmd.arg("-v");
     }
-    if !input.is_empty() {
-        let tileset = Path::new(input).join("tileset.json");
-        if tileset.is_file() {
-            eprintln!("  note: found tileset.json under input (good for a future run)");
-        } else {
-            eprintln!("  note: tileset.json not found under input (ok for stub)");
+
+    match cmd.status() {
+        Ok(status) if status.success() => ExitCode::SUCCESS,
+        Ok(status) => ExitCode::from(status.code().unwrap_or(1) as u8),
+        Err(err) => {
+            eprintln!("rebuild-top: failed to launch {:?}: {}", python, err);
+            eprintln!("  hint: create .venv and pip install numpy pillow trimesh");
+            ExitCode::from(2)
         }
     }
-    eprintln!("  see docs/REBUILD_TOP.md for the algorithm design.");
-    ExitCode::from(2)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::Command;
 
     fn app() -> Command {
         Command::new("test").subcommand(command())
@@ -157,20 +185,6 @@ mod tests {
         let mut help = Vec::new();
         cmd.write_long_help(&mut help).unwrap();
         let s = String::from_utf8(help).unwrap();
-        assert!(s.contains("Post-process") || s.contains("post-process") || s.contains("tileset"));
-    }
-
-    #[test]
-    fn stub_run_returns_nonzero() {
-        let m = command()
-            .try_get_matches_from([
-                "rebuild-top",
-                "-i",
-                "/no/such/in",
-                "-o",
-                "/no/such/out",
-            ])
-            .unwrap();
-        assert_eq!(run(&m), ExitCode::from(2));
+        assert!(s.to_lowercase().contains("post-process") || s.contains("tileset"));
     }
 }

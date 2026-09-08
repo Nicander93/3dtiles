@@ -20,7 +20,7 @@
 </head>
 <body>
   <div id="hud">
-    <h1>公开样例 OSGBny → 3D Tiles</h1>
+    <h1>公开样例 OSGBny → rebuild-top 结果</h1>
     <div>数据来源：fanvanzh/3dtiles issue #336 附件<br/>
     加载：<code>tiles/tileset.json</code></div>
   <div style="margin-top:8px"><a href="./osgb.html" style="color:#8ec5ff">OSGB 源模型预览</a></div></div>
@@ -48,7 +48,7 @@
       })
     );
     (async () => {
-      const tileset = await Cesium.Cesium3DTileset.fromUrl('./tiles/tileset.json');
+      const tileset = await Cesium.Cesium3DTileset.fromUrl('./tiles_rebuild/tileset.json');
       viewer.scene.primitives.add(tileset);
       await viewer.zoomTo(tileset);
       console.log('tileset loaded', tileset.boundingSphere);

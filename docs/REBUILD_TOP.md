@@ -30,4 +30,10 @@ _3dtile rebuild-top -i <tileset_dir> -o <out_dir> --levels N [--simplify 0.5] [-
 
 ## Status
 
-Scaffold stub only: see `crates/rebuild_top_cli`. Implementation lands in M1.
+**Status: v0 implemented**
+
+- Implementation: `tools/rebuild_top/rebuild_top.py`
+- CLI entry: `_3dtile rebuild-top ...` (via `crates/rebuild_top_cli`) or
+  `python tools/rebuild_top/rebuild_top.py -i <tileset> -o <out>`
+- Behavior: 2×2 group of `Tile_+r_+c` root external tilesets; merge root `.b3dm` meshes;
+  write `Data/Merge_L*_*/` parent with `refine: REPLACE`; copy remainder of tileset tree.

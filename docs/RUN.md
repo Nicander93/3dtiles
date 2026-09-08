@@ -32,3 +32,25 @@ docker run --rm -v "$PWD/samples:/data" winner1/3dtiles:1.0 \
 test -f samples/OSGBny_3dtiles/tileset.json
 find samples/OSGBny_3dtiles -name '*.b3dm' | head
 ```
+
+## OSGB 三维预览（公开倾斜样例）
+
+```bash
+./scripts/prepare_osgb_preview.sh
+python3 -m http.server 8080 --directory examples/preview
+# 打开 http://127.0.0.1:8080/osgb.html
+```
+
+将各 `Tile_*/Tile_*.osgb` 转为 GLB 后用 Three.js 浏览（公开样例 OSGBny）。
+
+## 顶层重建 rebuild-top
+
+```bash
+./scripts/convert_sample.sh
+./scripts/rebuild_sample.sh
+# 预览合并结果：把 examples/preview/index.html 里 tileset 路径改成 ./tiles_rebuild/tileset.json
+# 或:
+python tools/rebuild_top/rebuild_top.py -i samples/OSGBny_3dtiles -o samples/OSGBny_3dtiles_rebuild -v
+```
+
+依赖：`tools/rebuild_top/requirements.txt`（脚本会自动建 `.venv`）。
