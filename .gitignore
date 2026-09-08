@@ -8,4 +8,4 @@
 .DS_Store
 
 data
-output
+output/target/

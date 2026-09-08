@@ -1,5 +1,9 @@
 # Introduction
 
+> **Fork goals (v0):** [V0 scope](./docs/V0_SCOPE.md) · [rebuild-top design](./docs/REBUILD_TOP.md) · [UI plan](./docs/UI_PLAN.md)  
+> On top of upstream OSGB→3D Tiles (KTX2 / Draco / simplify), add **post-process top-level rebuild** and a **desktop UI** (native OSG + Cesium).  
+> Upstream: [fanvanzh/3dtiles](https://github.com/fanvanzh/3dtiles) (Apache-2.0).
+
 [![glTF status](https://img.shields.io/badge/glTF-2%2E0-green.svg?style=flat)](https://github.com/KhronosGroup/glTF)
 [![Linux Status](https://github.com/fanvanzh/3dtiles/actions/workflows/linux.yml/badge.svg)](https://github.com/fanvanzh/3dtiles/actions/workflows/linux.yml)
 [![Windows Status](https://github.com/fanvanzh/3dtiles/actions/workflows/windows.yml/badge.svg)](https://github.com/fanvanzh/3dtiles/actions/workflows/windows.yml)

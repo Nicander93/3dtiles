@@ -1,3 +1,8 @@
+# 3dtiles (fork)
+
+> **Fork goals (v0):** [V0 scope](./docs/V0_SCOPE.md) · [rebuild-top](./docs/REBUILD_TOP.md) · [UI plan](./docs/UI_PLAN.md)  
+> Upstream: [fanvanzh/3dtiles](https://github.com/fanvanzh/3dtiles) (Apache-2.0).
+
 **[English](./README_EN.md) | [简体中文](./README_ZH.md)**
 
 # 3D Tiles Converter

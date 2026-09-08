@@ -1,5 +1,9 @@
 # 简介
 
+> **本仓库 Fork 目标（v0）**：[V0 范围说明](./docs/V0_SCOPE.md) · [顶层重建设计](./docs/REBUILD_TOP.md) · [UI 计划](./docs/UI_PLAN.md)  
+> 在上游 OSGB→3D Tiles（含 KTX2 / Draco / 简化）之上，增加**后处理顶层重建**与**桌面预览 UI**（原生 OSG + Cesium）。  
+> 上游项目：[fanvanzh/3dtiles](https://github.com/fanvanzh/3dtiles)（Apache-2.0）。
+
 3D-Tile 转换工具集，高效快速的 3D-Tiles 生产工具。
 
 ## 主要功能
@@ -285,6 +289,15 @@ RUSTFLAGS="-D warnings" cargo build --release -vv
 # 使用说明
 
 ## ① 命令行格式
+
+### 顶层重建（后处理，脚手架 stub）
+
+```sh
+_3dtile rebuild-top -i <tileset_dir> -o <out_dir> --levels 1 --simplify 0.5 --texture-scale 0.5
+```
+
+当前为未实现占位（退出码 2），设计见 [docs/REBUILD_TOP.md](./docs/REBUILD_TOP.md)。
+
 
 ```sh
 _3dtile.exe [FLAGS] [OPTIONS] --format <FORMAT> --input <PATH> --output <DIR>

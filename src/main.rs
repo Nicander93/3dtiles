@@ -16,6 +16,8 @@ pub mod fun_c;
 mod osgb;
 mod shape;
 
+use rebuild_top_cli;
+
 use chrono::prelude::*;
 use clap::{Arg, ArgAction, Command};
 use log::LevelFilter;
@@ -103,8 +105,8 @@ fn main() {
                 .short('i')
                 .long("input")
                 .value_name("FILE")
-                .help("Set the input file")
-                .required(true)
+                .help("Set the input file (required for convert)")
+                .required(false)
                 .num_args(1),
         )
         .arg(
@@ -112,8 +114,8 @@ fn main() {
                 .short('o')
                 .long("output")
                 .value_name("FILE")
-                .help("Set the out file")
-                .required(true)
+                .help("Set the out file (required for convert)")
+                .required(false)
                 .num_args(1),
         )
         .arg(
@@ -121,8 +123,8 @@ fn main() {
                 .short('f')
                 .long("format")
                 .value_name("osgb,shape,gltf,b3dm,fbx")
-                .help("Set input format")
-                .required(true)
+                .help("Set input format (required for convert)")
+                .required(false)
                 .value_parser(["osgb", "shape", "gltf", "b3dm", "fbx"])
                 .num_args(1),
         )
@@ -216,20 +218,36 @@ fn main() {
             .help("Set the path to geoid data files (egm96-5.pgm, etc.). Default: GEOGRAPHICLIB_GEOID_PATH env or /usr/local/share/GeographicLib/geoids")
             .num_args(1),
         )
+        .subcommand(rebuild_top_cli::command())
+        .subcommand_required(false)
         .get_matches();
 
-    let input = matches
-        .get_one::<String>("input")
-        .expect("input is required")
-        .as_str();
-    let output = matches
-        .get_one::<String>("output")
-        .expect("output is required")
-        .as_str();
-    let format = matches
-        .get_one::<String>("format")
-        .expect("format is required")
-        .as_str();
+    if let Some(("rebuild-top", sub_m)) = matches.subcommand() {
+        let code = rebuild_top_cli::run(sub_m);
+        std::process::exit(code.code().unwrap_or(2) as i32);
+    }
+
+    let input = match matches.get_one::<String>("input") {
+        Some(s) => s.as_str(),
+        None => {
+            error!("--input is required for convert (or use subcommand: rebuild-top)");
+            return;
+        }
+    };
+    let output = match matches.get_one::<String>("output") {
+        Some(s) => s.as_str(),
+        None => {
+            error!("--output is required for convert (or use subcommand: rebuild-top)");
+            return;
+        }
+    };
+    let format = match matches.get_one::<String>("format") {
+        Some(s) => s.as_str(),
+        None => {
+            error!("--format is required for convert (or use subcommand: rebuild-top)");
+            return;
+        }
+    };
     let tile_config = matches
         .get_one::<String>("config")
         .map(|s| s.as_str())
