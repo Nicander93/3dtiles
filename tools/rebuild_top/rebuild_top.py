@@ -48,7 +48,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="rebuild-top", description="3D Tiles top-level rebuild (post-process)")
     p.add_argument("-i", "--input", required=True, help="Input tileset directory")
     p.add_argument("-o", "--output", required=True, help="Output directory (new)")
-    p.add_argument("--levels", type=int, default=1, help="Pyramid merge levels (default 1)")
+    p.add_argument("--levels", type=int, default=1, help="Pyramid merge levels (default 1; 2 = second 2x2 pass, cheap smoke OK)")
     p.add_argument("--simplify", type=float, default=0.5, help="Mesh keep-ratio (0,1]")
     p.add_argument("--texture-scale", type=float, default=0.5, help="Texture scale (0,1]")
     p.add_argument("-v", "--verbose", action="store_true")
@@ -118,6 +118,30 @@ def write_b3dm(path: Path, glb: bytes) -> None:
     struct.pack_into("<I", out, 24, 0)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(bytes(out))
+
+
+def box_diagonal(box: List[float]) -> float:
+    """Full AABB diagonal length from Cesium box (center + halfAxes)."""
+    if not box or len(box) < 12:
+        return 0.0
+    hx, hy, hz = abs(box[3]), abs(box[7]), abs(box[11])
+    return 2.0 * math.sqrt(hx * hx + hy * hy + hz * hz)
+
+
+def parent_geometric_error(members: List[RootChild], bv: Dict[str, Any]) -> float:
+    """LOD switch heuristic for REPLACE parents.
+
+    Uses max(2 * max(child GE), ~1/4 of parent AABB diagonal, max(child)+1).
+    Ensures parent GE strictly exceeds every child so Cesium refines correctly.
+    """
+    child_max = max((m.geometric_error for m in members), default=0.0)
+    box = (bv or {}).get("box") if isinstance(bv, dict) else None
+    diag = box_diagonal(box) if box else 0.0
+    # Diagonal fraction approximates screen-space error at far LOD; 0.25 is conservative.
+    from_diag = diag * 0.25 if diag > 0 else 0.0
+    ge = max(child_max * 2.0, from_diag, child_max + 1.0)
+    # Never below any child (REPLACE requires parent > children to switch)
+    return float(max(ge, child_max * 1.01 + 1e-3))
 
 
 def box_union(boxes: List[List[float]]) -> List[float]:
@@ -315,7 +339,7 @@ def rebuild(input_dir: Path, output_dir: Path, levels: int, simplify: float, tex
                 if box and len(box) >= 12:
                     boxes.append(box)
             bv = {"box": box_union(boxes)} if boxes else (members[0].bounding_volume or {})
-            parent_ge = max(m.geometric_error for m in members) * 2.0
+            parent_ge = parent_geometric_error(members, bv)
             parent_node = {
                 "boundingVolume": bv,
                 "geometricError": parent_ge,
@@ -339,7 +363,14 @@ def rebuild(input_dir: Path, output_dir: Path, levels: int, simplify: float, tex
                 )
             )
         root["children"] = new_children_nodes
-        root["geometricError"] = float(root.get("geometricError") or 2000) * 2
+        # Root GE must exceed every immediate child for REPLACE LOD switching.
+        child_ges = [float(n.get("geometricError") or 0) for n in new_children_nodes]
+        root_box = (root.get("boundingVolume") or {}).get("box")
+        root_diag = box_diagonal(root_box) if root_box else 0.0
+        prev_root = float(root.get("geometricError") or 0)
+        root["geometricError"] = float(
+            max(prev_root, max(child_ges, default=0.0) * 2.0, root_diag * 0.25, max(child_ges, default=0.0) + 1.0)
+        )
         working = new_working
         # next level uses coarser cell on already-merged indices (gr,gc)
         # members now keyed by previous group coords; keep cell=2

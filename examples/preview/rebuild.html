@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>OSGB → 3D Tiles 预览</title>
+  <title>GeoForge Cesium Preview</title>
   <script src="https://cesium.com/downloads/cesiumjs/releases/1.125/Build/Cesium/Cesium.js"></script>
   <link href="https://cesium.com/downloads/cesiumjs/releases/1.125/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
   <style>
@@ -11,21 +11,51 @@
     #hud {
       position:absolute; left:12px; top:12px; z-index:10;
       background:rgba(20,24,32,.88); color:#e8eefc; padding:12px 14px;
-      border-radius:10px; font:13px/1.45 system-ui,sans-serif; max-width:360px;
+      border-radius:10px; font:13px/1.45 system-ui,sans-serif; max-width:460px;
+      box-shadow:0 8px 24px rgba(0,0,0,.35);
     }
     #hud h1 { font-size:14px; margin:0 0 6px; }
-    #hud code { background:#2a3142; padding:1px 5px; border-radius:4px; }
+    #hud code { background:#2a3142; padding:1px 5px; border-radius:4px; word-break:break-all; }
+    #hud .meta { color:#9eb0cc; font-size:12px; margin-top:6px; }
+    #errorBanner {
+      display:none; margin-top:10px; padding:8px 10px; border-radius:8px;
+      background:rgba(208,48,80,.18); border:1px solid rgba(255,139,139,.45);
+      color:#ffb4b4; font-size:12px; word-break:break-word;
+    }
+    #errorBanner.show { display:block; }
     a { color:#8ec5ff; }
   </style>
 </head>
 <body>
   <div id="hud">
-    <h1>公开样例 OSGBny → rebuild-top 结果</h1>
-    <div>数据来源：fanvanzh/3dtiles issue #336 附件<br/>
-    加载：<code>tiles/tileset.json</code></div>
-  <div style="margin-top:8px"><a href="./osgb.html" style="color:#8ec5ff">OSGB 源模型预览</a></div></div>
+    <h1>Rebuild 样例预览</h1>
+    <div>加载：<code id="tilesetLabel">…</code></div>
+    <div class="meta" id="statusLine">初始化…</div>
+    <div class="meta" id="debugLine" style="display:none"></div>
+    <div id="errorBanner"></div>
+  </div>
   <div id="cesiumContainer"></div>
   <script>
+    function q(name) {
+      const u = new URL(window.location.href);
+      return u.searchParams.get(name);
+    }
+    function showError(err) {
+      const el = document.getElementById('errorBanner');
+      el.textContent = '加载失败: ' + (err && err.message ? err.message : String(err));
+      el.classList.add('show');
+      document.getElementById('statusLine').textContent = '失败';
+    }
+    function setStatus(text) {
+      document.getElementById('statusLine').textContent = text;
+    }
+
+    const tilesetUrl = q('tileset') || './tiles_rebuild/tileset.json';
+    const debugExtent = q('debug') === '1' || q('debug') === 'true';
+    const enuParam = q('enu'); // lat,lon[,height] — for local/ENU origins without tileset transform
+    document.getElementById('tilesetLabel').textContent = tilesetUrl;
+    if (debugExtent) document.getElementById('debugLine').style.display = 'block';
+
     Cesium.Ion.defaultAccessToken = undefined;
     const viewer = new Cesium.Viewer('cesiumContainer', {
       animation: false,
@@ -38,23 +68,269 @@
       fullscreenButton: true,
       imageryProvider: false,
       terrainProvider: undefined,
+      infoBox: false,
+      selectionIndicator: false,
     });
-    // OSM imagery without Ion
+    viewer.scene.globe.depthTestAgainstTerrain = false;
+    viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#1a2333');
     viewer.imageryLayers.removeAll();
-    viewer.imageryLayers.addImageryProvider(
-      new Cesium.UrlTemplateImageryProvider({
-        url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-        credit: '© OpenStreetMap'
-      })
-    );
-    (async () => {
-      const tileset = await Cesium.Cesium3DTileset.fromUrl('./tiles_rebuild/tileset.json');
+    try {
+      viewer.imageryLayers.addImageryProvider(
+        new Cesium.UrlTemplateImageryProvider({
+          url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          credit: '© OpenStreetMap'
+        })
+      );
+    } catch (e) {
+      console.warn('imagery failed', e);
+    }
+
+    let currentTileset = null;
+    function parseEnu(param) {
+      if (!param) return null;
+      const parts = String(param).split(',').map((s) => Number(String(s).trim()));
+      if (parts.length < 2 || parts.some((n) => Number.isNaN(n))) return null;
+      return { lat: parts[0], lon: parts[1], height: parts[2] || 0 };
+    }
+
+    function isLocalOrigin(sphere) {
+      if (!sphere) return true;
+      const mag = Cesium.Cartesian3.magnitude(sphere.center);
+      // Near ECEF origin → local Cartesian / missing georef transform
+      return mag < 1.0e6;
+    }
+
+    function isNearEarthCenterButNotSurface(sphere) {
+      const mag = Cesium.Cartesian3.magnitude(sphere.center);
+      // Below ~Earth radius minus margin → still treat as local
+      return mag < 6.0e6;
+    }
+
+    function applyEnuFrame(tileset, enu) {
+      const lat = enu.lat;
+      const lon = enu.lon;
+      const height = enu.height || 0;
+      const position = Cesium.Cartesian3.fromDegrees(lon, lat, height);
+      tileset.modelMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(position);
+      return { lat, lon, height };
+    }
+
+    function drawDebugExtent(sphere) {
+      viewer.entities.removeAll();
+      if (!sphere) return;
+      viewer.entities.add({
+        position: sphere.center,
+        ellipsoid: {
+          radii: new Cesium.Cartesian3(sphere.radius, sphere.radius, sphere.radius),
+          material: Cesium.Color.CYAN.withAlpha(0.12),
+          outline: true,
+          outlineColor: Cesium.Color.CYAN.withAlpha(0.85),
+          fill: true,
+        },
+      });
+      viewer.entities.add({
+        position: sphere.center,
+        point: {
+          pixelSize: 10,
+          color: Cesium.Color.YELLOW,
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 1,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      });
+    }
+
+
+    function collectContentSpheres(tileset) {
+      const spheres = [];
+      const stack = [tileset.root];
+      while (stack.length) {
+        const tile = stack.pop();
+        if (!tile) continue;
+        try {
+          if (tile.contentReady && tile.content && tile.content.boundingSphere) {
+            spheres.push(Cesium.BoundingSphere.clone(tile.content.boundingSphere));
+          }
+        } catch (e) { /* ignore */ }
+        if (tile.children && tile.children.length) {
+          for (let i = 0; i < tile.children.length; i++) stack.push(tile.children[i]);
+        }
+      }
+      return spheres;
+    }
+
+    function bestSphere(tileset) {
+      const root = tileset.boundingSphere;
+      const parts = collectContentSpheres(tileset);
+      if (parts.length >= 2) {
+        try {
+          return Cesium.BoundingSphere.fromBoundingSpheres(parts);
+        } catch (e) {
+          return root;
+        }
+      }
+      if (parts.length === 1) return parts[0];
+      return root;
+    }
+
+    function framingOffset(sphere) {
+      const r = Math.max(sphere.radius || 100, 50);
+      // Pitch ~ -35°; range scales with extent so local ENU blocks fill the view
+      return new Cesium.HeadingPitchRange(0.25, -0.55, Math.max(r * 2.0, 150));
+    }
+
+    async function fitToTileset(tileset, duration) {
+      const sphere = tileset.boundingSphere;
+      if (!sphere || !(sphere.radius > 0)) {
+        await viewer.zoomTo(tileset);
+        return;
+      }
+      const offset = framingOffset(sphere);
+      try {
+        await viewer.flyTo(tileset, { duration: duration == null ? 0.8 : duration, offset });
+      } catch (e) {
+        console.warn('flyTo failed, zoomTo fallback', e);
+        await viewer.zoomTo(tileset, offset);
+      }
+      // Snap if fly animation skipped in headless
+      try {
+        viewer.camera.viewBoundingSphere(sphere, offset);
+        viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+      } catch (e) {
+        /* ignore */
+      }
+    }
+
+    function waitForTiles(tileset, timeoutMs) {
+      return new Promise((resolve) => {
+        const start = Date.now();
+        const tick = () => {
+          if (tileset.tilesLoaded || Date.now() - start > (timeoutMs || 8000)) {
+            resolve(tileset.tilesLoaded);
+            return;
+          }
+          requestAnimationFrame(tick);
+        };
+        // Also listen once
+        const remove = tileset.allTilesLoaded.addEventListener(() => {
+          remove();
+          resolve(true);
+        });
+        requestAnimationFrame(tick);
+      });
+    }
+
+    async function loadAndFrame() {
+      setStatus('加载 tileset…');
+      const tileset = await Cesium.Cesium3DTileset.fromUrl(tilesetUrl, {
+        maximumScreenSpaceError: 8,
+      });
+      currentTileset = tileset;
       viewer.scene.primitives.add(tileset);
-      await viewer.zoomTo(tileset);
-      console.log('tileset loaded', tileset.boundingSphere);
-    })().catch(err => {
+
+      let sphere = tileset.boundingSphere;
+      let enuApplied = null;
+      const enu = parseEnu(enuParam);
+
+      if (isLocalOrigin(sphere) || (isNearEarthCenterButNotSurface(sphere) && enu)) {
+        const fallback = enu || { lat: 35.90924, lon: 117.13183, height: 0 };
+        enuApplied = applyEnuFrame(tileset, fallback);
+        // Force sphere update after modelMatrix
+        sphere = tileset.boundingSphere;
+        setStatus(
+          '检测到局部/ENU 原点，已套 ENU 框架 ' +
+            enuApplied.lat.toFixed(5) +
+            ',' +
+            enuApplied.lon.toFixed(5)
+        );
+      } else if (isNearEarthCenterButNotSurface(sphere)) {
+        // Local meters without query — place at OSGBny-like default for visibility
+        enuApplied = applyEnuFrame(tileset, { lat: 35.90924, lon: 117.13183, height: 0 });
+        sphere = tileset.boundingSphere;
+        setStatus('局部坐标无地理变换，已用默认 ENU:35.90924,117.13183（可用 ?enu=lat,lon 覆盖）');
+      }
+
+      if (debugExtent) {
+        drawDebugExtent(tileset.boundingSphere);
+        const c = tileset.boundingSphere.center;
+        const carto = Cesium.Cartographic.fromCartesian(c);
+        const dbg =
+          'center r=' +
+          tileset.boundingSphere.radius.toFixed(1) +
+          'm' +
+          (carto
+            ? ' lon=' +
+              Cesium.Math.toDegrees(carto.longitude).toFixed(5) +
+              ' lat=' +
+              Cesium.Math.toDegrees(carto.latitude).toFixed(5)
+            : '') +
+          (enuApplied ? ' enuApplied' : '');
+        document.getElementById('debugLine').textContent = dbg;
+      }
+
+      await fitToTileset(tileset, 0);
+      setStatus('已定位，等待瓦片…');
+
+      // After first tiles stream in, reframe once — fixes sparse/too-far first view
+      const loaded = await waitForTiles(tileset, 10000);
+      try {
+        const bs = bestSphere(tileset);
+        const offset = framingOffset(bs);
+        viewer.camera.viewBoundingSphere(bs, offset);
+        viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+        if (debugExtent) drawDebugExtent(bs);
+      } catch (e) {
+        await fitToTileset(tileset, 0.6);
+        if (debugExtent) drawDebugExtent(tileset.boundingSphere);
+      }
+
+      const bs = bestSphere(tileset);
+      const rootR = tileset.boundingSphere.radius | 0;
+      const viewR = bs.radius | 0;
+      setStatus(
+        (loaded ? 'tilesLoaded' : '部分瓦片') +
+          ' · view r≈' +
+          viewR +
+          'm' +
+          (viewR !== rootR ? ' (root ' + rootR + 'm)' : '') +
+          (enuApplied ? ' · ENU' : '')
+      );
+      console.log('tileset loaded', {
+        boundingSphere: bs,
+        tilesLoaded: tileset.tilesLoaded,
+        enuApplied,
+      });
+      window.__geoforgePreview = { tileset, viewer, enuApplied };
+      return tileset;
+    }
+
+    function refit() {
+      if (currentTileset) return fitToTileset(currentTileset, 0.5);
+    }
+
+    window.addEventListener('message', (ev) => {
+      const data = ev && ev.data;
+      if (!data || typeof data !== 'object') return;
+      if (data.type === 'geoforge-fit') {
+        void refit();
+      }
+    });
+
+    // Home button → fit tileset instead of Cesium default
+    try {
+      viewer.homeButton.viewModel.command.beforeExecute.addEventListener((e) => {
+        if (currentTileset) {
+          e.cancel = true;
+          void refit();
+        }
+      });
+    } catch (e) {
+      /* older Cesium */
+    }
+
+    loadAndFrame().catch((err) => {
       console.error(err);
-      document.getElementById('hud').innerHTML += '<div style="color:#ff8b8b;margin-top:8px">加载失败: ' + err + '</div>';
+      showError(err);
     });
   </script>
 </body>
