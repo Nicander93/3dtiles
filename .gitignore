@@ -17,3 +17,12 @@ examples/preview/tiles_rebuild/
 .venv/
 __pycache__/
 *.pyc
+
+# GeoForge local state / build artifacts (keep apps/web/dist committed)
+.geoforge/
+apps/web/node_modules/
+apps/*/build/
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+*.bak
+*.bak_*
