@@ -21,6 +21,12 @@ env_logger = "0.11.8"
 #
 
 byteorder = "1.2"
+rebuild_top_cli = { path = "crates/rebuild_top_cli" }
 [build-dependencies]
 cmake = "0.1"
 pkg-config = "0.3"
+
+
+[workspace]
+members = [".", "crates/rebuild_top_cli"]
+resolver = "2"

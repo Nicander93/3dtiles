@@ -1,0 +1,43 @@
+{
+  "source": "OSGBny public sample",
+  "tile_count": 6,
+  "tiles": [
+    {
+      "name": "Tile_+005_+033",
+      "root_osgb": "Data/Tile_+005_+033/Tile_+005_+033.osgb",
+      "files": 5,
+      "bytes": 164773
+    },
+    {
+      "name": "Tile_+006_+005",
+      "root_osgb": "Data/Tile_+006_+005/Tile_+006_+005.osgb",
+      "files": 9,
+      "bytes": 2097867
+    },
+    {
+      "name": "Tile_+006_+006",
+      "root_osgb": "Data/Tile_+006_+006/Tile_+006_+006.osgb",
+      "files": 20,
+      "bytes": 4822832
+    },
+    {
+      "name": "Tile_+006_+007",
+      "root_osgb": "Data/Tile_+006_+007/Tile_+006_+007.osgb",
+      "files": 19,
+      "bytes": 3752424
+    },
+    {
+      "name": "Tile_+006_+009",
+      "root_osgb": "Data/Tile_+006_+009/Tile_+006_+009.osgb",
+      "files": 20,
+      "bytes": 3178496
+    },
+    {
+      "name": "Tile_+032_+031",
+      "root_osgb": "Data/Tile_+032_+031/Tile_+032_+031.osgb",
+      "files": 5,
+      "bytes": 113601
+    }
+  ],
+  "metadata_xml_head": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ModelMetadata version=\"1\">\n    <!--Spatial Reference System-->\n    <SRS>ENU:35.9092400000,117.1318300000</SRS>\n    <!--Origin in Spatial Reference System-->\n    <SRSOrigin>-958.000000,-993.000000,69.000000</SRSOrigin>\n</ModelMetadata>\n"
+}

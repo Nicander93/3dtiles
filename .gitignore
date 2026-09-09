@@ -8,4 +8,12 @@
 .DS_Store
 
 data
-output
+output/target/
+.runtime/
+samples/
+examples/preview/tiles/
+*.zip
+examples/preview/tiles_rebuild/
+.venv/
+__pycache__/
+*.pyc

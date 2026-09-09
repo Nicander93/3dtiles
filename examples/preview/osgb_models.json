@@ -1,0 +1,36 @@
+{
+  "source": "OSGBny public oblique sample (fanvanzh/3dtiles#336 attachment)",
+  "models": [
+    {
+      "name": "Tile_+005_+033",
+      "url": "./osgb_glb/Tile_+005_+033.glb",
+      "bytes": 6120
+    },
+    {
+      "name": "Tile_+006_+005",
+      "url": "./osgb_glb/Tile_+006_+005.glb",
+      "bytes": 37060
+    },
+    {
+      "name": "Tile_+006_+006",
+      "url": "./osgb_glb/Tile_+006_+006.glb",
+      "bytes": 86132
+    },
+    {
+      "name": "Tile_+006_+007",
+      "url": "./osgb_glb/Tile_+006_+007.glb",
+      "bytes": 54908
+    },
+    {
+      "name": "Tile_+006_+009",
+      "url": "./osgb_glb/Tile_+006_+009.glb",
+      "bytes": 30852
+    },
+    {
+      "name": "Tile_+032_+031",
+      "url": "./osgb_glb/Tile_+032_+031.glb",
+      "bytes": 11148
+    }
+  ],
+  "metadata_xml_head": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ModelMetadata version=\"1\">\n    <!--Spatial Reference System-->\n    <SRS>ENU:35.9092400000,117.1318300000</SRS>\n    <!--Origin in Spatial Reference System-->\n    <SRSOrigin>-958.000000,-993.000000,69.000000</SRSOrigin>\n</ModelMetadata>\n"
+}

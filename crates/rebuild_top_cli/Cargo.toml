@@ -1,0 +1,9 @@
+[package]
+name = "rebuild_top_cli"
+version = "0.1.0"
+edition = "2021"
+description = "CLI stub and design helpers for post-process top-level 3D Tiles rebuild"
+license = "Apache-2.0"
+
+[dependencies]
+clap = "4.5.53"
