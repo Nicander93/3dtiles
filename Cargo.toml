@@ -28,5 +28,6 @@ pkg-config = "0.3"
 
 
 [workspace]
-members = [".", "crates/rebuild_top_cli"]
+members = [".", "crates/rebuild_top_cli", "crates/processor", "crates/top_rebuild"]
+exclude = ["apps/desktop/src-tauri"]
 resolver = "2"

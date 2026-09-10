@@ -1,3 +1,10 @@
+> **CANCELLED FOR V1 — HISTORICAL ONLY.**  
+> Prior P0–P7 delivery plan assumed React+Python server and optional Qt/OSGB preview. That Qt/OSGB track is cancelled for the new V1 rebuild.  
+> Qt main window, Qt WebEngine, OSGB native preview, `apps/geoforge_shell`, and `apps/osgb_viewer` are **out of V1 scope**. Code is **not deleted** in Phase 0.  
+> Current architecture authority: [`03-v1-architecture-rebuild-plan.md`](./03-v1-architecture-rebuild-plan.md).
+
+---
+
 # GeoForge 3D — V1 对照交付计划
 
 依据：`01-product-definition.md`、`02-v1-implementation.md` §2 功能边界、合集图 `mockups/`。  
@@ -35,7 +42,7 @@
 
 ## 当前工作焦点
 
-**P0–P7 done（文档同步）**：KTX2 basisu 后处理、Cesium ENU framing、rebuild levels 1|2 UI、geoforge_shell 浏览器回退、`run_geoforge.sh` / `run_geoforge_shell.sh`。非声称不变（无 Windows、无已链接 WebEngine）。日后推送见 `PUSH_CANDIDATES.md`（本批不 push）。
+**P0–P7 done（文档同步）**：KTX2 basisu 后处理、Cesium ENU framing、rebuild levels 1|2 UI、geoforge_shell 浏览器回退、`run_geoforge.sh` / `(deleted) run_geoforge_shell.sh`。非声称不变（无 Windows、无已链接 WebEngine）。日后推送见 `PUSH_CANDIDATES.md`（本批不 push）。
 
 ## 运行入口
 

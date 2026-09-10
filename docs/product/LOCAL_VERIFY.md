@@ -1,29 +1,45 @@
-# GeoForge 3D 本地验证指南（v0.1）
+# GeoForge 3D 本地验证指南（v0.1 / Phase 4）
 
-面向从 GitHub 克隆后在本机跑通产品壳与转换流水线（keep / KTX2）。
-Date: 2026-09-09 Asia/Shanghai.
+面向从 GitHub 克隆后在本机跑通 Tauri 桌面壳与 Processor 流水线（keep / KTX2）。
+Date: 2026-09-10 Asia/Shanghai.
 
 ## 1. 克隆
 
-Clone Nicander93/3dtiles, checkout feat/v0-scaffold.
-Repo includes apps/web/dist for the UI.
+Clone Nicander93/3dtiles.
+Repo may include `apps/desktop/dist` for the UI.
 
 ## 2. Deps
 
-Use a virtualenv and pip requirements for the desktop API.
-npm optional when dist exists.
-Converter binary outside repo; set runtime env vars. Prefer ktx2+basisu wrapper.
+- Node 18+ for `apps/desktop`
+- Rust toolchain for `processor` + `geoforge-desktop` (Tauri)
+- Optional Python venv for rebuild baseline / KTX2 (`tools/experiments/rebuild_top_py`, `tools/texture_ktx2`)
+- Converter binary outside repo; set `GEOFORGE_3DTILE` / runtime env. Prefer ktx2+basisu wrapper.
 
 ## 3. Sample
 
 Prepare an OSGB folder with metadata.xml (SRS / SRSOrigin).
 Sample data is not shipped with the repo.
 
-## 4. Start
+## 4. Start (preferred)
 
-Launch the desktop API via scripts/run_geoforge.
-Open the UI on local port 8787 and hit /api/health.
-Task DB and preview cache live under .geoforge (gitignored).
+```bash
+cargo build -p processor
+cd apps/desktop && npm install && npm run tauri:dev
+```
+
+Or print / launch helper:
+
+```bash
+bash scripts/run_geoforge.sh
+```
+
+Legacy Python API (reference):
+
+```bash
+bash scripts/run_geoforge.sh --legacy-server   # :8787
+```
+
+Task DB and preview cache live under `.geoforge` (gitignored).
 
 ## 5. Smoke keep + ktx2
 
@@ -32,24 +48,23 @@ Task DB and preview cache live under .geoforge (gitignored).
 3. ktx2-etc1s (optional rebuild levels=1); needs basisu postprocess capability.
 4. Or continue-process tiles on an existing keep artifact.
 
-## 6. Qt shell optional
+## 6. Qt shell
 
-Needs osgb_viewer conda env and built geoforge_shell binary.
-Start API first, then the shell launcher with DISPLAY and MAMBA_ROOT_PREFIX.
-Browser-fallback shell (not full WebEngine). See QT_SHELL.md.
+**Removed in Phase 4.** See `docs/product/historical/QT_SHELL.md`.
 
 ## 7. FAQ
 
 | issue | fix |
 |------|------|
-| missing web dist | rebuild apps/web |
-| converter missing | set runtime / 3dtile env |
-| ktx2 grayed | check wrapper and basisu |
-| Qt fails | conda env, DISPLAY, binary |
+| missing web dist | `cd apps/desktop && npm run build` |
+| converter missing | set `GEOFORGE_RUNTIME` / `GEOFORGE_3DTILE` |
+| rebuild script missing | `tools/experiments/rebuild_top_py/rebuild_top.py` or `GEOFORGE_REBUILD_TOP` |
+| ktx2 grayed | check wrapper and basisu (`tools/texture_ktx2`) |
 
 ## Related
 
 - docs/product/USER_GUIDE.md
 - docs/product/ACCEPTANCE.md
 - docs/REBUILD_TOP.md
+- tools/experiments/rebuild_top_py/README.md
 - tools/texture_ktx2/README.md

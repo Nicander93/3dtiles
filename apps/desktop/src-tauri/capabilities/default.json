@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default GeoForge desktop capabilities (Phase 2)",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "allow-select-input-directory",
+    "allow-select-output-directory",
+    "allow-select-tileset-file",
+    "allow-task-store",
+    "allow-artifact-store",
+    "allow-settings"
+  ]
+}

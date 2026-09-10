@@ -1,38 +1,34 @@
 # Push candidates (do NOT push/commit unless asked)
 
-Date: 2026-09-09 Asia/Shanghai. Branch context: `feat/v0-scaffold` (local).
-Purpose: list major **new / product** paths ready to consider for a future commit+push.
+Date: 2026-09-10 Asia/Shanghai.
+Purpose: list major **product** paths after Phase 4 cleanup.
 **No git push / no commit performed by this note.**
 
-## Major new paths
+## Major paths
 
 ### Apps / product shell
-- `apps/web/` — React + Vite UI (dist, `public/cesium-preview.html`, pages, API client)
-- `apps/desktop_server/` — FastAPI GeoForge API (tasks, artifacts, preview-url, `texture_ktx2.py`, runner)
-- `apps/geoforge_shell/` — Qt product shell (browser fallback; OSGB embed)
-- `apps/osgb_viewer/` — native OSGB preview helper
+- `apps/desktop/` — React + Vite + Tauri 2 (`src-tauri`, crate `geoforge-desktop`)
+- `crates/processor/` — Rust processor CLI (JSONL events)
+- `tools/experiments/desktop_server_py/` — legacy FastAPI reference (former `apps/desktop_server`)
+- ~~`apps/geoforge_shell/`~~ / ~~`apps/osgb_viewer/`~~ — **deleted Phase 4**
 
-### Scripts / runtime note
-- `scripts/run_geoforge.sh` — one-shot API+UI (:8787)
-- `scripts/run_geoforge_shell.sh`
-- `scripts/run_osgb_viewer.sh`
-- Runtime (outside repo, document only): `/workspace/runtime/3dtile-bin-ktx2/`
-  (`run.sh` wrapper → convert + basisu post-process; not a git path)
+### Scripts / runtime
+- `scripts/run_geoforge.sh` — prints Tauri/processor usage; `--legacy-server` for Python API
+- Runtime (outside repo): `/workspace/runtime/3dtile-bin-ktx2/` (document only)
 
-### Tools (supporting)
+### Tools
+- `tools/experiments/rebuild_top_py/` — Python rebuild **baseline only**
 - `tools/ktx2_postprocess/` — Node alternate encoder path
-- `tools/texture_ktx2/` — related helpers if present
-- `tools/rebuild_top/rebuild_top.py` (+ `docs/REBUILD_TOP.md` edits)
+- `tools/texture_ktx2/` — KTX2 wrapper → experiments desktop_server_py module
 
 ### Docs / product
-- `docs/product/` — V1_STATUS, V1_DELIVERY_PLAN, ACCEPTANCE, USER_GUIDE, QT_SHELL,
-  OSGB_NATIVE_PREVIEW, mockups, screenshots (`p7_cesium_ktx2.png`, geoforge_shell_*.png),
-  this `PUSH_CANDIDATES.md`
+- `docs/product/` — architecture plan, USER_GUIDE, PHASE_REPORTS, historical Qt/OSGB notes
 
 ## Suggested exclude / caution
-- `apps/web/node_modules/`, `apps/*/build/`, `__pycache__`, `.geoforge/`
+- `apps/desktop/node_modules/`, `apps/desktop/src-tauri/target/`, `__pycache__`, `.geoforge/`
 - Large local outputs under `/workspace/data/geoforge_outputs/` (not in repo)
 - Do not force-push; do not include secrets
 
-## Verification already done (P7)
-- Artifact art-c704b957a939 preview-url + Cesium load + KHR_texture_basisu evidence
+## Verification already done (P7 / Phase 3)
+- Artifact preview-url + Cesium load + KHR_texture_basisu evidence (historical)
+- Phase 3: Tauri happy path without Python HTTP for convert/scan when processor present

@@ -1,0 +1,46 @@
+[package]
+name = "geoforge-desktop"
+version = "0.1.0"
+description = "GeoForge 3D desktop shell (Tauri 2 + React)"
+authors = ["GeoForge"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "geoforge_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[example]]
+name = "phase2_smoke"
+path = "examples/phase2_smoke.rs"
+
+[[example]]
+name = "phase3_smoke"
+path = "examples/phase3_smoke.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2", features = [] }
+tauri-plugin-log = "2"
+tauri-plugin-dialog = "2"
+rusqlite = { version = "0.32", features = ["bundled"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util", "fs"] }
+axum = { version = "0.7", features = ["http1", "tokio"] }
+tower-http = { version = "0.5", features = ["cors"] }
+http-body-util = "0.1"
+mime_guess = "2"
+parking_lot = "0.12"
+reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
+chrono = { version = "0.4", features = ["serde"] }
+opener = "0.7"
+thiserror = "1"
+bytes = "1"
+
+# Independent from repo-root _3dtile workspace
+[workspace]

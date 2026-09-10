@@ -50,7 +50,7 @@ python3 -m http.server 8080 --directory examples/preview
 ./scripts/rebuild_sample.sh
 # 预览合并结果：把 examples/preview/index.html 里 tileset 路径改成 ./tiles_rebuild/tileset.json
 # 或:
-python tools/rebuild_top/rebuild_top.py -i samples/OSGBny_3dtiles -o samples/OSGBny_3dtiles_rebuild -v
+python tools/experiments/rebuild_top_py/rebuild_top.py -i samples/OSGBny_3dtiles -o samples/OSGBny_3dtiles_rebuild -v
 ```
 
-依赖：`tools/rebuild_top/requirements.txt`（脚本会自动建 `.venv`）。
+依赖：`tools/experiments/rebuild_top_py/requirements.txt`（脚本会自动建 `.venv`）。
