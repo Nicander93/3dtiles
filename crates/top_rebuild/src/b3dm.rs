@@ -1,4 +1,4 @@
-//! B3DM ↔ GLB payload reader/writer (Phase 6).
+//! B3DM ↔ GLB payload reader/writer (Phase 6 + Phase 12 alignment fix).
 
 use crate::error::{Result, TopRebuildError};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -44,6 +44,13 @@ pub fn extract_glb_from_b3dm_bytes(data: &[u8]) -> Result<Vec<u8>> {
             TopRebuildError::Other("glb magic not found in b3dm payload".into())
         })?;
     }
+    // Prefer GLB header length so trailing b3dm padding is not returned.
+    if offset + 12 <= data.len() && &data[offset..offset + 4] == b"glTF" {
+        let glb_len = u32::from_le_bytes(data[offset + 8..offset + 12].try_into().unwrap()) as usize;
+        if glb_len >= 12 && offset + glb_len <= data.len() {
+            return Ok(data[offset..offset + glb_len].to_vec());
+        }
+    }
     if byte_length > 0 && byte_length <= data.len() && byte_length > offset {
         Ok(data[offset..byte_length].to_vec())
     } else {
@@ -56,27 +63,48 @@ pub fn extract_glb_from_b3dm_path(path: &Path) -> Result<Vec<u8>> {
     extract_glb_from_b3dm_bytes(&data)
 }
 
-/// Pack a GLB into a minimal fanvanzh-style B3DM (feature/batch JSON only).
-pub fn pack_glb_as_b3dm(glb: &[u8]) -> Result<Vec<u8>> {
-    fn pad4(mut b: Vec<u8>) -> Vec<u8> {
-        let rem = (4 - (b.len() % 4)) % 4;
-        b.extend(std::iter::repeat(b' ').take(rem));
-        b
+/// Pad JSON with trailing spaces so that `start_offset + len` ends on an 8-byte boundary.
+fn pad_json_end_aligned(mut json: Vec<u8>, start_offset: usize) -> Vec<u8> {
+    while (start_offset + json.len()) % 8 != 0 {
+        json.push(b' ');
     }
-    let ftj = pad4(b"{\"BATCH_LENGTH\":1}".to_vec());
-    let btj = pad4(b"{\"batchId\":{\"byteOffset\":0}}".to_vec());
-    let total = 28 + ftj.len() + btj.len() + glb.len();
+    json
+}
+
+/// Pack a GLB into a minimal valid B3DM for CesiumGS validator.
+///
+/// Spec (Feature Table / Batch Table padding):
+/// - JSON headers must **end** on an 8-byte boundary within the tile
+/// - Binary bodies (and embedded GLB) must **start** on an 8-byte boundary
+/// - Tile `byteLength` must be a multiple of 8
+///
+/// Header is 28 bytes, so feature-table JSON length is typically ≡ 4 (mod 8).
+pub fn pack_glb_as_b3dm(glb: &[u8]) -> Result<Vec<u8>> {
+    let ftj = pad_json_end_aligned(b"{\"BATCH_LENGTH\":1}".to_vec(), 28);
+    let after_ft = 28 + ftj.len();
+    debug_assert_eq!(after_ft % 8, 0);
+
+    // Empty feature binary (length 0) — next section starts at after_ft (8-aligned).
+    let btj = pad_json_end_aligned(b"{}".to_vec(), after_ft);
+    let after_bt = after_ft + btj.len();
+    debug_assert_eq!(after_bt % 8, 0);
+
+    let mut total = after_bt + glb.len();
+    let pad_end = (8 - (total % 8)) % 8;
+    total += pad_end;
+
     let mut out = Vec::with_capacity(total);
     out.extend_from_slice(b"b3dm");
     out.write_u32::<LittleEndian>(1)?;
     out.write_u32::<LittleEndian>(total as u32)?;
     out.write_u32::<LittleEndian>(ftj.len() as u32)?;
-    out.write_u32::<LittleEndian>(0)?;
+    out.write_u32::<LittleEndian>(0)?; // featureTableBinaryByteLength
     out.write_u32::<LittleEndian>(btj.len() as u32)?;
-    out.write_u32::<LittleEndian>(0)?;
+    out.write_u32::<LittleEndian>(0)?; // batchTableBinaryByteLength
     out.extend_from_slice(&ftj);
     out.extend_from_slice(&btj);
     out.extend_from_slice(glb);
+    out.extend(std::iter::repeat(0u8).take(pad_end));
     Ok(out)
 }
 
@@ -113,13 +141,23 @@ mod tests {
 
     #[test]
     fn roundtrip_emptyish_glb() {
-        // Minimal valid-looking glTF magic + version + length header only (not a full GLB)
         let mut glb = Vec::new();
         glb.extend_from_slice(b"glTF");
         glb.extend_from_slice(&2u32.to_le_bytes());
         glb.extend_from_slice(&12u32.to_le_bytes());
         let b3dm = pack_glb_as_b3dm(&glb).unwrap();
+        assert_eq!(b3dm.len() % 8, 0);
         let extracted = extract_glb_from_b3dm_bytes(&b3dm).unwrap();
         assert_eq!(extracted, glb);
+        let ftj = u32::from_le_bytes(b3dm[12..16].try_into().unwrap()) as usize;
+        let ftb = u32::from_le_bytes(b3dm[16..20].try_into().unwrap()) as usize;
+        let btj = u32::from_le_bytes(b3dm[20..24].try_into().unwrap()) as usize;
+        let btb = u32::from_le_bytes(b3dm[24..28].try_into().unwrap()) as usize;
+        assert_eq!((28 + ftj) % 8, 0, "feature JSON must end 8-aligned");
+        assert_eq!((28 + ftj + ftb) % 8, 0);
+        assert_eq!((28 + ftj + ftb + btj) % 8, 0, "batch JSON must end 8-aligned");
+        let offset = 28 + ftj + ftb + btj + btb;
+        assert_eq!(offset % 8, 0);
+        assert_eq!(&b3dm[offset..offset + 4], b"glTF");
     }
 }

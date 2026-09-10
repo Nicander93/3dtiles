@@ -1,4 +1,4 @@
-# Architecture rebuild — Phase 0–11 SUMMARY
+# Architecture rebuild — Phase 0–12 SUMMARY
 
 Date: **2026-09-10** Asia/Shanghai  
 Authority: [`../03-v1-architecture-rebuild-plan.md`](../03-v1-architecture-rebuild-plan.md)  
@@ -30,6 +30,8 @@ Authority: [`../03-v1-architecture-rebuild-plan.md`](../03-v1-architecture-rebui
 | **8** | Boundary / texture / budget | Done — LockBorder, gaps, hash/resize, optional KTX2, `rebuild_metrics.json` |
 | **9** | Replace Python rebuild in Processor | Done — default Rust `top_rebuild`; Python via `GEOFORGE_REBUILD_ENGINE=python` only |
 | **10** | Scale validation ladder | **Partial** — 4×4 + **16×16** synthetic PASS; OSGBny `GRID_SPATIAL_MISMATCH`; no urban/百km² data |
+| **11** | TopRebuild correctness P0-1..P0-4 | Done — no synthetic release; subtree preserve; coverage frontier; world BV |
+| **12** | Validator layers A/B | Done — processor Layer A pre-commit; CesiumGS Layer B acceptance `numErrors=0` |
 
 ## Phase 10 numbers (record)
 

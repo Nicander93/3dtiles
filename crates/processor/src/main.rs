@@ -1,8 +1,8 @@
-//! processor CLI — `run --task`, `convert-osgb`, `process-tileset`, `scan-osgb`.
+//! processor CLI — `run --task`, `convert-osgb`, `process-tileset`, `scan-osgb`, `validate-tileset`.
 
 use clap::{Parser, Subcommand};
 use processor::{
-    run_task, scan_osgb, CancelFlag, TaskConfig, EXIT_FAILED,
+    run_task, scan_osgb, validate_and_write_report, CancelFlag, TaskConfig, EXIT_FAILED,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -53,6 +53,12 @@ enum Commands {
     },
     /// OSGB scan (no Python). Prints JSON to stdout (not JSONL events).
     ScanOsgb {
+        #[arg(long)]
+        path: PathBuf,
+    },
+    /// Layer A recursive tileset validation (Phase 12). Writes validation_internal.json.
+    ValidateTileset {
+        /// Directory containing tileset.json (or path to tileset.json itself).
         #[arg(long)]
         path: PathBuf,
     },
@@ -139,6 +145,33 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::from(EXIT_FAILED as u8)
+            }
+        }
+        Commands::ValidateTileset { path } => {
+            let dir = if path.is_file() {
+                path.parent().unwrap_or(path.as_path()).to_path_buf()
+            } else {
+                path
+            };
+            match validate_and_write_report(&dir) {
+                Ok(report) => {
+                    println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
+                    if report.ok {
+                        ExitCode::SUCCESS
+                    } else {
+                        eprintln!(
+                            "VALIDATION_FAILED: {}",
+                            report
+                                .first_error_summary()
+                                .unwrap_or_else(|| "see issues".into())
+                        );
+                        ExitCode::from(EXIT_FAILED as u8)
+                    }
+                }
+                Err(e) => {
+                    eprintln!("VALIDATION_FAILED: {e}");
+                    ExitCode::from(EXIT_FAILED as u8)
+                }
             }
         }
     }

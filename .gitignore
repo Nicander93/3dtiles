@@ -29,3 +29,7 @@ tsconfig.tsbuildinfo
 
 # Tauri / desktop build artifacts
 apps/desktop/src-tauri/target/
+
+# Phase 12 acceptance / tooling
+acceptance-results/
+node_modules/
