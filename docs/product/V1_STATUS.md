@@ -1,4 +1,21 @@
-# GeoForge 3D V1 Status
+> **Architecture rebuild Phases 0–10 (2026-09-10 Asia/Shanghai):** see [`PHASE_REPORTS/SUMMARY.md`](./PHASE_REPORTS/SUMMARY.md) + [`phase-10.md`](./PHASE_REPORTS/phase-10.md).  
+> TopRebuild Rust formal path; scale ladder **4×4 + 16×16 synthetic PASS**; OSGBny sparse → `GRID_SPATIAL_MISMATCH`.  
+> **Do NOT claim** `支持大范围倾斜摄影顶层重建` / 百平方公里. Honest line: *V1 algorithm complete for continuous regular grids (≤16×16 synthetic); large-scale / urban validation pending.*
+
+> **Phase 1 done (see report):** Tauri 2 shell under `apps/desktop/src-tauri`; OSGB Preview UI removed; Python API :8787 still used. Details: [`PHASE_REPORTS/phase-1.md`](./PHASE_REPORTS/phase-1.md).
+
+# HISTORICAL — GeoForge 3D prior “V1” status (NOT current V1 complete)
+
+> **HISTORICAL / SUPERSEDED for architecture decisions.**  
+> Date banner kept for archaeology. This file records the **previous** React+Python desktop_server + optional Qt shell delivery track (v0.1 / P0–P7).  
+> It must **not** be read as “current V1 is complete.”  
+> **Current authority:** [`03-v1-architecture-rebuild-plan.md`](./03-v1-architecture-rebuild-plan.md) (Tauri + Processor + Proxy HLOD rebuild).  
+> **Qt / OSGB native preview / `geoforge_shell` / `osgb_viewer`:** **cancelled for V1** (code retained until later cleanup phase; historical only).  
+> Baseline freeze: [`BASELINE_FREEZE.md`](./BASELINE_FREEZE.md). Phase reports: [`PHASE_REPORTS/`](./PHASE_REPORTS/).
+
+---
+
+# GeoForge 3D prior status archive (was: V1 Status)
 
 Date: 2026-09-09 Asia/Shanghai. v0.1.0 deliverable. No git push.
 Plan: V1_DELIVERY_PLAN.md (P0–P7 done; **P4 closed** via basisu post-process; **P7 Cesium KTX2 load confirmed**).
@@ -15,7 +32,7 @@ Default convert bin: `/workspace/runtime/3dtile-bin-ktx2/run.sh` when present
 - keep works on convert and process-tileset
 - **KTX2 ETC1S works** without a newer `_3dtile` binary:
   1. keep-convert with winner1/3dtiles:1.0
-  2. post-process B3DM/GLB with **basisu** (`apps/desktop_server/app/texture_ktx2.py`)
+  2. post-process B3DM/GLB with **basisu** (`tools/experiments/desktop_server_py/app/texture_ktx2.py`)
      → `KHR_texture_basisu` / `image/ktx2` evidence
 - Wrapper: `/workspace/runtime/3dtile-bin-ktx2/run.sh`
   - `--help` lists `--enable-texture-compress`
@@ -117,12 +134,12 @@ Confirmed Cesium can load **P7 E2E KTX2+rebuild** artifact:
 
 ## P7d Cesium camera / ENU polish (2026-09-09 ~17:31 Asia/Shanghai)
 
-- `apps/web/public/cesium-preview.html` (+ `examples/preview/index.html` / `rebuild.html`):
+- `apps/desktop/public/cesium-preview.html` (+ `examples/preview/index.html` / `rebuild.html`):
   - After load: `flyTo` / `viewBoundingSphere` with `HeadingPitchRange`, wait for `tilesLoaded`, then re-frame on loaded **content** spheres (fallback root)
   - Local / near-ECEF-origin tilesets get ENU `modelMatrix` (`?enu=lat,lon[,h]` or OSGBny default 35.90924,117.13183)
   - Load error banner (`#errorBanner`); optional `?debug=1` extent ellipsoid + HUD stats
   - `postMessage({type:'geoforge-fit'})` and Home button re-fit
-- UI: Processing / OsgbPreview / TilesPreview toolbars closer to mockups; KTX2 options enabled when `caps.postprocessBasisu.available` (`apps/web/src/lib/textureCaps.ts`)
+- UI: Processing / OsgbPreview / TilesPreview toolbars closer to mockups; KTX2 options enabled when `caps.postprocessBasisu.available` (`apps/desktop/src/lib/textureCaps.ts`)
 - Smoke: art-c704b957a939 → `tilesLoaded`, camera over lon≈117.14 lat≈35.92 (not starfield); screenshot `docs/product/p7_cesium_ktx2_v2.png` (headless Chrome). Mesh still sparse for this sample’s tile footprint.
 
 

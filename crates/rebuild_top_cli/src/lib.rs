@@ -1,6 +1,6 @@
 //! Post-process top-level reconstruction (`rebuild-top`) CLI.
 //!
-//! Dispatches to `tools/rebuild_top/rebuild_top.py` for the v0 merge
+//! Dispatches to `tools/experiments/rebuild_top_py/rebuild_top.py` for the v0 merge
 //! implementation (b3dm/GLB merge + tileset rewrite).
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
@@ -65,19 +65,30 @@ pub fn command() -> Command {
         )
 }
 
+fn rebuild_script_candidates(root: &Path) -> [PathBuf; 2] {
+    [
+        root.join("tools/experiments/rebuild_top_py/rebuild_top.py"),
+        root.join("tools/rebuild_top/rebuild_top.py"), // one-release fallback
+    ]
+}
+
+fn find_rebuild_script(root: &Path) -> Option<PathBuf> {
+    rebuild_script_candidates(root)
+        .into_iter()
+        .find(|p| p.is_file())
+}
+
 fn find_repo_root() -> Option<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         for ancestor in exe.ancestors().take(8) {
-            let cand = ancestor.join("tools/rebuild_top/rebuild_top.py");
-            if cand.is_file() {
+            if find_rebuild_script(ancestor).is_some() {
                 return Some(ancestor.to_path_buf());
             }
         }
     }
     let cwd = std::env::current_dir().ok()?;
     for ancestor in cwd.ancestors().take(8) {
-        let cand = ancestor.join("tools/rebuild_top/rebuild_top.py");
-        if cand.is_file() {
+        if find_rebuild_script(ancestor).is_some() {
             return Some(ancestor.to_path_buf());
         }
     }
@@ -110,10 +121,13 @@ pub fn run(matches: &ArgMatches) -> ExitCode {
     let verbose = matches.get_flag("verbose");
 
     let Some(repo) = find_repo_root() else {
-        eprintln!("rebuild-top: cannot find tools/rebuild_top/rebuild_top.py (run from repo checkout)");
+        eprintln!("rebuild-top: cannot find tools/experiments/rebuild_top_py/rebuild_top.py (run from repo checkout)");
         return ExitCode::from(2);
     };
-    let script = repo.join("tools/rebuild_top/rebuild_top.py");
+    let Some(script) = find_rebuild_script(&repo) else {
+        eprintln!("rebuild-top: rebuild_top.py missing under tools/experiments/rebuild_top_py (or legacy tools/rebuild_top)");
+        return ExitCode::from(2);
+    };
     let python = find_python(&repo);
 
     let mut cmd = ProcCommand::new(&python);

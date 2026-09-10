@@ -1,0 +1,54 @@
+{
+  "asset": {
+    "version": "1.0",
+    "gltfUpAxis": "Z"
+  },
+  "geometricError": 50.0,
+  "root": {
+    "boundingVolume": {
+      "box": [
+        1450.0,
+        150.0,
+        10.0,
+        50.0,
+        0,
+        0,
+        0,
+        50.0,
+        0,
+        0,
+        0,
+        10.0
+      ]
+    },
+    "geometricError": 50.0,
+    "refine": "REPLACE",
+    "content": {
+      "uri": "./Tile_+014_+001.b3dm"
+    },
+    "children": [
+      {
+        "boundingVolume": {
+          "box": [
+            1450.0,
+            150.0,
+            10.0,
+            50.0,
+            0,
+            0,
+            0,
+            50.0,
+            0,
+            0,
+            0,
+            10.0
+          ]
+        },
+        "geometricError": 10.0,
+        "content": {
+          "uri": "./Tile_+014_+001_L1.b3dm"
+        }
+      }
+    ]
+  }
+}

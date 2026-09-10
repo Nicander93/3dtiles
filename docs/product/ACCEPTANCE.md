@@ -1,9 +1,21 @@
+> **Architecture rebuild acceptance (Phases 0–10, 2026-09-10 Asia/Shanghai):**  
+> Algorithm / Processor / Tauri path: see [`PHASE_REPORTS/SUMMARY.md`](./PHASE_REPORTS/SUMMARY.md).  
+> Top rebuild scale: **4×4 + 16×16 synthetic demonstrated**; sparse OSGBny **rejected** (`GRID_SPATIAL_MISMATCH`); **城区 / 百平方公里 NOT demonstrated** — do not treat historical “Top rebuild | pass” row as large-area production acceptance.  
+> Status line: *V1 algorithm complete for continuous regular grids (≤16×16 synthetic); large-scale validation pending.*
+
+> **CANCELLED FOR V1 — HISTORICAL ONLY.**  
+> Prior acceptance table included OSGB native / Qt shell as partial. Those rows are cancelled for new V1; do not use this file as final V1 acceptance.  
+> Qt main window, Qt WebEngine, OSGB native preview, `apps/geoforge_shell`, and `apps/osgb_viewer` are **out of V1 scope**. Code is **not deleted** in Phase 0.  
+> Current architecture authority: [`03-v1-architecture-rebuild-plan.md`](./03-v1-architecture-rebuild-plan.md).
+
+---
+
 # GeoForge 3D V1 ACCEPTANCE
 
 Date: 2026-09-09 Asia/Shanghai.
 Maps design section 2 must-deliver rows to pass/partial/fail.
 **P0–P7 done** (incl. KTX2 postprocess, Cesium ENU framing, rebuild levels 1|2 UI,
-geoforge_shell browser fallback, `run_geoforge.sh` / `run_geoforge_shell.sh`).
+geoforge_shell browser fallback, `run_geoforge.sh` / `(deleted) run_geoforge_shell.sh`).
 P4 closed via basisu. Later push list: `PUSH_CANDIDATES.md` (no push this batch).
 
 | Item | Result | Evidence |
@@ -19,7 +31,7 @@ P4 closed via basisu. Later push list: `PUSH_CANDIDATES.md` (no push this batch)
 | process-tileset | pass | tiles process UI keep/rebuild/KTX2 |
 | Texture keep KTX2 | pass | P4 closed. keep green; KTX2 ETC1S via basisu post-process (`KHR_texture_basisu`). P7a E2E task-3917f396ea60; process task-5f1d943144ed |
 | CRS origin elevation | pass | P5 UI API MISSING_CRS gate; vertical datum note |
-| One-shot docs | pass | `run_geoforge.sh` / `run_geoforge_shell.sh`; ACCEPTANCE USER_GUIDE |
+| One-shot docs | pass | `run_geoforge.sh` / `(deleted) run_geoforge_shell.sh`; ACCEPTANCE USER_GUIDE |
 
 ## Evidence
 

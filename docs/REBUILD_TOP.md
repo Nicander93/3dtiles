@@ -30,11 +30,13 @@ _3dtile rebuild-top -i <tileset_dir> -o <out_dir> --levels N [--simplify 0.5] [-
 
 ## Status
 
-**Status: v0 + P7c geometricError heuristic**
+**Status: v0 + P7c geometricError heuristic — baseline only, not release runtime**
 
-- Implementation: `tools/rebuild_top/rebuild_top.py`
+Phase 4: moved to `tools/experiments/rebuild_top_py/`. Formal V1 TopRebuild is C++ (Phase 5+).
+
+- Implementation: `tools/experiments/rebuild_top_py/rebuild_top.py`
 - CLI entry: `_3dtile rebuild-top ...` (via `crates/rebuild_top_cli`) or
-  `python tools/rebuild_top/rebuild_top.py -i <tileset> -o <out>`
+  `python tools/experiments/rebuild_top_py/rebuild_top.py -i <tileset> -o <out>`
 - Behavior: 2×2 group of `Tile_+r_+c` root external tilesets; merge root `.b3dm` meshes;
   write `Data/Merge_L*_*/` parent with `refine: REPLACE`; copy remainder of tileset tree.
 
@@ -61,12 +63,12 @@ Small, safe changes only (no algorithm rewrite):
 ### Smoke
 
 ```bash
-python tools/rebuild_top/rebuild_top.py \
+python tools/experiments/rebuild_top_py/rebuild_top.py \
   -i /workspace/data/geoforge_outputs/osgbny_p7_e2e \
   -o /workspace/data/geoforge_outputs/osgbny_p7c_rebuild --levels 1 -v
 # → 6 tiles → 5 groups; 1 Merge_L1_3_3 REPLACE parent
 
-python tools/rebuild_top/rebuild_top.py \
+python tools/experiments/rebuild_top_py/rebuild_top.py \
   -i /workspace/data/geoforge_outputs/osgbny_p7_e2e \
   -o /workspace/data/geoforge_outputs/osgbny_p7c_rebuild_l2 --levels 2 -v
 # → level2: 5→5 (no extra merge); REPLACE still intact

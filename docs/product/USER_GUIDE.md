@@ -1,22 +1,43 @@
+> **V1 path update (Phase 4):** Preferred desktop is **Tauri 2** (`apps/desktop`) + React + Cesium + Rust `processor`.  
+> Qt shell / OSGB native preview **deleted** (historical stubs: [`QT_SHELL.md`](./QT_SHELL.md), [`OSGB_NATIVE_PREVIEW.md`](./OSGB_NATIVE_PREVIEW.md)).  
+> Legacy Python API moved to `tools/experiments/desktop_server_py` (`bash scripts/run_geoforge.sh --legacy-server`).  
+> Rebuild Python baseline: `tools/experiments/rebuild_top_py` (not release runtime).  
+> Authority: [`03-v1-architecture-rebuild-plan.md`](./03-v1-architecture-rebuild-plan.md). Reports: [`PHASE_REPORTS/`](./PHASE_REPORTS/).
+
+---
 # GeoForge 3D 用户指南（V1）
 
-日期：2026-09-09（Asia/Shanghai）。P0–P7 已闭环。推送候选见 `docs/product/PUSH_CANDIDATES.md`（本批不 push）。
+日期：2026-09-10（Asia/Shanghai）。架构重构 Phase 0–10 已推进（TopRebuild Rust 正式路径；规模验证至合成 16×16）。**不宣称**大范围/百平方公里。详见 `PHASE_REPORTS/SUMMARY.md`。推送候选见 `docs/product/PUSH_CANDIDATES.md`（本批不 push）。
 
 ## 启动
 
-```bash
-bash scripts/run_geoforge.sh
-# UI http://127.0.0.1:8787/
-# 健康检查：curl -s http://127.0.0.1:8787/api/health
-```
-
-可选 Qt 壳（浏览器回退，非完整 WebEngine）：
+### 推荐（Phase 3+）：Tauri 桌面 + Processor
 
 ```bash
-# 先起 API/UI，再：
-bash scripts/run_geoforge_shell.sh
-# DISPLAY 常用 :2；二进制 apps/geoforge_shell/build/geoforge_shell
+# 从仓库根目录
+cargo build -p processor
+cd apps/desktop && npm install && npm run tauri:dev
+# 需 DISPLAY + WebKitGTK；编译检查见 apps/desktop/README.md
+# 或：bash scripts/run_geoforge.sh   # 打印用法；有 DISPLAY 且已装依赖时可直接拉起 tauri:dev
 ```
+
+### 浏览器 / Vite（无 Tauri 窗口）
+
+```bash
+cd apps/desktop && npm run build && npm run preview
+# 或 npm run dev → http://127.0.0.1:5173
+```
+
+### 遗留：Python HTTP API（参考实现）
+
+```bash
+bash scripts/run_geoforge.sh --legacy-server
+# UI http://127.0.0.1:8787/  （需先 npm run build 产出 apps/desktop/dist）
+```
+
+### 历史 / 已删除：Qt 壳与 OSGB Viewer
+
+Phase 4 已删除 `apps/geoforge_shell/`、`apps/osgb_viewer/` 及对应 scripts。说明见 `docs/product/historical/`。
 
 ## 路径与环境变量
 
@@ -29,7 +50,7 @@ bash scripts/run_geoforge_shell.sh
 | `GEOFORGE_VENV` | Python venv | `/workspace/venv-3dtiles` → `$ROOT/.venv` |
 | `GEOFORGE_SAMPLE` | 样例 OSGB 提示路径 | `/workspace/data/OSGBny/OSGBny` |
 | `GEOFORGE_PREVIEW_CACHE` | 预览缓存 | `$ROOT/.geoforge/preview_cache` |
-| `MAMBA_ROOT_PREFIX` | Qt 壳 / OSGB 查看器 conda | `/workspace/conda` → `$HOME/conda` |
+| `GEOFORGE_REBUILD_TOP` | Python rebuild baseline | `tools/experiments/rebuild_top_py/rebuild_top.py` |
 
 本地完整步骤见 `docs/product/LOCAL_VERIFY.md`。
 
@@ -63,9 +84,9 @@ ENU lat/lon → 3dtile `-c` x/y；原点 Z 可映射 offset。高程基准独立
 
 ## 预览
 
-- 3D Tiles：成果页或 `/preview/tiles`（Cesium；本地/近原点 tileset 自动 ENU `modelMatrix`，可 `?enu=lat,lon[,h]`）  
-- 可选原生 OSGB：`/preview/osgb` → Qt `osgb_viewer`（需 DISPLAY，常 :2）  
-- Qt 产品壳：`run_geoforge_shell.sh`（浏览器回退 + 内嵌 OSGB；截图 `geoforge_shell_shot.png` / `geoforge_shell_osgb.png`）
+- **3D Tiles（V1）**：成果页或 `/preview/tiles`（Cesium；本地/近原点 tileset 自动 ENU `modelMatrix`，可 `?enu=lat,lon[,h]`）  
+- **OSGB Preview 已从产品 UI 移除**（Phase 1）。历史 Qt `osgb_viewer` / `/preview/osgb` 不再作为产品入口。  
+- Qt 产品壳：`(deleted) run_geoforge_shell.sh` 仅为历史路径（已取消于 V1）。
 
 ## 取消任务
 
@@ -74,7 +95,7 @@ ENU lat/lon → 3dtile `-c` x/y；原点 Z 可映射 offset。高程基准独立
 ## 已知限制 / 非声称
 
 - **不做** Windows 安装包  
-- **不做** 完整/已链接 Qt WebEngine 壳（现为浏览器回退）  
+- **不做** Qt 壳 / OSGB 原生预览（Phase 4 已删除产品路径）  
 - `_3dtile` 二进制内原生 `--enable-texture-compress` 仍缺；KTX2 靠 wrapper + basisu 后处理  
 - 首版不做：裁剪/压平/工程保存、多源融合、分布式  
 
@@ -84,9 +105,10 @@ ENU lat/lon → 3dtile `-c` x/y；原点 Z 可映射 offset。高程基准独立
 - `docs/product/V1_DELIVERY_PLAN.md`
 - `docs/product/V1_STATUS.md`
 - `docs/product/PUSH_CANDIDATES.md`（日后 push 清单）
-- `docs/product/QT_SHELL.md` · `docs/REBUILD_TOP.md`
-- `apps/osgb_viewer/README.md` · `apps/geoforge_shell/README.md`
+- `docs/product/historical/QT_SHELL.md` · `docs/product/historical/OSGB_NATIVE_PREVIEW.md`
+- `docs/REBUILD_TOP.md` · `tools/experiments/rebuild_top_py/README.md`
+- `apps/desktop/README.md` · `tools/experiments/desktop_server_py/README.md`
 
 ## English (short)
 
-Start with `scripts/run_geoforge.sh` → http://127.0.0.1:8787/. Convert: scan → rebuild levels 1|2 + keep/KTX2 (basisu post-process) → submit. Cesium ENU framing works. Qt shell via `run_geoforge_shell.sh` is browser-fallback only. No Windows package; no linked WebEngine. See `PUSH_CANDIDATES.md` for a later push. P0–P7 done.
+Preferred: `cd apps/desktop && npm run tauri:dev` with `cargo build -p processor`. Legacy API: `bash scripts/run_geoforge.sh --legacy-server`. Convert: scan → rebuild levels 1|2 + keep/KTX2 → Cesium preview. Qt / OSGB viewer removed in Phase 4. See `PUSH_CANDIDATES.md`. No claim of large-area top-rebuild production support yet.

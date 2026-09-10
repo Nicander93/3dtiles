@@ -1,0 +1,3 @@
+[toolchain]
+channel = "stable"
+# Tauri 2 / current crates need a recent stable (1.88+; verified with 1.98.1)

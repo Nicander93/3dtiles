@@ -1,0 +1,381 @@
+{
+  "asset": {
+    "version": "1.0",
+    "gltfUpAxis": "Z"
+  },
+  "geometricError": 400.0,
+  "root": {
+    "boundingVolume": {
+      "box": [
+        200.0,
+        200.0,
+        10.0,
+        200.0,
+        0,
+        0,
+        0,
+        200.0,
+        0,
+        0,
+        0,
+        10.0
+      ]
+    },
+    "geometricError": 400.0,
+    "refine": "ADD",
+    "children": [
+      {
+        "boundingVolume": {
+          "box": [
+            50.0,
+            50.0,
+            10.0,
+            50.0,
+            0,
+            0,
+            0,
+            50.0,
+            0,
+            0,
+            0,
+            10.0
+          ]
+        },
+        "geometricError": 100.0,
+        "content": {
+          "uri": "./Data/Tile_+000_+000/tileset.json"
+        }
+      },
+      {
+        "boundingVolume": {
+          "box": [
+            150.0,
+            50.0,
+            10.0,
+            50.0,
+            0,
+            0,
+            0,
+            50.0,
+            0,
+            0,
+            0,
+            10.0
+          ]
+        },
+        "geometricError": 100.0,
+        "content": {
+          "uri": "./Data/Tile_+001_+000/tileset.json"
+        }
+      },
+      {
+        "boundingVolume": {
+          "box": [
+            250.0,
+            50.0,
+            10.0,
+            50.0,
+            0,
+            0,
+            0,
+            50.0,
+            0,
+            0,
+            0,
+            10.0
+          ]
+        },
+        "geometricError": 100.0,
+        "content": {
+          "uri": "./Data/Tile_+002_+000/tileset.json"
+        }
+      },
+      {
+        "boundingVolume": {
+          "box": [
+            350.0,
+            50.0,
+            10.0,
+            50.0,
+            0,
+            0,
+            0,
+            50.0,
+            0,
+            0,
+            0,
+            10.0
+          ]
+        },
+        "geometricError": 100.0,
+        "content": {
+          "uri": "./Data/Tile_+003_+000/tileset.json"
+        }
+      },
+      {
+        "boundingVolume": {
+          "box": [
+            50.0,
+            150.0,
+            10.0,
+            50.0,
+            0,
+            0,
+            0,
+            50.0,
+            0,
+            0,
+            0,
+            10.0
+          ]
+        },
+        "geometricError": 100.0,
+        "content": {
+          "uri": "./Data/Tile_+000_+001/tileset.json"
+        }
+      },
+      {
+        "boundingVolume": {
+          "box": [
+            150.0,
+            150.0,
+            10.0,
+            50.0,
+            0,
+            0,
+            0,
+            50.0,
+            0,
+            0,
+            0,
+            10.0
+          ]
+        },
+        "geometricError": 100.0,
+        "content": {
+          "uri": "./Data/Tile_+001_+001/tileset.json"
+        }
+      },
+      {
+        "boundingVolume": {
+          "box": [
+            250.0,
+            150.0,
+            10.0,
+            50.0,
+            0,
+            0,
+            0,
+            50.0,
+            0,
+            0,
+            0,
+            10.0
+          ]
+        },
+        "geometricError": 100.0,
+        "content": {
+          "uri": "./Data/Tile_+002_+001/tileset.json"
+        }
+      },
+      {
+        "boundingVolume": {
+          "box": [
+            350.0,
+            150.0,
+            10.0,
+            50.0,
+            0,
+            0,
+            0,
+            50.0,
+            0,
+            0,
+            0,
+            10.0
+          ]
+        },
+        "geometricError": 100.0,
+        "content": {
+          "uri": "./Data/Tile_+003_+001/tileset.json"
+        }
+      },
+      {
+        "boundingVolume": {
+          "box": [
+            50.0,
+            250.0,
+            10.0,
+            50.0,
+            0,
+            0,
+            0,
+            50.0,
+            0,
+            0,
+            0,
+            10.0
+          ]
+        },
+        "geometricError": 100.0,
+        "content": {
+          "uri": "./Data/Tile_+000_+002/tileset.json"
+        }
+      },
+      {
+        "boundingVolume": {
+          "box": [
+            150.0,
+            250.0,
+            10.0,
+            50.0,
+            0,
+            0,
+            0,
+            50.0,
+            0,
+            0,
+            0,
+            10.0
+          ]
+        },
+        "geometricError": 100.0,
+        "content": {
+          "uri": "./Data/Tile_+001_+002/tileset.json"
+        }
+      },
+      {
+        "boundingVolume": {
+          "box": [
+            250.0,
+            250.0,
+            10.0,
+            50.0,
+            0,
+            0,
+            0,
+            50.0,
+            0,
+            0,
+            0,
+            10.0
+          ]
+        },
+        "geometricError": 100.0,
+        "content": {
+          "uri": "./Data/Tile_+002_+002/tileset.json"
+        }
+      },
+      {
+        "boundingVolume": {
+          "box": [
+            350.0,
+            250.0,
+            10.0,
+            50.0,
+            0,
+            0,
+            0,
+            50.0,
+            0,
+            0,
+            0,
+            10.0
+          ]
+        },
+        "geometricError": 100.0,
+        "content": {
+          "uri": "./Data/Tile_+003_+002/tileset.json"
+        }
+      },
+      {
+        "boundingVolume": {
+          "box": [
+            50.0,
+            350.0,
+            10.0,
+            50.0,
+            0,
+            0,
+            0,
+            50.0,
+            0,
+            0,
+            0,
+            10.0
+          ]
+        },
+        "geometricError": 100.0,
+        "content": {
+          "uri": "./Data/Tile_+000_+003/tileset.json"
+        }
+      },
+      {
+        "boundingVolume": {
+          "box": [
+            150.0,
+            350.0,
+            10.0,
+            50.0,
+            0,
+            0,
+            0,
+            50.0,
+            0,
+            0,
+            0,
+            10.0
+          ]
+        },
+        "geometricError": 100.0,
+        "content": {
+          "uri": "./Data/Tile_+001_+003/tileset.json"
+        }
+      },
+      {
+        "boundingVolume": {
+          "box": [
+            250.0,
+            350.0,
+            10.0,
+            50.0,
+            0,
+            0,
+            0,
+            50.0,
+            0,
+            0,
+            0,
+            10.0
+          ]
+        },
+        "geometricError": 100.0,
+        "content": {
+          "uri": "./Data/Tile_+002_+003/tileset.json"
+        }
+      },
+      {
+        "boundingVolume": {
+          "box": [
+            350.0,
+            350.0,
+            10.0,
+            50.0,
+            0,
+            0,
+            0,
+            50.0,
+            0,
+            0,
+            0,
+            10.0
+          ]
+        },
+        "geometricError": 100.0,
+        "content": {
+          "uri": "./Data/Tile_+003_+003/tileset.json"
+        }
+      }
+    ]
+  }
+}

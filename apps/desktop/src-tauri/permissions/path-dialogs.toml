@@ -1,0 +1,41 @@
+[[permission]]
+identifier = "allow-select-input-directory"
+description = "Allows the select_input_directory command"
+commands.allow = ["select_input_directory"]
+
+[[permission]]
+identifier = "allow-select-output-directory"
+description = "Allows the select_output_directory command"
+commands.allow = ["select_output_directory"]
+
+[[permission]]
+identifier = "allow-select-tileset-file"
+description = "Allows the select_tileset_file command"
+commands.allow = ["select_tileset_file"]
+
+[[permission]]
+identifier = "allow-task-store"
+description = "Task store commands (submit/cancel/get/list/logs)"
+commands.allow = [
+  "submit_task",
+  "cancel_task",
+  "get_task",
+  "list_tasks",
+  "get_task_logs"
+]
+
+[[permission]]
+identifier = "allow-artifact-store"
+description = "Artifact store + preview + open directory"
+commands.allow = [
+  "list_artifacts",
+  "register_artifact",
+  "get_preview_url",
+  "open_artifact_directory",
+  "get_resource_server_info"
+]
+
+[[permission]]
+identifier = "allow-settings"
+description = "Settings get/update"
+commands.allow = ["get_settings", "update_settings"]
