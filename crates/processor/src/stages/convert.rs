@@ -75,5 +75,70 @@ pub fn run_convert(
     if !tileset.is_file() {
         return Err(format!("tileset.json missing under {}", out_dir.display()));
     }
+    // Native _3dtile often omits root `refine`; 3D Tiles requires it when children exist
+    // (CesiumGS validator: TILE_REFINE_MISSING_IN_ROOT). Default REPLACE for OSGB mesh trees.
+    match ensure_tileset_refine(out_dir) {
+        Ok(n) if n > 0 => emitter.log(&format!(
+            "[convert] set missing refine=REPLACE on {n} tileset root(s) with children"
+        )),
+        Ok(_) => {}
+        Err(e) => emitter.log(&format!("[convert] refine normalize warning: {e}")),
+    }
     Ok(())
+}
+
+/// Walk tileset.json tree under `out_dir` and set `root.refine = "REPLACE"` when missing
+/// and the root has children (external or inline). Does not invent geometry.
+fn ensure_tileset_refine(out_dir: &Path) -> Result<usize, String> {
+    use serde_json::{json, Value};
+    use std::fs;
+    let mut fixed = 0usize;
+    let mut stack = vec![out_dir.join("tileset.json")];
+    let mut seen = std::collections::HashSet::new();
+    while let Some(path) = stack.pop() {
+        let canon = path.canonicalize().unwrap_or(path.clone());
+        if !seen.insert(canon.clone()) {
+            continue;
+        }
+        if !path.is_file() {
+            continue;
+        }
+        let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        let mut doc: Value = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+        let Some(root) = doc.get_mut("root") else {
+            continue;
+        };
+        let has_children = root
+            .get("children")
+            .and_then(|c| c.as_array())
+            .map(|a| !a.is_empty())
+            .unwrap_or(false);
+        if has_children && root.get("refine").and_then(|v| v.as_str()).is_none() {
+            root.as_object_mut()
+                .ok_or_else(|| format!("root not object in {}", path.display()))?
+                .insert("refine".into(), json!("REPLACE"));
+            fs::write(&path, serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())? + "
+")
+                .map_err(|e| e.to_string())?;
+            fixed += 1;
+        }
+        // queue external tilesets referenced by content.uri
+        let root_ref = doc.get("root").cloned().unwrap_or(Value::Null);
+        let mut nodes = vec![root_ref];
+        while let Some(node) = nodes.pop() {
+            if let Some(uri) = node.pointer("/content/uri").and_then(|v| v.as_str()) {
+                if uri.ends_with("tileset.json") || uri.contains("tileset.json?") {
+                    let base = path.parent().unwrap_or(out_dir);
+                    let child = base.join(uri.split('?').next().unwrap_or(uri));
+                    if child.is_file() {
+                        stack.push(child);
+                    }
+                }
+            }
+            if let Some(chs) = node.get("children").and_then(|c| c.as_array()) {
+                nodes.extend(chs.iter().cloned());
+            }
+        }
+    }
+    Ok(fixed)
 }
