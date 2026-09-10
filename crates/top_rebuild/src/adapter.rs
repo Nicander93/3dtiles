@@ -1,7 +1,8 @@
-//! Tileset Source Adapter: parse tileset.json (+ external refs) → SourceBlocks (plan §9.4).
+//! Tileset Source Adapter: parse tileset.json (+ external refs) → SourceBlocks
+//! with coverage-frontier Representations (plan §9.4, Phase 11 P0-2/P0-3).
 
 use crate::error::{Result, TopRebuildError};
-use crate::types::{BoundingVolume, Mat4d, Representation, SourceBlock};
+use crate::types::{BoundingVolume, Mat4d, Representation, RepresentationPart, SourceBlock};
 use regex::Regex;
 use serde_json::Value;
 use std::cmp::Ordering;
@@ -55,16 +56,18 @@ fn mul_transform(parent: &Mat4d, local: &Mat4d) -> Mat4d {
     parent.mul(local)
 }
 
-/// Walk a block tileset root collecting content-bearing nodes as Representations.
-/// Order: root first (typically coarser / higher geometricError), then depth-first children.
-fn collect_representations(
-    node: &Value,
-    block_dir: &Path,
-    parent_world: &Mat4d,
-    block_id: &str,
-    out: &mut Vec<Representation>,
-    counter: &mut usize,
-) {
+#[derive(Clone, Debug)]
+struct LodNode {
+    geometric_error: f64,
+    content_path: Option<PathBuf>,
+    bounds: BoundingVolume,
+    world_transform: Mat4d,
+    #[allow(dead_code)]
+    refine: String,
+    children: Vec<LodNode>,
+}
+
+fn parse_lod_node(node: &Value, block_dir: &Path, parent_world: &Mat4d) -> Result<LodNode> {
     let local = parse_transform(node);
     let world = mul_transform(parent_world, &local);
     let ge = node
@@ -75,32 +78,183 @@ fn collect_representations(
         .get("boundingVolume")
         .and_then(parse_box)
         .unwrap_or_else(BoundingVolume::empty);
+    let refine = node
+        .get("refine")
+        .and_then(|v| v.as_str())
+        .unwrap_or("REPLACE")
+        .to_string();
 
-    if let Some(uri) = node
+    let content_path = node
         .get("content")
         .and_then(|c| c.get("uri"))
         .and_then(|u| u.as_str())
-    {
-        let rel = normalize_uri(uri);
-        let content_path = block_dir.join(&rel);
-        let rep_id = format!("{block_id}#rep{counter}");
-        *counter += 1;
-        out.push(Representation {
-            id: rep_id,
-            content_path,
-            geometric_error_meters: ge,
-            triangle_count: 0,
-            texture_bytes: 0,
-            bounds: bounds.clone(),
-            world_transform: world.clone(),
-        });
+        .map(|uri| {
+            let rel = normalize_uri(uri);
+            // External tileset refs are not mesh content for coverage.
+            if rel.ends_with("tileset.json") {
+                None
+            } else {
+                Some(block_dir.join(&rel))
+            }
+        })
+        .flatten();
+
+    // ADD refine with mesh content is unsupported for V1 rebuild coverage.
+    if refine.eq_ignore_ascii_case("ADD") && content_path.is_some() {
+        return Err(TopRebuildError::InvalidTileset(
+            "ADD refine with content is unsupported for V1 TopRebuild coverage frontiers".into(),
+        ));
     }
 
-    if let Some(children) = node.get("children").and_then(|c| c.as_array()) {
-        for child in children {
-            collect_representations(child, block_dir, &world, block_id, out, counter);
+    let mut children = Vec::new();
+    if let Some(arr) = node.get("children").and_then(|c| c.as_array()) {
+        for child in arr {
+            children.push(parse_lod_node(child, block_dir, &world)?);
         }
     }
+
+    Ok(LodNode {
+        geometric_error: ge,
+        content_path,
+        bounds,
+        world_transform: world,
+        refine,
+        children,
+    })
+}
+
+/// Expand a node to a complete content frontier (no parent+descendant overlap).
+fn expand_to_content_frontier<'a>(node: &'a LodNode) -> Result<Vec<&'a LodNode>> {
+    if node.content_path.is_some() {
+        return Ok(vec![node]);
+    }
+    if node.children.is_empty() {
+        return Err(TopRebuildError::source_coverage_incomplete(
+            "node has no content and no children",
+        ));
+    }
+    let mut parts = Vec::new();
+    for child in &node.children {
+        let child_parts = expand_to_content_frontier(child)?;
+        if child_parts.is_empty() {
+            return Err(TopRebuildError::source_coverage_incomplete(
+                "child branch produced empty coverage",
+            ));
+        }
+        parts.extend(child_parts);
+    }
+    if parts.is_empty() {
+        return Err(TopRebuildError::source_coverage_incomplete(
+            "failed to form complete coverage frontier",
+        ));
+    }
+    Ok(parts)
+}
+
+fn frontier_to_representation(
+    block_id: &str,
+    counter: &mut usize,
+    nodes: &[&LodNode],
+) -> Representation {
+    let ge = nodes
+        .iter()
+        .map(|n| n.geometric_error)
+        .fold(0.0_f64, f64::max);
+    let bounds = BoundingVolume::union_all(
+        &nodes
+            .iter()
+            .map(|n| n.bounds.clone())
+            .collect::<Vec<_>>(),
+    );
+    let parts: Vec<RepresentationPart> = nodes
+        .iter()
+        .filter_map(|n| {
+            n.content_path.as_ref().map(|p| RepresentationPart {
+                content_path: p.clone(),
+                world_transform: n.world_transform.clone(),
+                bounds: n.bounds.clone(),
+            })
+        })
+        .collect();
+    let id = format!("{block_id}#rep{counter}");
+    *counter += 1;
+    Representation {
+        id,
+        geometric_error_meters: ge,
+        parts,
+        triangle_count: 0,
+        texture_bytes: 0,
+        bounds,
+    }
+}
+
+/// Collect discrete coverage frontiers from coarse → fine (P0-3).
+fn collect_coverage_frontiers(root: &LodNode, block_id: &str) -> Result<Vec<Representation>> {
+    let mut out = Vec::new();
+    let mut counter = 0usize;
+
+    let mut current = expand_to_content_frontier(root)?;
+    if current.is_empty() {
+        return Err(TopRebuildError::source_coverage_incomplete(format!(
+            "block {block_id} has empty coverage frontier"
+        )));
+    }
+    out.push(frontier_to_representation(block_id, &mut counter, &current));
+
+    // Progressively refine: expand any frontier node that has children into child content frontiers.
+    loop {
+        let mut next: Vec<&LodNode> = Vec::new();
+        let mut expanded_any = false;
+        for node in &current {
+            if !node.children.is_empty() {
+                let mut child_front = Vec::new();
+                let mut ok = true;
+                for child in &node.children {
+                    match expand_to_content_frontier(child) {
+                        Ok(parts) => child_front.extend(parts),
+                        Err(_) => {
+                            ok = false;
+                            break;
+                        }
+                    }
+                }
+                if ok && !child_front.is_empty() {
+                    next.extend(child_front);
+                    expanded_any = true;
+                    continue;
+                }
+            }
+            next.push(node);
+        }
+        if !expanded_any {
+            break;
+        }
+        // Skip duplicate frontier (same content set)
+        let same = next.len() == current.len()
+            && next.iter().zip(current.iter()).all(|(a, b)| {
+                a.content_path == b.content_path && a.geometric_error == b.geometric_error
+            });
+        if same {
+            break;
+        }
+        out.push(frontier_to_representation(block_id, &mut counter, &next));
+        current = next;
+        if out.len() > 64 {
+            break; // safety
+        }
+    }
+    Ok(out)
+}
+
+/// Public helper for tests: build frontiers from a JSON tileset root value.
+pub fn frontiers_from_tileset_root(
+    root: &Value,
+    block_dir: &Path,
+    block_id: &str,
+    parent_world: &Mat4d,
+) -> Result<Vec<Representation>> {
+    let lod = parse_lod_node(root, block_dir, parent_world)?;
+    collect_coverage_frontiers(&lod, block_id)
 }
 
 fn load_json(path: &Path) -> Result<Value> {
@@ -109,11 +263,6 @@ fn load_json(path: &Path) -> Result<Value> {
 }
 
 /// Validate grid indices against spatial centers (plan §9.4).
-///
-/// Phase 10: V1 **stops** on `GRID_SPATIAL_MISMATCH` (no silent wrong tree).
-/// Sparse / irregular `Tile_*` sets (e.g. OSGBny 6 tiles) are a known limit of
-/// regular-grid Proxy HLOD — not covered by inventing partial coverage.
-/// Optional `--allow-partial-grid` was deferred; document refusal instead.
 pub fn validate_grid_spatial(blocks: &[SourceBlock]) -> Result<()> {
     let with_grid: Vec<_> = blocks
         .iter()
@@ -157,7 +306,6 @@ pub fn validate_grid_spatial(blocks: &[SourceBlock]) -> Result<()> {
         }
     }
 
-    // Distinct grid indices but coincident centers ⇒ mismatch.
     if (collapsed_x && !spacings_x.is_empty())
         || (collapsed_y && !spacings_y.is_empty())
         || (collapsed_x && collapsed_y)
@@ -251,7 +399,7 @@ pub fn load_source_blocks(tileset_path: &Path) -> Result<Vec<SourceBlock>> {
 
         let ext_path = input_dir.join(&rel);
         if !ext_path.exists() {
-            return Err(TopRebuildError::InvalidTileset(format!(
+            return Err(TopRebuildError::content_missing(format!(
                 "missing external tileset {}",
                 ext_path.display()
             )));
@@ -274,16 +422,8 @@ pub fn load_source_blocks(tileset_path: &Path) -> Result<Vec<SourceBlock>> {
             .get("root")
             .ok_or_else(|| TopRebuildError::InvalidTileset(format!("{rel} missing root")))?;
 
-        let mut representations = Vec::new();
-        let mut counter = 0usize;
-        collect_representations(
-            ext_root,
-            &block_dir,
-            &child_world,
-            &block_id,
-            &mut representations,
-            &mut counter,
-        );
+        let lod = parse_lod_node(ext_root, &block_dir, &child_world)?;
+        let representations = collect_coverage_frontiers(&lod, &block_id)?;
         if representations.is_empty() {
             return Err(TopRebuildError::NoRepresentations(block_id));
         }
@@ -300,6 +440,8 @@ pub fn load_source_blocks(tileset_path: &Path) -> Result<Vec<SourceBlock>> {
             grid_y: Some(grid_y),
             bounds,
             world_transform: child_world,
+            source_tileset_path: ext_path,
+            source_block_dir: block_dir,
             representations,
         });
     }
@@ -316,6 +458,7 @@ pub fn load_source_blocks(tileset_path: &Path) -> Result<Vec<SourceBlock>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn normalize_uri_strips_dot_slash() {
@@ -328,7 +471,6 @@ mod tests {
 
     #[test]
     fn grid_spatial_mismatch_detected() {
-        use crate::types::{BoundingVolume, Mat4d, Representation, SourceBlock};
         let mk = |id: &str, gx: i32, gy: i32, cx: f64, cy: f64| SourceBlock {
             id: id.into(),
             grid_x: Some(gx),
@@ -337,15 +479,15 @@ mod tests {
                 cx, cy, 0.0, 50.0, 0.0, 0.0, 0.0, 50.0, 0.0, 0.0, 0.0, 10.0,
             ]),
             world_transform: Mat4d::identity(),
-            representations: vec![Representation {
-                id: format!("{id}#r0"),
-                content_path: "x.b3dm".into(),
-                geometric_error_meters: 10.0,
-                triangle_count: 0,
-                texture_bytes: 0,
-                bounds: BoundingVolume::empty(),
-                world_transform: Mat4d::identity(),
-            }],
+            source_tileset_path: "tileset.json".into(),
+            source_block_dir: ".".into(),
+            representations: vec![Representation::single_part(
+                format!("{id}#r0"),
+                "x.b3dm".into(),
+                10.0,
+                BoundingVolume::empty(),
+                Mat4d::identity(),
+            )],
         };
         let blocks = vec![
             mk("A", 0, 0, 50.0, 50.0),
@@ -355,5 +497,101 @@ mod tests {
         let err = validate_grid_spatial(&blocks).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("GRID_SPATIAL_MISMATCH"), "{msg}");
+    }
+
+    #[test]
+    fn single_chain_lod_two_frontiers() {
+        let dir = PathBuf::from("/tmp");
+        let root = json!({
+            "geometricError": 50.0,
+            "refine": "REPLACE",
+            "boundingVolume": { "box": [0,0,0, 1,0,0, 0,1,0, 0,0,1] },
+            "content": { "uri": "./coarse.b3dm" },
+            "children": [{
+                "geometricError": 10.0,
+                "boundingVolume": { "box": [0,0,0, 1,0,0, 0,1,0, 0,0,1] },
+                "content": { "uri": "./fine.b3dm" }
+            }]
+        });
+        let reps = frontiers_from_tileset_root(&root, &dir, "B", &Mat4d::identity()).unwrap();
+        assert_eq!(reps.len(), 2);
+        assert_eq!(reps[0].frontier_parts(), 1);
+        assert_eq!(reps[0].geometric_error_meters, 50.0);
+        assert_eq!(reps[1].frontier_parts(), 1);
+        assert_eq!(reps[1].geometric_error_meters, 10.0);
+    }
+
+    #[test]
+    fn root_content_plus_four_children_no_overlap() {
+        let dir = PathBuf::from("/tmp");
+        let mut children = Vec::new();
+        for i in 0..4 {
+            children.push(json!({
+                "geometricError": 5.0,
+                "boundingVolume": { "box": [i as f64, 0,0, 1,0,0, 0,1,0, 0,0,1] },
+                "content": { "uri": format!("./c{i}.b3dm") }
+            }));
+        }
+        let root = json!({
+            "geometricError": 40.0,
+            "refine": "REPLACE",
+            "boundingVolume": { "box": [0,0,0, 4,0,0, 0,1,0, 0,0,1] },
+            "content": { "uri": "./root.b3dm" },
+            "children": children
+        });
+        let reps = frontiers_from_tileset_root(&root, &dir, "B", &Mat4d::identity()).unwrap();
+        assert_eq!(reps.len(), 2);
+        assert_eq!(reps[0].frontier_parts(), 1); // root only
+        assert_eq!(reps[1].frontier_parts(), 4); // four children, no parent
+        assert!(!reps[1]
+            .parts
+            .iter()
+            .any(|p| p.content_path.ends_with("root.b3dm")));
+    }
+
+    #[test]
+    fn root_no_content_four_child_coverage() {
+        let dir = PathBuf::from("/tmp");
+        let mut children = Vec::new();
+        for i in 0..4 {
+            children.push(json!({
+                "geometricError": 8.0,
+                "boundingVolume": { "box": [i as f64, 0,0, 1,0,0, 0,1,0, 0,0,1] },
+                "content": { "uri": format!("./c{i}.b3dm") }
+            }));
+        }
+        let root = json!({
+            "geometricError": 40.0,
+            "refine": "REPLACE",
+            "boundingVolume": { "box": [0,0,0, 4,0,0, 0,1,0, 0,0,1] },
+            "children": children
+        });
+        let reps = frontiers_from_tileset_root(&root, &dir, "B", &Mat4d::identity()).unwrap();
+        assert_eq!(reps.len(), 1);
+        assert_eq!(reps[0].frontier_parts(), 4);
+    }
+
+    #[test]
+    fn one_child_missing_content_incomplete() {
+        let dir = PathBuf::from("/tmp");
+        let root = json!({
+            "geometricError": 40.0,
+            "refine": "REPLACE",
+            "boundingVolume": { "box": [0,0,0, 2,0,0, 0,1,0, 0,0,1] },
+            "children": [
+                {
+                    "geometricError": 5.0,
+                    "boundingVolume": { "box": [0,0,0, 1,0,0, 0,1,0, 0,0,1] },
+                    "content": { "uri": "./ok.b3dm" }
+                },
+                {
+                    "geometricError": 5.0,
+                    "boundingVolume": { "box": [1,0,0, 1,0,0, 0,1,0, 0,0,1] }
+                    // no content, no children
+                }
+            ]
+        });
+        let err = frontiers_from_tileset_root(&root, &dir, "B", &Mat4d::identity()).unwrap_err();
+        assert_eq!(err.code_str(), "SOURCE_COVERAGE_INCOMPLETE");
     }
 }

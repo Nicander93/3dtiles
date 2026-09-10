@@ -166,7 +166,7 @@ fn hlod_4x4_pipeline_16_4_1() {
     assert!(report.metrics_path.exists(), "rebuild_metrics.json missing");
     let metrics: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&report.metrics_path).unwrap()).unwrap();
-    assert_eq!(metrics["phase"], 8);
+    assert!(metrics["phase"].as_u64().unwrap() >= 8);
     assert!(metrics["gaps"]["maxGap"].as_f64().is_some());
     assert!(metrics["gaps"]["P95Gap"].as_f64().is_some());
     assert!(metrics["budgets"]["maxTextureSize"].as_u64().unwrap() >= 256);

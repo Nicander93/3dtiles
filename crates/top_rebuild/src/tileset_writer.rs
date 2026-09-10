@@ -1,27 +1,31 @@
-//! TilesetWriter + HLOD rebuild pipeline (plan §§17–19, Phase 7).
+//! TilesetWriter + HLOD rebuild pipeline (plan §§17–19, Phases 7–11).
 //!
 //! - Proxy content as B3DM (3D Tiles 1.0) or GLB
 //! - boundingVolume + geometricError (plan §17.3)
 //! - refine: REPLACE
-//! - Attach original child subtrees; world transform invariant
-//! - Full 4×4: 16 → 4 → 1
+//! - Preserve original Block external tilesets (P0-2)
+//! - Release path: no synthetic content (P0-1)
+//! - Multi-part coverage frontiers feed ProxyBuilder (P0-3)
+//! - World-space BV / transform semantics (P0-4)
 
 use crate::adapter::load_source_blocks;
-use crate::b3dm::pack_glb_as_b3dm;
+use crate::b3dm::{load_content_glb, pack_glb_as_b3dm};
 use crate::error::{Result, TopRebuildError};
 use crate::gap::GapMetrics;
-use crate::glb::{make_box_primitive, make_textured_box_glb, transform_primitive, write_glb};
+use crate::glb::{
+    load_mesh_from_glb, make_box_primitive, make_textured_box_glb, transform_primitive, write_glb,
+};
 use crate::proxy_builder::{build_proxy_to_file, ChildContent, ProxyBudget, ProxyBuildResult};
-use crate::texture::TextureMetrics;
 use crate::selector::{self, Selection, DEFAULT_SOURCE_ERROR_RATIO};
+use crate::texture::TextureMetrics;
 use crate::tree_builder::{build_tree, TreeBuildOptions};
-use crate::types::{BoundingVolume, Mat4d, SourceBlock, TreeNode};
+use crate::types::{BoundingVolume, Mat4d, Representation, SourceBlock, TreeNode};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Writer / rebuild options (Phases 7–8).
+/// Writer / rebuild options (Phases 7–11).
 #[derive(Clone, Debug)]
 pub struct WriteOptions {
     /// Pack proxy GLB as B3DM (3D Tiles 1.0). If false, write `.glb`.
@@ -30,19 +34,18 @@ pub struct WriteOptions {
     pub l2_max_triangles: u64,
     pub target_error_meters: f64,
     /// When selected content is empty / unreadable, synthesize a box mesh.
+    /// **Release CLI must keep this false** (P0-1).
     pub synthesize_if_empty: bool,
     pub box_segments: u32,
     pub source_error_ratio: f64,
-    /// Plan §16.2 budgets
     pub max_texture_size: u32,
     pub max_texture_bytes: u64,
     pub max_glb_bytes: u64,
     pub enable_ktx2: bool,
     pub lock_border: bool,
     pub strict_budget: bool,
-    /// When synthesizing empty leaves, embed a solid test texture (Phase 8 path).
+    /// When synthesizing empty leaves, embed a solid test texture (debug/fixture only).
     pub inject_test_textures: bool,
-    /// Gap warning threshold in meters (plan §15.3 calibration).
     pub gap_warn_meters: f64,
 }
 
@@ -53,7 +56,8 @@ impl Default for WriteOptions {
             l1_max_triangles: 4_000,
             l2_max_triangles: 2_000,
             target_error_meters: 2.0,
-            synthesize_if_empty: true,
+            // Phase 11: production-safe defaults (fixtures must opt in).
+            synthesize_if_empty: false,
             box_segments: 6,
             source_error_ratio: DEFAULT_SOURCE_ERROR_RATIO,
             max_texture_size: 1024,
@@ -62,7 +66,7 @@ impl Default for WriteOptions {
             enable_ktx2: false,
             lock_border: true,
             strict_budget: false,
-            inject_test_textures: true,
+            inject_test_textures: false,
             gap_warn_meters: 1.0,
         }
     }
@@ -85,11 +89,24 @@ pub struct ProxyWriteMetrics {
 }
 
 #[derive(Clone, Debug)]
+pub struct SubtreePreservationEntry {
+    pub block: String,
+    pub source_node_count: usize,
+    pub output_node_count: usize,
+    pub source_content_count: usize,
+    pub output_content_count: usize,
+    pub missing_uri: usize,
+    pub structure_preserved: bool,
+}
+
+#[derive(Clone, Debug)]
 pub struct RebuildReport {
     pub level_counts: Vec<(u32, usize)>,
     pub proxies: Vec<ProxyWriteMetrics>,
     pub tileset_path: PathBuf,
     pub metrics_path: PathBuf,
+    pub subtree_preservation_path: PathBuf,
+    pub subtree_preservation: Vec<SubtreePreservationEntry>,
     pub warnings: Vec<String>,
     pub gap: GapMetrics,
     pub texture: TextureMetrics,
@@ -100,7 +117,8 @@ pub struct RebuildReport {
 
 #[derive(Clone)]
 struct NodePayload {
-    content_path: PathBuf,
+    /// Content used when this node is a child source for a parent proxy.
+    proxy_sources: Vec<ChildContent>,
     content_uri: String,
     world_transform: Mat4d,
     geometric_error: f64,
@@ -110,21 +128,17 @@ struct NodePayload {
     external_tileset_uri: Option<String>,
 }
 
-/// AABB diagonal length from Cesium box (center + half-axes).
+/// AABB diagonal from oriented Cesium box half-axes (P0-4).
 pub fn box_diagonal(bv: &BoundingVolume) -> f64 {
     let Some(b) = bv.box_values else {
         return 0.0;
     };
-    let hx = b[3].abs();
-    let hy = b[7].abs();
-    let hz = b[11].abs();
+    let hx = (b[3] * b[3] + b[4] * b[4] + b[5] * b[5]).sqrt();
+    let hy = (b[6] * b[6] + b[7] * b[7] + b[8] * b[8]).sqrt();
+    let hz = (b[9] * b[9] + b[10] * b[10] + b[11] * b[11]).sqrt();
     2.0 * (hx * hx + hy * hy + hz * hz).sqrt()
 }
 
-/// Plan §17.3: `proxyError = max(childSourceError) + simplificationError`,
-/// with strict parent > child and upward monotonicity.
-/// A mild diagonal floor assists when simplification error is ~0
-/// (not the Python 0.25 smoke heuristic alone).
 pub fn geometric_error_proxy(
     child_errors: &[f64],
     simplification_error: f64,
@@ -143,8 +157,6 @@ pub fn geometric_error_proxy(
     }
 }
 
-/// `newChildLocal = inv(parentWorld) * childWorld`
-/// so `parentWorld * newChildLocal == childWorld`.
 pub fn relative_transform(parent_world: &Mat4d, child_world: &Mat4d) -> Result<Mat4d> {
     let inv = parent_world
         .inverse()
@@ -202,11 +214,91 @@ fn bv_to_json(bv: &BoundingVolume) -> Value {
     }
 }
 
+fn content_exists(path: &Path) -> bool {
+    path.exists()
+}
+
 fn content_usable(path: &Path) -> bool {
     match fs::metadata(path) {
         Ok(m) => m.len() > 32,
         Err(_) => false,
     }
+}
+
+/// Validate content for the release path (P0-1).
+pub fn validate_release_content(path: &Path) -> Result<()> {
+    if !path.exists() {
+        return Err(TopRebuildError::content_missing(format!(
+            "content file missing: {}",
+            path.display()
+        )));
+    }
+    let meta = fs::metadata(path)?;
+    if meta.len() < 32 {
+        return Err(TopRebuildError::content_invalid(format!(
+            "content too small ({} bytes): {}",
+            meta.len(),
+            path.display()
+        )));
+    }
+    let data = fs::read(path)?;
+    let is_b3dm = data.len() >= 4 && &data[0..4] == b"b3dm";
+    let is_glb = data.len() >= 4 && &data[0..4] == b"glTF";
+    if !is_b3dm && !is_glb {
+        return Err(TopRebuildError::content_invalid(format!(
+            "not b3dm/glb magic: {}",
+            path.display()
+        )));
+    }
+    if is_b3dm {
+        // Header sanity
+        if data.len() < 28 {
+            return Err(TopRebuildError::content_invalid(format!(
+                "b3dm header truncated: {}",
+                path.display()
+            )));
+        }
+        let byte_length = u32::from_le_bytes(data[8..12].try_into().unwrap()) as usize;
+        if byte_length > 0 && byte_length > data.len() {
+            return Err(TopRebuildError::content_invalid(format!(
+                "b3dm byteLength {byte_length} > file {}: {}",
+                data.len(),
+                path.display()
+            )));
+        }
+    }
+    let glb = load_content_glb(path).map_err(|e| {
+        TopRebuildError::content_invalid(format!(
+            "failed to extract glb from {}: {e}",
+            path.display()
+        ))
+    })?;
+    let mesh = load_mesh_from_glb(&glb).map_err(|e| {
+        TopRebuildError::gltf_invalid(format!("gltf parse failed for {}: {e}", path.display()))
+    })?;
+    if mesh.primitives.is_empty() {
+        return Err(TopRebuildError::gltf_invalid(format!(
+            "no primitives in {}",
+            path.display()
+        )));
+    }
+    for p in &mesh.primitives {
+        if p.positions.is_empty() {
+            return Err(TopRebuildError::gltf_invalid(format!(
+                "POSITION missing in {}",
+                path.display()
+            )));
+        }
+        for v in &p.positions {
+            if !v[0].is_finite() || !v[1].is_finite() || !v[2].is_finite() {
+                return Err(TopRebuildError::gltf_invalid(format!(
+                    "non-finite POSITION in {}",
+                    path.display()
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn synthesize_box_glb_at(
@@ -225,14 +317,66 @@ fn synthesize_box_glb_at(
     write_glb(&[prim])
 }
 
-fn ensure_leaf_content(
+fn count_tileset_nodes(node: &Value, nodes: &mut usize, contents: &mut usize, uris: &mut Vec<String>) {
+    *nodes += 1;
+    if let Some(uri) = node
+        .get("content")
+        .and_then(|c| c.get("uri"))
+        .and_then(|u| u.as_str())
+    {
+        *contents += 1;
+        uris.push(uri.to_string());
+    }
+    if let Some(children) = node.get("children").and_then(|c| c.as_array()) {
+        for c in children {
+            count_tileset_nodes(c, nodes, contents, uris);
+        }
+    }
+}
+
+/// Structure digest ignoring absolute paths — node/content counts + relative URI stems.
+pub fn structure_digest(tileset_path: &Path) -> Result<(usize, usize, Vec<String>)> {
+    let doc: Value = serde_json::from_str(&fs::read_to_string(tileset_path)?)?;
+    let root = doc
+        .get("root")
+        .ok_or_else(|| TopRebuildError::InvalidTileset("missing root".into()))?;
+    let mut nodes = 0usize;
+    let mut contents = 0usize;
+    let mut uris = Vec::new();
+    count_tileset_nodes(root, &mut nodes, &mut contents, &mut uris);
+    // Normalize URIs to basename for path-invariant compare
+    let stems: Vec<String> = uris
+        .into_iter()
+        .map(|u| {
+            Path::new(&u)
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or(u)
+        })
+        .collect();
+    Ok((nodes, contents, stems))
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let to = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_recursive(&entry.path(), &to)?;
+        } else if ty.is_file() {
+            fs::copy(entry.path(), &to)?;
+        }
+    }
+    Ok(())
+}
+
+fn synthesize_missing_content_in_dir(
     block: &SourceBlock,
-    sel: &Selection,
     out_block_dir: &Path,
     opts: &WriteOptions,
-) -> Result<(PathBuf, f64)> {
-    fs::create_dir_all(out_block_dir)?;
-    let rep = &block.representations[sel.representation_index];
+) -> Result<()> {
     let (cx, cy, cz) = block.bounds.center().unwrap_or((0.0, 0.0, 0.0));
     let ((min_x, min_y, min_z), (max_x, max_y, max_z)) = block
         .bounds
@@ -242,17 +386,40 @@ fn ensure_leaf_content(
     let hy = ((max_y - min_y) * 0.4).max(5.0) as f32;
     let hz = ((max_z - min_z) * 0.4).max(2.0) as f32;
 
-    for (i, r) in block.representations.iter().enumerate() {
-        let file_name = r
-            .content_path
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| format!("{}.b3dm", block.id));
-        let dest = out_block_dir.join(&file_name);
-        let src_ok = content_usable(&r.content_path);
-        if src_ok {
-            fs::copy(&r.content_path, &dest)?;
-        } else if opts.synthesize_if_empty {
+    for (i, rep) in block.representations.iter().enumerate() {
+        for part in &rep.parts {
+            let file_name = part
+                .content_path
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| format!("{}_{}.b3dm", block.id, i));
+            let dest = out_block_dir.join(&file_name);
+            if content_usable(&dest) {
+                continue;
+            }
+            if content_usable(&part.content_path) {
+                fs::copy(&part.content_path, &dest)?;
+                continue;
+            }
+            // File present but too small / corrupt → CONTENT_INVALID on release path.
+            if content_exists(&part.content_path) || content_exists(&dest) {
+                let bad = if content_exists(&part.content_path) {
+                    &part.content_path
+                } else {
+                    &dest
+                };
+                if !opts.synthesize_if_empty {
+                    return Err(TopRebuildError::content_invalid(format!(
+                        "content present but unreadable/corrupt: {}",
+                        bad.display()
+                    )));
+                }
+            } else if !opts.synthesize_if_empty {
+                return Err(TopRebuildError::content_missing(format!(
+                    "empty content and synthesize disabled: {}",
+                    part.content_path.display()
+                )));
+            }
             let segs = if i == 0 {
                 opts.box_segments
             } else {
@@ -274,21 +441,14 @@ fn ensure_leaf_content(
                     rgb,
                     64,
                 )?;
-                // place into world
                 let mesh = crate::glb::load_mesh_from_glb(&local)?;
                 let mut prims = mesh.primitives;
                 let place = Mat4d::translation(cx, cy, cz);
                 for p in &mut prims {
                     transform_primitive(p, &place);
                 }
-                // re-encode with same textures
-                let (proc, _) = crate::texture::process_textures(
-                    &mesh.textures,
-                    64,
-                    0,
-                    false,
-                    None,
-                )?;
+                let (proc, _) =
+                    crate::texture::process_textures(&mesh.textures, 64, 0, false, None)?;
                 crate::glb::write_glb_with_textures(&prims, &proc)?
             } else {
                 synthesize_box_glb_at(
@@ -304,57 +464,195 @@ fn ensure_leaf_content(
             };
             let bytes = pack_glb_as_b3dm(&glb)?;
             fs::write(&dest, bytes)?;
-        } else {
-            return Err(TopRebuildError::Other(format!(
-                "empty content and synthesize disabled: {}",
-                r.content_path.display()
-            )));
+        }
+    }
+    Ok(())
+}
+
+/// Preserve original Block external tileset (P0-2). Does not flatten LOD via rewrite.
+fn preserve_block_subtree(
+    block: &SourceBlock,
+    sel: &Selection,
+    out_block_dir: &Path,
+    opts: &WriteOptions,
+) -> Result<(Vec<ChildContent>, f64, SubtreePreservationEntry)> {
+    fs::create_dir_all(out_block_dir)?;
+
+    let src_tileset = &block.source_tileset_path;
+    let src_dir = &block.source_block_dir;
+    let (src_nodes, src_contents, src_stems) = if src_tileset.exists() {
+        structure_digest(src_tileset)?
+    } else if opts.synthesize_if_empty {
+        (0, 0, Vec::new())
+    } else {
+        return Err(TopRebuildError::content_missing(format!(
+            "missing source tileset {}",
+            src_tileset.display()
+        )));
+    };
+
+    if src_tileset.exists() && src_dir.exists() {
+        // Full subtree copy with relative URIs preserved.
+        copy_dir_recursive(src_dir, out_block_dir)?;
+    } else if opts.synthesize_if_empty {
+        // Debug/fixture: synthesize content files; keep a minimal tileset if none.
+        synthesize_missing_content_in_dir(block, out_block_dir, opts)?;
+        if !out_block_dir.join("tileset.json").exists() {
+            write_minimal_leaf_tileset(block, out_block_dir)?;
+        }
+    } else {
+        return Err(TopRebuildError::content_missing(format!(
+            "missing block dir {}",
+            src_dir.display()
+        )));
+    }
+
+    // Fill any missing content only when explicitly allowed.
+    synthesize_missing_content_in_dir(block, out_block_dir, opts)?;
+
+    let out_tileset = out_block_dir.join("tileset.json");
+    if !out_tileset.exists() {
+        return Err(TopRebuildError::content_missing(format!(
+            "output tileset missing after preserve: {}",
+            out_tileset.display()
+        )));
+    }
+
+    let (out_nodes, out_contents, out_stems) = structure_digest(&out_tileset)?;
+    let mut missing_uri = 0usize;
+    {
+        let doc: Value = serde_json::from_str(&fs::read_to_string(&out_tileset)?)?;
+        let mut uris = Vec::new();
+        let mut n = 0usize;
+        let mut c = 0usize;
+        if let Some(root) = doc.get("root") {
+            count_tileset_nodes(root, &mut n, &mut c, &mut uris);
+        }
+        for uri in uris {
+            let rel = uri.trim_start_matches("./");
+            let p = out_block_dir.join(rel);
+            if !p.exists() {
+                missing_uri += 1;
+                if !opts.synthesize_if_empty {
+                    return Err(TopRebuildError::content_missing(format!(
+                        "subtree URI missing: {} (block {})",
+                        p.display(),
+                        block.id
+                    )));
+                }
+            } else if !opts.synthesize_if_empty {
+                validate_release_content(&p)?;
+            }
         }
     }
 
-    let sel_name = rep
-        .content_path
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| format!("{}.b3dm", block.id));
-    let sel_path = out_block_dir.join(&sel_name);
+    let structure_preserved = out_nodes >= src_nodes
+        && out_contents >= src_contents
+        && missing_uri == 0
+        && (src_stems.is_empty() || {
+            let mut a = src_stems.clone();
+            let mut b = out_stems.clone();
+            a.sort();
+            b.sort();
+            a == b || out_contents >= src_contents
+        });
 
-    let coarse_name = block.representations[0]
-        .content_path
-        .file_name()
-        .unwrap()
-        .to_string_lossy()
-        .to_string();
+    let entry = SubtreePreservationEntry {
+        block: block.id.clone(),
+        source_node_count: src_nodes,
+        output_node_count: out_nodes,
+        source_content_count: src_contents,
+        output_content_count: out_contents,
+        missing_uri,
+        structure_preserved,
+    };
+
+    let rep = &block.representations[sel.representation_index];
+    let proxy_sources = resolve_proxy_sources(rep, out_block_dir, opts)?;
+    Ok((proxy_sources, sel.source_error, entry))
+}
+
+fn write_minimal_leaf_tileset(block: &SourceBlock, out_block_dir: &Path) -> Result<()> {
+    let coarse = block
+        .representations
+        .first()
+        .and_then(|r| r.primary_content_path())
+        .and_then(|p| p.file_name().map(|s| s.to_string_lossy().to_string()))
+        .unwrap_or_else(|| format!("{}.b3dm", block.id));
     let mut root_node = json!({
         "boundingVolume": bv_to_json(&block.bounds),
-        "geometricError": block.representations[0].geometric_error_meters,
+        "geometricError": block.representations.first().map(|r| r.geometric_error_meters).unwrap_or(1.0),
         "refine": "REPLACE",
-        "content": { "uri": format!("./{coarse_name}") }
+        "content": { "uri": format!("./{coarse}") }
     });
     if block.representations.len() > 1 {
-        let fine_name = block.representations[1]
-            .content_path
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        root_node["children"] = json!([{
-            "boundingVolume": bv_to_json(&block.bounds),
-            "geometricError": block.representations[1].geometric_error_meters,
-            "content": { "uri": format!("./{fine_name}") }
-        }]);
+        if let Some(fine) = block.representations[1]
+            .primary_content_path()
+            .and_then(|p| p.file_name().map(|s| s.to_string_lossy().to_string()))
+        {
+            root_node["children"] = json!([{
+                "boundingVolume": bv_to_json(&block.bounds),
+                "geometricError": block.representations[1].geometric_error_meters,
+                "content": { "uri": format!("./{fine}") }
+            }]);
+        }
     }
     let tileset = json!({
         "asset": { "version": "1.0", "gltfUpAxis": "Z" },
-        "geometricError": block.representations[0].geometric_error_meters,
+        "geometricError": block.representations.first().map(|r| r.geometric_error_meters).unwrap_or(1.0),
         "root": root_node
     });
     fs::write(
         out_block_dir.join("tileset.json"),
         serde_json::to_string_pretty(&tileset)?,
     )?;
+    Ok(())
+}
 
-    Ok((sel_path, sel.source_error))
+fn resolve_proxy_sources(
+    rep: &Representation,
+    out_block_dir: &Path,
+    opts: &WriteOptions,
+) -> Result<Vec<ChildContent>> {
+    if rep.parts.is_empty() {
+        return Err(TopRebuildError::source_coverage_incomplete(
+            "selected representation has no parts",
+        ));
+    }
+    let mut out = Vec::with_capacity(rep.parts.len());
+    for part in &rep.parts {
+        let file_name = part
+            .content_path
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .ok_or_else(|| {
+                TopRebuildError::content_missing(format!(
+                    "content path has no file name: {}",
+                    part.content_path.display()
+                ))
+            })?;
+        let dest = out_block_dir.join(&file_name);
+        let path = if content_usable(&dest) {
+            dest
+        } else if content_usable(&part.content_path) {
+            part.content_path.clone()
+        } else if opts.synthesize_if_empty {
+            dest
+        } else {
+            return Err(TopRebuildError::content_missing(format!(
+                "selected coverage part missing: {}",
+                part.content_path.display()
+            )));
+        };
+        if !opts.synthesize_if_empty {
+            validate_release_content(&path)?;
+        }
+        out.push(ChildContent {
+            content_path: path,
+            world_transform: part.world_transform.clone(),
+        });
+    }
+    Ok(out)
 }
 
 fn write_proxy_bytes(
@@ -459,6 +757,7 @@ pub fn rebuild_tileset(
 
     let mut payloads: HashMap<String, NodePayload> = HashMap::new();
     let mut warnings = Vec::new();
+    let mut subtree_preservation = Vec::new();
 
     for node in &tree.levels[0] {
         let block_id = node.id.strip_prefix("L0_").unwrap_or(&node.id);
@@ -470,14 +769,22 @@ pub fn rebuild_tileset(
             TopRebuildError::Other(format!("missing selection for {}", block.id))
         })?;
         let out_block = output.join("Data").join(&block.id);
-        let (content_path, ge) = ensure_leaf_content(block, sel, &out_block, write_opts)?;
+        let (proxy_sources, ge, entry) =
+            preserve_block_subtree(block, sel, &out_block, write_opts)?;
+        if !entry.structure_preserved {
+            warnings.push(format!(
+                "subtree structure not fully preserved for {}",
+                block.id
+            ));
+        }
+        subtree_preservation.push(entry);
         let external_uri = format!("./Data/{}/tileset.json", block.id);
         payloads.insert(
             node.id.clone(),
             NodePayload {
-                content_path,
+                proxy_sources,
                 content_uri: external_uri.clone(),
-                // Mesh authored in world space; tile world frame is identity.
+                // Selected mesh is already in world; L0 tile frame identity keeps remount invariant.
                 world_transform: Mat4d::identity(),
                 geometric_error: ge,
                 bounds: node.bounds.clone(),
@@ -519,10 +826,8 @@ pub fn rebuild_tileset(
                 let p = payloads.get(cid).ok_or_else(|| {
                     TopRebuildError::Other(format!("missing payload for child {cid}"))
                 })?;
-                children.push(ChildContent {
-                    content_path: p.content_path.clone(),
-                    world_transform: p.world_transform.clone(),
-                });
+                // Full coverage frontier parts (P0-3), not a single content assumption.
+                children.extend(p.proxy_sources.clone());
                 child_ges.push(p.geometric_error);
             }
 
@@ -567,7 +872,6 @@ pub fn rebuild_tileset(
                 max_gap: built.gap.max_gap,
                 p95_gap: built.gap.p95_gap,
             });
-            // Accumulate texture metrics (last wins for ktx2 flags; sums for bytes)
             agg_texture.input_count += built.texture.input_count;
             agg_texture.unique_count += built.texture.unique_count;
             agg_texture.dedup_removed += built.texture.dedup_removed;
@@ -590,7 +894,10 @@ pub fn rebuild_tileset(
             payloads.insert(
                 node.id.clone(),
                 NodePayload {
-                    content_path,
+                    proxy_sources: vec![ChildContent {
+                        content_path,
+                        world_transform: node.world_transform.clone(),
+                    }],
                     content_uri: uri,
                     world_transform: node.world_transform.clone(),
                     geometric_error: ge,
@@ -628,11 +935,31 @@ pub fn rebuild_tileset(
     let total_texture_bytes: u64 = proxy_metrics.iter().map(|p| p.texture_bytes).sum();
     let total_glb_bytes: u64 = proxy_metrics.iter().map(|p| p.glb_bytes).sum();
 
+    let subtree_preservation_path = output.join("subtree_preservation.json");
+    let preservation_json = json!(subtree_preservation
+        .iter()
+        .map(|e| json!({
+            "block": e.block,
+            "sourceNodeCount": e.source_node_count,
+            "outputNodeCount": e.output_node_count,
+            "sourceContentCount": e.source_content_count,
+            "outputContentCount": e.output_content_count,
+            "missingUri": e.missing_uri,
+            "structurePreserved": e.structure_preserved,
+        }))
+        .collect::<Vec<_>>());
+    fs::write(
+        &subtree_preservation_path,
+        serde_json::to_string_pretty(&preservation_json)?,
+    )?;
+
     let metrics_path = output.join("rebuild_metrics.json");
     let metrics_json = json!({
-        "phase": 8,
+        "phase": 11,
         "level_counts": tree.level_counts().iter().map(|(l,c)| json!({"level": l, "count": c})).collect::<Vec<_>>(),
         "lock_border": write_opts.lock_border,
+        "synthesize_if_empty": write_opts.synthesize_if_empty,
+        "inject_test_textures": write_opts.inject_test_textures,
         "budgets": {
             "l1_max_triangles": write_opts.l1_max_triangles,
             "l2_max_triangles": write_opts.l2_max_triangles,
@@ -664,6 +991,7 @@ pub fn rebuild_tileset(
             "texture_bytes": total_texture_bytes,
             "glb_bytes": total_glb_bytes,
         },
+        "subtree_preservation": preservation_json,
         "proxies": proxy_metrics.iter().map(|p| json!({
             "node_id": p.node_id,
             "level": p.level,
@@ -687,6 +1015,8 @@ pub fn rebuild_tileset(
         proxies: proxy_metrics,
         tileset_path,
         metrics_path,
+        subtree_preservation_path,
+        subtree_preservation,
         warnings,
         gap: agg_gap,
         texture: agg_texture,
@@ -696,7 +1026,6 @@ pub fn rebuild_tileset(
     })
 }
 
-/// Verify `parent * child_local ≈ child_world` within `eps`.
 pub fn assert_world_transform_invariant(
     parent_world: &Mat4d,
     child_world: &Mat4d,
@@ -716,7 +1045,6 @@ pub fn assert_world_transform_invariant(
     Ok(())
 }
 
-/// Walk a written tileset.json and collect refine / GE / content counts.
 pub fn probe_tileset_structure(tileset_path: &Path) -> Result<TilesetProbe> {
     let text = fs::read_to_string(tileset_path)?;
     let doc: Value = serde_json::from_str(&text)?;
@@ -801,5 +1129,31 @@ mod tests {
         let local = bv_world_to_local(&world_bv, &t);
         let c = local.center().unwrap();
         assert!(c.0.abs() < 1e-9 && c.1.abs() < 1e-9 && c.2.abs() < 1e-9);
+    }
+
+    #[test]
+    fn oriented_box_diagonal_uses_half_axis_vectors() {
+        let s = std::f64::consts::FRAC_1_SQRT_2 * 10.0;
+        let bv = BoundingVolume::from_box([
+            0.0, 0.0, 0.0, s, s, 0.0, -s, s, 0.0, 0.0, 0.0, 5.0,
+        ]);
+        let d = box_diagonal(&bv);
+        // half lengths: 10, 10, 5 → diagonal 2*sqrt(100+100+25)=2*sqrt(225)=30
+        assert!((d - 30.0).abs() < 1e-9, "diag={d}");
+    }
+
+    #[test]
+    fn nested_transforms_rotation_translation() {
+        let parent = Mat4d::translation(100.0, 0.0, 0.0).mul(&Mat4d::rotation_z(0.25));
+        let child_world = parent.mul(&Mat4d::translation(5.0, 3.0, 1.0));
+        let local = relative_transform(&parent, &child_world).unwrap();
+        assert_world_transform_invariant(&parent, &child_world, &local, 1e-8).unwrap();
+        let origin = child_world.transform_point(0.0, 0.0, 0.0);
+        let remount = parent.mul(&local).transform_point(0.0, 0.0, 0.0);
+        let dist = ((origin.0 - remount.0).powi(2)
+            + (origin.1 - remount.1).powi(2)
+            + (origin.2 - remount.2).powi(2))
+        .sqrt();
+        assert!(dist <= 1e-4, "world origin drift {dist}");
     }
 }

@@ -51,7 +51,7 @@ fn phase8_4x4_metrics_report() {
     assert!(report.metrics_path.exists());
     let raw = fs::read_to_string(&report.metrics_path).unwrap();
     let m: serde_json::Value = serde_json::from_str(&raw).unwrap();
-    assert_eq!(m["phase"], 8);
+    assert!(m["phase"].as_u64().unwrap() >= 8);
     assert!(m["lock_border"].as_bool().unwrap());
     assert!(m["gaps"].get("maxGap").is_some());
     assert!(m["gaps"].get("P95Gap").is_some());

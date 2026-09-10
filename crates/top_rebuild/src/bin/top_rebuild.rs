@@ -98,7 +98,7 @@ fn run(args: Args) -> top_rebuild::Result<()> {
         l1_max_triangles: args.l1_max_triangles,
         l2_max_triangles: args.l2_max_triangles,
         target_error_meters: args.target_error,
-        synthesize_if_empty: true,
+        synthesize_if_empty: false,
         box_segments: args.segments,
         source_error_ratio: args.source_error_ratio,
         max_texture_size: args.max_texture_size,

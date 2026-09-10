@@ -1,4 +1,4 @@
-# Architecture rebuild — Phase 0–10 SUMMARY
+# Architecture rebuild — Phase 0–11 SUMMARY
 
 Date: **2026-09-10** Asia/Shanghai  
 Authority: [`../03-v1-architecture-rebuild-plan.md`](../03-v1-architecture-rebuild-plan.md)  
@@ -63,4 +63,7 @@ cargo build -p top_rebuild --bin top_rebuild -p processor
 ```
 
 ## Reports index
-- [phase-0.md](./phase-0.md) … [phase-10.md](./phase-10.md)
+- [phase-0.md](./phase-0.md) … [phase-11.md](./phase-11.md)
+
+## Phase 11 (production readiness)
+Correctness hardening P0-1..P0-4 in `top_rebuild`: no synthetic release path; original Block subtree preservation + `subtree_preservation.json`; coverage frontiers; oriented/world BV. See [phase-11.md](./phase-11.md). Authority: [`../04-v1-production-readiness-plan.md`](../04-v1-production-readiness-plan.md).

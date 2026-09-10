@@ -2,7 +2,7 @@
 name = "top_rebuild"
 version = "0.1.0"
 edition = "2021"
-description = "TopRebuild core — Proxy HLOD Phases 5–10 (release CLI + Processor default)"
+description = "TopRebuild core — Proxy HLOD Phases 5–11 (release CLI + Processor default)"
 license = "Apache-2.0"
 authors = ["GeoForge"]
 
