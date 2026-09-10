@@ -1,0 +1,23 @@
+{
+  "schema": "geoforge.acceptance.thresholds.v1",
+  "spatial": {
+    "horizontalCenterDeviationMaxM": 1.0,
+    "parentCoversChildToleranceM": 0.10,
+    "worldTransformDriftMaxM": 0.001,
+    "glbLocalRoundtripP99MaxM": 0.05,
+    "glbLocalRoundtripMaxM": 0.10
+  },
+  "seam": {
+    "lockBorderDisplacementMaxM": 1e-4,
+    "addedGapP95MaxM": 0.10,
+    "addedGapMaxM": 0.50
+  },
+  "validator": {
+    "layerBNumErrorsMax": 0
+  },
+  "budget": {
+    "downloadSoftMaxGiB": 20,
+    "downloadHardStopGiB": 30,
+    "freeSpaceFactor": 2.5
+  }
+}

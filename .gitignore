@@ -39,3 +39,6 @@ apps/desktop/src-tauri/binaries/*
 !apps/desktop/src-tauri/binaries/README.md
 apps/desktop/src-tauri/resources/bin/**
 !apps/desktop/src-tauri/resources/bin/README.md
+
+# Phase 15 public-data acceptance (never commit datasets)
+.geoforge-testdata/
