@@ -1,4 +1,4 @@
-//! convert-osgb / process-tileset pipelines with temp → validate → commit.
+//! convert-osgb / process-tileset pipelines with sibling staging → validate → atomic commit.
 
 use crate::cancel::CancelFlag;
 use crate::geo::{build_tile_config_json, missing_crs_message, resolve_effective_geo};
@@ -26,7 +26,9 @@ pub fn run_task(config: TaskConfig, cancel: CancelFlag) -> RunOutcome {
     match result {
         Ok(path) => {
             if cancel.is_cancelled() {
+                // Should not succeed after cancel — treat as cancelled and scrub staging.
                 emitter.error("CANCELLED", "task cancelled");
+                scrub_on_abort(&config, true);
                 RunOutcome {
                     exit_code: EXIT_CANCELLED,
                     final_path: None,
@@ -43,17 +45,21 @@ pub fn run_task(config: TaskConfig, cancel: CancelFlag) -> RunOutcome {
         Err(msg) => {
             if cancel.is_cancelled() || msg == "cancelled" {
                 emitter.error("CANCELLED", "task cancelled");
-                // Best-effort cleanup of temp
-                let final_out = PathBuf::from(config.output_path());
-                commit::cleanup_temp(&commit::temp_work_dir(&final_out, &config.task_id));
+                scrub_on_abort(&config, true);
                 RunOutcome {
                     exit_code: EXIT_CANCELLED,
                     final_path: None,
                 }
             } else {
-                emitter.error("FAILED", &msg);
-                let final_out = PathBuf::from(config.output_path());
-                commit::cleanup_temp(&commit::temp_work_dir(&final_out, &config.task_id));
+                let code = if msg.contains("COMMIT_RENAME_FAILED") {
+                    "COMMIT_RENAME_FAILED"
+                } else if msg.contains("COMMIT_REFUSED") {
+                    "COMMIT_REFUSED"
+                } else {
+                    "FAILED"
+                };
+                emitter.error(code, &msg);
+                scrub_on_abort(&config, false);
                 RunOutcome {
                     exit_code: EXIT_FAILED,
                     final_path: None,
@@ -61,6 +67,16 @@ pub fn run_task(config: TaskConfig, cancel: CancelFlag) -> RunOutcome {
             }
         }
     }
+}
+
+fn scrub_on_abort(config: &TaskConfig, interrupted: bool) {
+    let final_out = PathBuf::from(config.output_path());
+    let stage = commit::staging_dir(&final_out, &config.task_id);
+    if interrupted {
+        commit::mark_interrupted(&final_out, &config.task_id);
+    }
+    commit::cleanup_temp(&stage);
+    // Never touch source / never delete final on abort.
 }
 
 fn check_cancel(cancel: &CancelFlag) -> Result<(), String> {
@@ -78,8 +94,11 @@ fn run_convert_osgb(
 ) -> Result<PathBuf, String> {
     let options = config.options_obj();
     let final_out = PathBuf::from(config.output_path());
-    let temp = commit::prepare_temp(&final_out, &config.task_id)?;
-    // Work subdirs inside temp
+    let input = PathBuf::from(config.input_path());
+    refuse_source_overwrite(&input, &final_out)?;
+
+    let temp = commit::prepare_staging(&final_out, &config.task_id)?;
+    // Work subdirs inside sibling staging (never inside final).
     let convert_dir = temp.join("convert");
     std::fs::create_dir_all(&convert_dir).map_err(|e| e.to_string())?;
 
@@ -92,7 +111,10 @@ fn run_convert_osgb(
         .unwrap_or(json!(0));
     emitter.log(&format!(
         "[scan] valid={} tiles={}",
-        scan_result.get("valid").and_then(|v| v.as_bool()).unwrap_or(false),
+        scan_result
+            .get("valid")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
         tile_count
     ));
     if !scan_result
@@ -129,11 +151,7 @@ fn run_convert_osgb(
     if let Some(msg) = missing_crs_message(&effective) {
         return Err(msg);
     }
-    emitter.stage_extra(
-        Stage::Scan,
-        "OSGB validated",
-        json!({ "geo": effective }),
-    );
+    emitter.stage_extra(Stage::Scan, "OSGB validated", json!({ "geo": effective }));
 
     let (cfg_json, notes) = build_tile_config_json(&effective);
     for n in notes {
@@ -168,12 +186,11 @@ fn run_convert_osgb(
     texture::finish_texture(emitter, cancel, &work, &tex_mode)?;
     check_cancel(cancel)?;
 
-    // Stage final content into temp root for commit
+    // Stage final content into staging/staged for commit (still sibling of final).
     let staged = temp.join("staged");
     if staged.exists() {
         let _ = std::fs::remove_dir_all(&staged);
     }
-    // Move work → staged (or rename if already at convert and no rebuild)
     if work != staged {
         std::fs::rename(&work, &staged).or_else(|_| {
             copy_dir(&work, &staged)?;
@@ -185,10 +202,14 @@ fn run_convert_osgb(
     validate::validate_tileset_dir(emitter, &staged)?;
     check_cancel(cancel)?;
 
-    // Move staged up: commit expects temp_dir contents to become final_out
-    // So rename temp's staged to be the only content — simplest: commit `staged` as final
-    commit::commit_rename(emitter, &staged, &final_out)?;
-    // Cleanup leftover temp shell
+    commit::commit_transaction(
+        emitter,
+        &staged,
+        &final_out,
+        &config.task_id,
+        Some(&input),
+    )?;
+    // Leftover staging shell (convert leftovers etc.)
     commit::cleanup_temp(&temp);
 
     Ok(final_out)
@@ -220,13 +241,15 @@ fn run_process_tileset(
     check_cancel(cancel)?;
 
     let final_out = PathBuf::from(config.output_path());
-    let temp = commit::prepare_temp(&final_out, &config.task_id)?;
+    refuse_source_overwrite(&in_dir, &final_out)?;
+
+    let temp = commit::prepare_staging(&final_out, &config.task_id)?;
     let work = temp.join("work");
 
     if want_rebuild {
         rebuild::run_rebuild(emitter, cancel, &in_dir, &work, &rebuild_opts)?;
     } else {
-        // texture-only: copy input tree
+        // texture-only: copy input tree into staging (never mutate source).
         emitter.log(&format!(
             "[texture] copy {} -> {}",
             in_dir.display(),
@@ -245,9 +268,31 @@ fn run_process_tileset(
 
     validate::validate_tileset_dir(emitter, &work)?;
     check_cancel(cancel)?;
-    commit::commit_rename(emitter, &work, &final_out)?;
+    commit::commit_transaction(
+        emitter,
+        &work,
+        &final_out,
+        &config.task_id,
+        Some(&in_dir),
+    )?;
     commit::cleanup_temp(&temp);
     Ok(final_out)
+}
+
+fn refuse_source_overwrite(source: &Path, final_out: &Path) -> Result<(), String> {
+    if source == final_out {
+        return Err(
+            "COMMIT_REFUSED: output must not overwrite source input in place".into(),
+        );
+    }
+    if let (Ok(a), Ok(b)) = (std::fs::canonicalize(source), std::fs::canonicalize(final_out)) {
+        if a == b {
+            return Err(
+                "COMMIT_REFUSED: output must not overwrite source input in place".into(),
+            );
+        }
+    }
+    Ok(())
 }
 
 fn copy_dir(src: &Path, dst: &Path) -> Result<(), String> {
