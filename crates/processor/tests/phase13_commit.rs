@@ -4,7 +4,7 @@
 //! cancel/crash leaves prior final intact; no success on partial.
 
 use processor::{
-    backup_dir, cleanup_staging, commit_transaction, dir_fingerprint, inject_fail_stage_to_final,
+    backup_dir, cleanup_staging, commit_transaction, dir_fingerprint, with_inject_fail_stage_to_final,
     interrupted_marker, mark_interrupted, prepare_staging, recover_interrupted_commit, staging_dir,
     CancelFlag, Emitter, TaskConfig, EXIT_CANCELLED, EXIT_OK,
 };
@@ -95,10 +95,10 @@ fn second_rename_failure_rolls_back_final() {
     let content = stage.join("staged");
     write_tree(&content, "corrupt-candidate");
 
-    inject_fail_stage_to_final(true);
     let em = Emitter::new("taskD");
-    let err = commit_transaction(&em, &content, &final_out, "taskD", None).unwrap_err();
-    inject_fail_stage_to_final(false);
+    let err = with_inject_fail_stage_to_final(|| {
+        commit_transaction(&em, &content, &final_out, "taskD", None).unwrap_err()
+    });
 
     assert!(
         err.contains("COMMIT_RENAME_FAILED"),

@@ -93,35 +93,42 @@ fn resolve_processor_bin() -> Option<PathBuf> {
       return Some(pb);
     }
   }
-  // Next to current exe
+  // Sidecar next to current exe / Tauri resource layouts (Phase 14)
   if let Ok(exe) = std::env::current_exe() {
     if let Some(dir) = exe.parent() {
       for name in ["processor", "processor.exe"] {
-        let cand = dir.join(name);
+        for sub in [
+          PathBuf::from(name),
+          PathBuf::from("resources/bin").join(name),
+          PathBuf::from("bin").join(name),
+        ] {
+          let cand = dir.join(&sub);
+          if cand.is_file() {
+            return Some(cand);
+          }
+        }
+      }
+      // Dev: apps/desktop/src-tauri/target/* → workspace target
+      for rel in [
+        "../../../target/debug/processor",
+        "../../../target/release/processor",
+        "../../binaries/processor",
+      ] {
+        let cand = dir.join(rel);
         if cand.is_file() {
           return Some(cand);
         }
       }
-      // Tauri target/debug sibling of geoforge-desktop — also try repo target
-      let cand = dir.join("../../../target/debug/processor");
-      if cand.is_file() {
-        return Some(cand);
-      }
     }
   }
-  // Repo-relative defaults
-  for cand in [
-    PathBuf::from("/workspace/repos/3dtiles/target/debug/processor"),
-    PathBuf::from("/workspace/repos/3dtiles/target/release/processor"),
-  ] {
-    if cand.is_file() {
-      return Some(cand);
-    }
-  }
-  // Walk up from CWD
+  // Walk up from CWD (developer checkout) — no hardcoded /workspace required
   if let Ok(cwd) = std::env::current_dir() {
-    for anc in cwd.ancestors().take(6) {
-      for sub in ["target/debug/processor", "target/release/processor"] {
+    for anc in cwd.ancestors().take(8) {
+      for sub in [
+        "target/debug/processor",
+        "target/release/processor",
+        "apps/desktop/src-tauri/binaries/processor",
+      ] {
         let cand = anc.join(sub);
         if cand.is_file() {
           return Some(cand);

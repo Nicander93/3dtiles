@@ -32,11 +32,92 @@ pub struct LoadedMesh {
     pub textures: Vec<TextureData>,
 }
 
+/// If the glTF crate rejects unknown `extensionsRequired` (e.g. KHR_techniques_webgl
+/// from older converters), demote those entries to `extensionsUsed` and retry parse.
+pub fn parse_gltf_lenient(glb: &[u8]) -> Result<gltf::Gltf> {
+    match gltf::Gltf::from_slice(glb) {
+        Ok(g) => Ok(g),
+        Err(e) => {
+            let msg = e.to_string();
+            if !msg.contains("Unsupported extension") && !msg.contains("extensionsRequired") {
+                return Err(TopRebuildError::Other(format!("gltf parse: {e}")));
+            }
+            let demoted = demote_unsupported_extensions_required(glb)
+                .map_err(|d| TopRebuildError::Other(format!("gltf parse: {e}; demote failed: {d}")))?;
+            gltf::Gltf::from_slice(&demoted)
+                .map_err(|e2| TopRebuildError::Other(format!("gltf parse after demote: {e2}")))
+        }
+    }
+}
+
+fn demote_unsupported_extensions_required(glb: &[u8]) -> std::result::Result<Vec<u8>, String> {
+    if glb.len() < 20 || &glb[0..4] != b"glTF" {
+        return Err("not glb".into());
+    }
+    let json_len = u32::from_le_bytes(glb[12..16].try_into().unwrap()) as usize;
+    if 20 + json_len > glb.len() {
+        return Err("json chunk truncated".into());
+    }
+    let json_bytes = &glb[20..20 + json_len];
+    let json_str = std::str::from_utf8(json_bytes).map_err(|e| e.to_string())?;
+    let mut root: serde_json::Value =
+        serde_json::from_str(json_str.trim_end()).map_err(|e| e.to_string())?;
+    let req = root
+        .get("extensionsRequired")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if req.is_empty() {
+        return Err("no extensionsRequired to demote".into());
+    }
+    // Keep only extensions the gltf crate is known to accept for required.
+    let known = ["KHR_texture_basisu", "KHR_materials_unlit"];
+    let (keep, demote): (Vec<_>, Vec<_>) = req.into_iter().partition(|e| {
+        e.as_str()
+            .map(|s| known.iter().any(|k| *k == s))
+            .unwrap_or(false)
+    });
+    if demote.is_empty() {
+        return Err("extensionsRequired already only known".into());
+    }
+    let mut used = root
+        .get("extensionsUsed")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    for d in &demote {
+        if !used.iter().any(|u| u == d) {
+            used.push(d.clone());
+        }
+    }
+    root["extensionsUsed"] = serde_json::Value::Array(used);
+    if keep.is_empty() {
+        root.as_object_mut().map(|o| o.remove("extensionsRequired"));
+    } else {
+        root["extensionsRequired"] = serde_json::Value::Array(keep);
+    }
+    let mut new_json = serde_json::to_vec(&root).map_err(|e| e.to_string())?;
+    while new_json.len() % 4 != 0 {
+        new_json.push(b' ');
+    }
+    let bin_start = 20 + json_len;
+    let rest = &glb[bin_start..];
+    let total = 12 + 8 + new_json.len() + rest.len();
+    let mut out = Vec::with_capacity(total);
+    out.extend_from_slice(b"glTF");
+    out.extend_from_slice(&2u32.to_le_bytes());
+    out.extend_from_slice(&(total as u32).to_le_bytes());
+    out.extend_from_slice(&(new_json.len() as u32).to_le_bytes());
+    out.extend_from_slice(b"JSON");
+    out.extend_from_slice(&new_json);
+    out.extend_from_slice(rest);
+    Ok(out)
+}
+
 /// Load mesh + textures from GLB bytes.
 pub fn load_mesh_from_glb(glb: &[u8]) -> Result<LoadedMesh> {
     let (textures, img_to_hash) = extract_textures_from_glb(glb)?;
-    let gltf = gltf::Gltf::from_slice(glb)
-        .map_err(|e| TopRebuildError::Other(format!("gltf parse: {e}")))?;
+    let gltf = parse_gltf_lenient(glb)?;
     let blob = gltf
         .blob
         .as_ref()

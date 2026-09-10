@@ -1,17 +1,17 @@
-# texture_ktx2
+# texture_ktx2 (experiments / regression)
 
-Post-process 3D Tiles textures to KTX2 via vcpkg basisu (KHR_texture_basisu).
+**Release path (Phase 14):** Processor uses a **Rust** tileset walker that calls the
+bundled `basisu` CLI. No Python is required for `texture.mode=ktx2-*`.
 
-Implementation lives in `tools/experiments/desktop_server_py/app/texture_ktx2.py`
-(legacy path was `apps/desktop_server`).
+This directory keeps the Python wrapper for regression only:
 
 ```bash
-# preferred wrapper
-python tools/texture_ktx2/run.py -i TILESET_DIR --mode ktx2-etc1s
-python tools/texture_ktx2/run.py -i TILESET_DIR -o OUT_DIR --mode ktx2-etc1s
+# Release / default
+GEOFORGE_TEXTURE_ENGINE=rust   # default
+# processor process-tileset -i DIR -o OUT --texture ktx2-etc1s
 
-# or run module file directly
-python tools/experiments/desktop_server_py/app/texture_ktx2.py -i TILESET_DIR --mode ktx2-etc1s
+# Experiments fallback only
+GEOFORGE_TEXTURE_ENGINE=python python tools/texture_ktx2/run.py -i TILESET_DIR --mode ktx2-etc1s
 ```
 
-Env: `GEOFORGE_BASISU` overrides basisu path.
+Env: `GEOFORGE_BASISU` overrides basisu path (sidecar preferred).

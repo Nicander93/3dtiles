@@ -33,3 +33,9 @@ apps/desktop/src-tauri/target/
 # Phase 12 acceptance / tooling
 acceptance-results/
 node_modules/
+
+# Phase 14 staged Tauri sidecars (do not commit binaries)
+apps/desktop/src-tauri/binaries/*
+!apps/desktop/src-tauri/binaries/README.md
+apps/desktop/src-tauri/resources/bin/**
+!apps/desktop/src-tauri/resources/bin/README.md

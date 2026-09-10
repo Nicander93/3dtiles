@@ -109,12 +109,30 @@ pub struct TextureMetrics {
     pub warnings: Vec<String>,
 }
 
-/// Locate `basisu` (PATH, GEOFORGE_BASISU, or vcpkg_installed relative to cwd/repo).
+/// Locate `basisu` (GEOFORGE_BASISU → sidecar next to exe → PATH → vcpkg_installed).
+/// Phase 14: `/workspace/...` is only a last-resort developer probe, not required.
 pub fn find_basisu() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("GEOFORGE_BASISU") {
         let pb = PathBuf::from(&p);
         if pb.is_file() {
             return Some(pb);
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            for name in ["basisu", "basisu.exe"] {
+                for sub in [
+                    PathBuf::from(name),
+                    PathBuf::from("resources/bin").join(name),
+                    PathBuf::from("bin").join(name),
+                    PathBuf::from("resources").join(name),
+                ] {
+                    let cand = dir.join(&sub);
+                    if cand.is_file() {
+                        return Some(cand);
+                    }
+                }
+            }
         }
     }
     if let Ok(out) = Command::new("which").arg("basisu").output() {
@@ -132,6 +150,7 @@ pub fn find_basisu() -> Option<PathBuf> {
         "vcpkg_installed/x64-linux/tools/basisu/basisu",
         "../vcpkg_installed/x64-linux/tools/basisu/basisu",
         "../../vcpkg_installed/x64-linux/tools/basisu/basisu",
+        // Developer probe only (not a release requirement):
         "/workspace/repos/3dtiles/vcpkg_installed/x64-linux/tools/basisu/basisu",
     ];
     for c in candidates {
@@ -140,11 +159,9 @@ pub fn find_basisu() -> Option<PathBuf> {
             return Some(pb);
         }
     }
-    // Walk up from CARGO_MANIFEST_DIR-style relative
     let mut cur = std::env::current_dir().ok()?;
     for _ in 0..6 {
-        let p = cur
-            .join("vcpkg_installed/x64-linux/tools/basisu/basisu");
+        let p = cur.join("vcpkg_installed/x64-linux/tools/basisu/basisu");
         if p.is_file() {
             return Some(p);
         }
@@ -362,8 +379,7 @@ pub fn process_textures(
 /// Extract embedded images from a GLB (PNG/JPEG). Returns textures + map of
 /// glTF image index → hash.
 pub fn extract_textures_from_glb(glb: &[u8]) -> Result<(Vec<TextureData>, BTreeMap<usize, String>)> {
-    let gltf = gltf::Gltf::from_slice(glb)
-        .map_err(|e| TopRebuildError::Other(format!("gltf parse: {e}")))?;
+    let gltf = crate::glb::parse_gltf_lenient(glb)?;
     let blob = gltf.blob.as_ref();
     let mut textures = Vec::new();
     let mut index_to_hash = BTreeMap::new();

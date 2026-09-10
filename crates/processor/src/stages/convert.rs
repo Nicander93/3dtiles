@@ -45,20 +45,20 @@ pub fn run_convert(
         emitter.log(&format!("[convert] -c {cfg}"));
     }
 
-    // Native KTX2 only when explicitly requested and not using postprocess path.
-    // Phase 3 happy-path smoke uses texture.mode=keep; KTX2 still via Python postprocess stage.
+    // Native KTX2 only when explicitly requested. Default release path uses Rust+basisu
+    // texture stage (Phase 14); Python is experiments-only.
     let texture = options.get("texture").cloned().unwrap_or(Value::Null);
     let mode = crate::stages::texture::normalize_mode(
         texture.get("mode").and_then(|v| v.as_str()),
     );
     if mode != "keep" {
-        // Prefer postprocess (basisu) — do not pass native flag unless GEOFORGE_NATIVE_KTX2=1
+        // Prefer Rust postprocess (basisu sidecar) — native flag only with GEOFORGE_NATIVE_KTX2=1
         if std::env::var("GEOFORGE_NATIVE_KTX2").ok().as_deref() == Some("1") {
             cmd.push("--enable-texture-compress".into());
             emitter.log(&format!("[convert] texture flag: --enable-texture-compress (mode={mode})"));
         } else {
             emitter.log(&format!(
-                "[convert] mode={mode}: convert without native KTX2; texture stage may post-process"
+                "[convert] mode={mode}: convert without native KTX2; texture stage may post-process (rust+basisu)"
             ));
         }
     }

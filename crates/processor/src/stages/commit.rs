@@ -16,17 +16,58 @@ use crate::protocol::{Emitter, Stage};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, MutexGuard};
+use std::cell::Cell;
 
 /// Test-only: force the stage→final rename to fail (after backup moved).
 static INJECT_FAIL_STAGE_TO_FINAL: AtomicBool = AtomicBool::new(false);
+/// Serializes commit_transaction in-process (avoids inject-flag races under cargo test -j).
+static COMMIT_SERIAL: Mutex<()> = Mutex::new(());
 
-/// Enable/disable injected stage→final rename failure (integration + unit tests).
+thread_local! {
+    static COMMIT_LOCK_DEPTH: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Enable/disable injected stage→final rename failure.
 pub fn inject_fail_stage_to_final(fail: bool) {
     INJECT_FAIL_STAGE_TO_FINAL.store(fail, Ordering::SeqCst);
 }
 
+/// Run `f` with inject-fail enabled under the commit serial lock.
+pub fn with_inject_fail_stage_to_final<R>(f: impl FnOnce() -> R) -> R {
+    let _guard = acquire_commit_serial();
+    INJECT_FAIL_STAGE_TO_FINAL.store(true, Ordering::SeqCst);
+    let out = f();
+    INJECT_FAIL_STAGE_TO_FINAL.store(false, Ordering::SeqCst);
+    out
+}
+
 fn stage_rename_injected_fail() -> bool {
     INJECT_FAIL_STAGE_TO_FINAL.load(Ordering::SeqCst)
+}
+
+#[allow(dead_code)]
+struct CommitSerialGuard(Option<MutexGuard<'static, ()>>);
+impl Drop for CommitSerialGuard {
+    fn drop(&mut self) {
+        COMMIT_LOCK_DEPTH.with(|d| {
+            let v = d.get().saturating_sub(1);
+            d.set(v);
+        });
+    }
+}
+
+fn acquire_commit_serial() -> CommitSerialGuard {
+    COMMIT_LOCK_DEPTH.with(|d| {
+        if d.get() > 0 {
+            d.set(d.get() + 1);
+            CommitSerialGuard(None)
+        } else {
+            let g = COMMIT_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+            d.set(1);
+            CommitSerialGuard(Some(g))
+        }
+    })
 }
 
 /// `<output-parent>/.geoforge-stage-<task-id>/`
@@ -140,6 +181,8 @@ pub fn commit_transaction(
     task_id: &str,
     source: Option<&Path>,
 ) -> Result<(), String> {
+    let _commit_serial = acquire_commit_serial();
+
     emitter.stage(Stage::Commit, "Committing output (atomic rename)");
 
     assert_safe_commit_paths(stage_content, final_output, source)?;
@@ -439,10 +482,10 @@ mod unit_tests {
         let content = stage.join("staged");
         write_tree(&content, "should-not-land");
 
-        inject_fail_stage_to_final(true);
         let em = Emitter::new("t4");
-        let err = commit_transaction(&em, &content, &final_out, "t4", None).unwrap_err();
-        inject_fail_stage_to_final(false);
+        let err = with_inject_fail_stage_to_final(|| {
+            commit_transaction(&em, &content, &final_out, "t4", None).unwrap_err()
+        });
 
         assert!(err.contains("COMMIT_RENAME_FAILED"), "{err}");
         assert!(final_out.exists(), "final must be restored");

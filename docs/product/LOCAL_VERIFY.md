@@ -12,7 +12,7 @@ Repo may include `apps/desktop/dist` for the UI.
 
 - Node 18+ for `apps/desktop`
 - Rust toolchain for `processor` + `geoforge-desktop` (Tauri)
-- Optional Python venv for rebuild baseline / KTX2 (`tools/experiments/rebuild_top_py`, `tools/texture_ktx2`)
+- Optional Python venv **only** for experiments (`GEOFORGE_REBUILD_ENGINE=python` / `GEOFORGE_TEXTURE_ENGINE=python`). Release path: Rust `top_rebuild` + Rust KTX2 walker + `basisu` sidecar.
 - Converter binary outside repo; set `GEOFORGE_3DTILE` / runtime env. Prefer ktx2+basisu wrapper.
 
 ## 3. Sample
@@ -58,8 +58,8 @@ Task DB and preview cache live under `.geoforge` (gitignored).
 |------|------|
 | missing web dist | `cd apps/desktop && npm run build` |
 | converter missing | set `GEOFORGE_RUNTIME` / `GEOFORGE_3DTILE` |
-| rebuild script missing | `tools/experiments/rebuild_top_py/rebuild_top.py` or `GEOFORGE_REBUILD_TOP` |
-| ktx2 grayed | check wrapper and basisu (`tools/texture_ktx2`) |
+| top_rebuild missing | `cargo build -p top_rebuild --bin top_rebuild` or `GEOFORGE_TOP_REBUILD` / sidecar |
+| ktx2 grayed | check `basisu` sidecar (`GEOFORGE_BASISU` / `scripts/release/stage_sidecars.sh`) |
 
 ## Related
 

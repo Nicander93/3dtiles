@@ -470,8 +470,8 @@ fn regex_lite_tile() -> impl Fn(&str) -> bool {
 
 #[tauri::command]
 pub fn health(state: State<'_, AppState>) -> Result<Value, String> {
-  let convert = std::env::var("GEOFORGE_3DTILE")
-    .unwrap_or_else(|_| "/workspace/runtime/3dtile-bin/run.sh".into());
+  let convert = resolve_convert_path();
+  let basisu_path = resolve_basisu_path();
   let processor = ProcessManager::processor_available();
   Ok(json!({
     "ok": true,
@@ -491,35 +491,35 @@ pub fn health(state: State<'_, AppState>) -> Result<Value, String> {
     },
     "texture": {
       "enableTextureCompress": false,
-      "ktx2Etc1s": true,
-      "ktx2Uastc": true,
+      "ktx2Etc1s": basisu_path.is_some(),
+      "ktx2Uastc": basisu_path.is_some(),
       "processTilesetTexture": true,
-      "postprocessBasisu": PathBuf::from(
-        "/workspace/repos/3dtiles/vcpkg_installed/x64-linux/tools/basisu/basisu"
-      ).is_file(),
-      "basisuPath": "/workspace/repos/3dtiles/vcpkg_installed/x64-linux/tools/basisu/basisu",
+      "postprocessBasisu": basisu_path.is_some(),
+      "basisuPath": basisu_path.as_ref().map(|p| p.to_string_lossy().to_string()),
       "notes": [
-        "Phase 3: KTX2 still via Python texture_ktx2 / basisu when requested; keep mode needs no Python."
+        "Phase 14: KTX2 via Rust walker + basisu sidecar; Python only with GEOFORGE_TEXTURE_ENGINE=python.",
+        "keep / convert+rebuild need no Python when sidecars are present."
       ],
     },
+    "pythonRequired": false,
+    "rebuildEngineDefault": "rust",
   }))
 }
 
 #[tauri::command]
 pub fn capabilities() -> Result<Value, String> {
-  let basisu = PathBuf::from(
-    "/workspace/repos/3dtiles/vcpkg_installed/x64-linux/tools/basisu/basisu",
-  );
-  let basisu_ok = basisu.is_file()
-    || std::env::var("GEOFORGE_BASISU").map(|p| PathBuf::from(p).is_file()).unwrap_or(false);
+  let basisu = resolve_basisu_path();
+  let basisu_ok = basisu.is_some();
+  let convert = resolve_convert_path();
   let modes = vec![
-    json!({ "mode": "keep", "supported": true, "cliFlags": [], "postprocess": false }),
+    json!({ "mode": "keep", "supported": true, "cliFlags": [], "postprocess": false, "python": false }),
     json!({
       "mode": "ktx2-etc1s",
       "supported": basisu_ok,
       "cliFlags": [],
       "postprocess": true,
-      "reason": if basisu_ok { Value::Null } else { json!("basisu not found") },
+      "python": false,
+      "reason": if basisu_ok { Value::Null } else { json!("basisu sidecar not found") },
       "processTileset": { "mode": "ktx2-etc1s", "supported": basisu_ok },
     }),
     json!({
@@ -527,7 +527,8 @@ pub fn capabilities() -> Result<Value, String> {
       "supported": basisu_ok,
       "cliFlags": [],
       "postprocess": true,
-      "reason": if basisu_ok { Value::Null } else { json!("basisu not found") },
+      "python": false,
+      "reason": if basisu_ok { Value::Null } else { json!("basisu sidecar not found") },
       "processTileset": { "mode": "ktx2-uastc", "supported": basisu_ok },
     }),
     json!({
@@ -535,24 +536,102 @@ pub fn capabilities() -> Result<Value, String> {
       "supported": basisu_ok,
       "cliFlags": [],
       "postprocess": true,
-      "reason": if basisu_ok { Value::Null } else { json!("basisu not found") },
+      "python": false,
+      "reason": if basisu_ok { Value::Null } else { json!("basisu sidecar not found") },
       "processTileset": { "mode": "ktx2", "supported": basisu_ok },
     }),
   ];
   Ok(json!({
     "ok": true,
+    "pythonRequired": false,
+    "rebuildEngineDefault": "rust",
     "convert": {
-      "bin": std::env::var("GEOFORGE_3DTILE").unwrap_or_else(|_| "/workspace/runtime/3dtile-bin/run.sh".into()),
-      "exists": PathBuf::from(
-        std::env::var("GEOFORGE_3DTILE").unwrap_or_else(|_| "/workspace/runtime/3dtile-bin/run.sh".into())
-      ).is_file(),
+      "bin": convert,
+      "exists": PathBuf::from(&convert).is_file(),
       "processor": ProcessManager::processor_available(),
     },
     "textureModes": modes,
     "aliases": { "ktx2": "ktx2-etc1s" },
     "postprocessBasisu": {
       "available": basisu_ok,
-      "path": if basisu_ok { json!(basisu.to_string_lossy()) } else { Value::Null },
+      "path": basisu.as_ref().map(|p| json!(p.to_string_lossy())).unwrap_or(Value::Null),
+      "engine": "rust+basisu",
     },
   }))
+}
+
+fn resolve_convert_path() -> String {
+  if let Ok(p) = std::env::var("GEOFORGE_3DTILE") {
+    return p;
+  }
+  if let Ok(exe) = std::env::current_exe() {
+    if let Some(dir) = exe.parent() {
+      for rel in [
+        "resources/bin/run.sh",
+        "resources/bin/_3dtile",
+        "bin/_3dtile",
+        "_3dtile",
+        "3dtile-bin/run.sh",
+      ] {
+        let cand = dir.join(rel);
+        if cand.is_file() {
+          return cand.to_string_lossy().into_owned();
+        }
+      }
+    }
+  }
+  if let Ok(cwd) = std::env::current_dir() {
+    for anc in cwd.ancestors().take(8) {
+      for rel in [
+        "apps/desktop/src-tauri/resources/bin/run.sh",
+        "apps/desktop/src-tauri/resources/bin/_3dtile",
+        ".runtime/3dtile-bin/run.sh",
+      ] {
+        let cand = anc.join(rel);
+        if cand.is_file() {
+          return cand.to_string_lossy().into_owned();
+        }
+      }
+    }
+  }
+  // Last-resort developer probe (optional)
+  let dev = PathBuf::from("/workspace/runtime/3dtile-bin/run.sh");
+  if dev.is_file() {
+    return dev.to_string_lossy().into_owned();
+  }
+  "_3dtile".into()
+}
+
+fn resolve_basisu_path() -> Option<PathBuf> {
+  if let Ok(p) = std::env::var("GEOFORGE_BASISU") {
+    let pb = PathBuf::from(p);
+    if pb.is_file() {
+      return Some(pb);
+    }
+  }
+  if let Ok(exe) = std::env::current_exe() {
+    if let Some(dir) = exe.parent() {
+      for rel in ["basisu", "basisu.exe", "resources/bin/basisu", "bin/basisu"] {
+        let cand = dir.join(rel);
+        if cand.is_file() {
+          return Some(cand);
+        }
+      }
+    }
+  }
+  if let Ok(cwd) = std::env::current_dir() {
+    for anc in cwd.ancestors().take(8) {
+      for rel in [
+        "vcpkg_installed/x64-linux/tools/basisu/basisu",
+        "apps/desktop/src-tauri/binaries/basisu",
+        "apps/desktop/src-tauri/resources/bin/basisu",
+      ] {
+        let cand = anc.join(rel);
+        if cand.is_file() {
+          return Some(cand);
+        }
+      }
+    }
+  }
+  None
 }
