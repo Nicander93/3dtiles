@@ -159,6 +159,14 @@ fn run_rebuild_rust(
     {
         cmd.push("--inject-test-textures".into());
     }
+    if rebuild
+        .get("synthesizeIfEmpty")
+        .or_else(|| rebuild.get("synthesize_if_empty"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        cmd.push("--synthesize-if-empty".into());
+    }
 
     emitter.stage(
         Stage::Rebuild,

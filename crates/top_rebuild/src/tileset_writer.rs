@@ -53,7 +53,7 @@ impl Default for WriteOptions {
             l1_max_triangles: 4_000,
             l2_max_triangles: 2_000,
             target_error_meters: 2.0,
-            synthesize_if_empty: true,
+            synthesize_if_empty: false,
             box_segments: 6,
             source_error_ratio: DEFAULT_SOURCE_ERROR_RATIO,
             max_texture_size: 1024,
@@ -62,7 +62,7 @@ impl Default for WriteOptions {
             enable_ktx2: false,
             lock_border: true,
             strict_budget: false,
-            inject_test_textures: true,
+            inject_test_textures: false,
             gap_warn_meters: 1.0,
         }
     }
@@ -110,14 +110,14 @@ struct NodePayload {
     external_tileset_uri: Option<String>,
 }
 
-/// AABB diagonal length from Cesium box (center + half-axes).
+/// Space diagonal of the OBB (twice the root-sum-square of half-axis lengths).
 pub fn box_diagonal(bv: &BoundingVolume) -> f64 {
     let Some(b) = bv.box_values else {
         return 0.0;
     };
-    let hx = b[3].abs();
-    let hy = b[7].abs();
-    let hz = b[11].abs();
+    let hx = (b[3] * b[3] + b[4] * b[4] + b[5] * b[5]).sqrt();
+    let hy = (b[6] * b[6] + b[7] * b[7] + b[8] * b[8]).sqrt();
+    let hz = (b[9] * b[9] + b[10] * b[10] + b[11] * b[11]).sqrt();
     2.0 * (hx * hx + hy * hy + hz * hz).sqrt()
 }
 
@@ -202,13 +202,6 @@ fn bv_to_json(bv: &BoundingVolume) -> Value {
     }
 }
 
-fn content_usable(path: &Path) -> bool {
-    match fs::metadata(path) {
-        Ok(m) => m.len() > 32,
-        Err(_) => false,
-    }
-}
-
 fn synthesize_box_glb_at(
     cx: f64,
     cy: f64,
@@ -225,14 +218,66 @@ fn synthesize_box_glb_at(
     write_glb(&[prim])
 }
 
-fn ensure_leaf_content(
+fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_all(&from, &to)?;
+        } else {
+            fs::copy(&from, &to)?;
+        }
+    }
+    Ok(())
+}
+
+fn content_rel(block: &SourceBlock, content_path: &Path) -> PathBuf {
+    if let Some(ts) = &block.source_tileset {
+        if let Some(dir) = ts.parent() {
+            if let Ok(rel) = content_path.strip_prefix(dir) {
+                return rel.to_path_buf();
+            }
+        }
+    }
+    content_path
+        .file_name()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(format!("{}.b3dm", block.id)))
+}
+
+fn probe_mesh_content(path: &Path) -> Result<()> {
+    if !path.exists() {
+        return Err(TopRebuildError::ContentMissing(path.display().to_string()));
+    }
+    let len = fs::metadata(path)?.len();
+    if len == 0 {
+        return Err(TopRebuildError::ContentMissing(path.display().to_string()));
+    }
+    let loaded = crate::b3dm::load_content(path).map_err(|e| {
+        TopRebuildError::ContentUnreadable(format!("{}: {e}", path.display()))
+    })?;
+    crate::glb::load_mesh_from_glb(&loaded.glb).map_err(|e| {
+        let msg = e.to_string();
+        if msg.contains("unsupported") {
+            TopRebuildError::UnsupportedContent(format!("{}: {msg}", path.display()))
+        } else {
+            TopRebuildError::ContentUnreadable(format!("{}: {msg}", path.display()))
+        }
+    })?;
+    Ok(())
+}
+
+fn write_synthesized_content(
+    dest: &Path,
     block: &SourceBlock,
-    sel: &Selection,
-    out_block_dir: &Path,
+    i: usize,
     opts: &WriteOptions,
-) -> Result<(PathBuf, f64)> {
-    fs::create_dir_all(out_block_dir)?;
-    let rep = &block.representations[sel.representation_index];
+) -> Result<()> {
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)?;
+    }
     let (cx, cy, cz) = block.bounds.center().unwrap_or((0.0, 0.0, 0.0));
     let ((min_x, min_y, min_z), (max_x, max_y, max_z)) = block
         .bounds
@@ -241,119 +286,106 @@ fn ensure_leaf_content(
     let hx = ((max_x - min_x) * 0.4).max(5.0) as f32;
     let hy = ((max_y - min_y) * 0.4).max(5.0) as f32;
     let hz = ((max_z - min_z) * 0.4).max(2.0) as f32;
+    let segs = if i == 0 {
+        opts.box_segments
+    } else {
+        opts.box_segments.saturating_add(2)
+    };
+    let scale = if i == 0 { 1.0 } else { 0.85 };
+    let glb = if opts.inject_test_textures {
+        let rgb = (
+            (40 + (block.grid_x.unwrap_or(0) as u8).wrapping_mul(30)),
+            (80 + (block.grid_y.unwrap_or(0) as u8).wrapping_mul(20)),
+            160u8,
+        );
+        let local = make_textured_box_glb(
+            hx * scale,
+            hy * scale,
+            hz * scale,
+            segs,
+            &format!("leaf:{}", block.id),
+            rgb,
+            64,
+        )?;
+        let mesh = crate::glb::load_mesh_from_glb(&local)?;
+        let mut prims = mesh.primitives;
+        let place = Mat4d::translation(cx, cy, cz);
+        for p in &mut prims {
+            transform_primitive(p, &place);
+        }
+        let (proc, _) = crate::texture::process_textures(&mesh.textures, 64, 0, false, None)?;
+        crate::glb::write_glb_with_textures(&prims, &proc)?
+    } else {
+        synthesize_box_glb_at(
+            cx,
+            cy,
+            cz,
+            hx * scale,
+            hy * scale,
+            hz * scale,
+            segs,
+            &format!("leaf:{}", block.id),
+        )?
+    };
+    let bytes = if dest
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("glb"))
+        .unwrap_or(false)
+    {
+        glb
+    } else {
+        pack_glb_as_b3dm(&glb)?
+    };
+    fs::write(dest, bytes)?;
+    Ok(())
+}
+
+fn ensure_leaf_content(
+    block: &SourceBlock,
+    sel: &Selection,
+    out_block_dir: &Path,
+    opts: &WriteOptions,
+) -> Result<(PathBuf, f64)> {
+    if let Some(ts) = &block.source_tileset {
+        let src_dir = ts.parent().ok_or_else(|| {
+            TopRebuildError::InvalidTileset(format!("block tileset has no parent: {}", ts.display()))
+        })?;
+        copy_dir_all(src_dir, out_block_dir)?;
+        if !out_block_dir.join("tileset.json").is_file() {
+            return Err(TopRebuildError::InvalidTileset(format!(
+                "copied block {} missing tileset.json",
+                block.id
+            )));
+        }
+    } else {
+        fs::create_dir_all(out_block_dir)?;
+        return Err(TopRebuildError::InvalidTileset(format!(
+            "block {} has no original tileset to preserve",
+            block.id
+        )));
+    }
 
     for (i, r) in block.representations.iter().enumerate() {
-        let file_name = r
-            .content_path
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| format!("{}.b3dm", block.id));
-        let dest = out_block_dir.join(&file_name);
-        let src_ok = content_usable(&r.content_path);
-        if src_ok {
-            fs::copy(&r.content_path, &dest)?;
-        } else if opts.synthesize_if_empty {
-            let segs = if i == 0 {
-                opts.box_segments
-            } else {
-                opts.box_segments.saturating_add(2)
-            };
-            let scale = if i == 0 { 1.0 } else { 0.85 };
-            let glb = if opts.inject_test_textures {
-                let rgb = (
-                    (40 + (block.grid_x.unwrap_or(0) as u8).wrapping_mul(30)),
-                    (80 + (block.grid_y.unwrap_or(0) as u8).wrapping_mul(20)),
-                    160u8,
-                );
-                let local = make_textured_box_glb(
-                    hx * scale,
-                    hy * scale,
-                    hz * scale,
-                    segs,
-                    &format!("leaf:{}", block.id),
-                    rgb,
-                    64,
-                )?;
-                // place into world
-                let mesh = crate::glb::load_mesh_from_glb(&local)?;
-                let mut prims = mesh.primitives;
-                let place = Mat4d::translation(cx, cy, cz);
-                for p in &mut prims {
-                    transform_primitive(p, &place);
+        let dest = out_block_dir.join(content_rel(block, &r.content_path));
+        match probe_mesh_content(&r.content_path) {
+            Ok(()) => {
+                if !dest.is_file() {
+                    if let Some(parent) = dest.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    fs::copy(&r.content_path, &dest)?;
                 }
-                // re-encode with same textures
-                let (proc, _) = crate::texture::process_textures(
-                    &mesh.textures,
-                    64,
-                    0,
-                    false,
-                    None,
-                )?;
-                crate::glb::write_glb_with_textures(&prims, &proc)?
-            } else {
-                synthesize_box_glb_at(
-                    cx,
-                    cy,
-                    cz,
-                    hx * scale,
-                    hy * scale,
-                    hz * scale,
-                    segs,
-                    &format!("leaf:{}", block.id),
-                )?
-            };
-            let bytes = pack_glb_as_b3dm(&glb)?;
-            fs::write(&dest, bytes)?;
-        } else {
-            return Err(TopRebuildError::Other(format!(
-                "empty content and synthesize disabled: {}",
-                r.content_path.display()
-            )));
+            }
+            Err(_) if opts.synthesize_if_empty => {
+                write_synthesized_content(&dest, block, i, opts)?;
+            }
+            Err(e) => return Err(e),
         }
     }
 
-    let sel_name = rep
-        .content_path
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| format!("{}.b3dm", block.id));
-    let sel_path = out_block_dir.join(&sel_name);
-
-    let coarse_name = block.representations[0]
-        .content_path
-        .file_name()
-        .unwrap()
-        .to_string_lossy()
-        .to_string();
-    let mut root_node = json!({
-        "boundingVolume": bv_to_json(&block.bounds),
-        "geometricError": block.representations[0].geometric_error_meters,
-        "refine": "REPLACE",
-        "content": { "uri": format!("./{coarse_name}") }
-    });
-    if block.representations.len() > 1 {
-        let fine_name = block.representations[1]
-            .content_path
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        root_node["children"] = json!([{
-            "boundingVolume": bv_to_json(&block.bounds),
-            "geometricError": block.representations[1].geometric_error_meters,
-            "content": { "uri": format!("./{fine_name}") }
-        }]);
-    }
-    let tileset = json!({
-        "asset": { "version": "1.0", "gltfUpAxis": "Z" },
-        "geometricError": block.representations[0].geometric_error_meters,
-        "root": root_node
-    });
-    fs::write(
-        out_block_dir.join("tileset.json"),
-        serde_json::to_string_pretty(&tileset)?,
-    )?;
-
+    let sel_rep = &block.representations[sel.representation_index];
+    let sel_path = out_block_dir.join(content_rel(block, &sel_rep.content_path));
     Ok((sel_path, sel.source_error))
 }
 
@@ -459,6 +491,11 @@ pub fn rebuild_tileset(
 
     let mut payloads: HashMap<String, NodePayload> = HashMap::new();
     let mut warnings = Vec::new();
+    for (_, s) in &selections {
+        if let Some(w) = &s.warning {
+            warnings.push(w.clone());
+        }
+    }
 
     for node in &tree.levels[0] {
         let block_id = node.id.strip_prefix("L0_").unwrap_or(&node.id);
@@ -477,8 +514,9 @@ pub fn rebuild_tileset(
             NodePayload {
                 content_path,
                 content_uri: external_uri.clone(),
-                // Mesh authored in world space; tile world frame is identity.
-                world_transform: Mat4d::identity(),
+                world_transform: block.representations[sel.representation_index]
+                    .world_transform
+                    .clone(),
                 geometric_error: ge,
                 bounds: node.bounds.clone(),
                 node: node.clone(),

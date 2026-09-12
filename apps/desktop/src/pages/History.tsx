@@ -76,8 +76,7 @@ export function History() {
     <div className="page">
       <div className="page-header">
         <div>
-          <h1>处理记录</h1>
-          <p>历史任务列表；「重新执行」克隆参数并 POST 新任务</p>
+          <h1>记录</h1>
         </div>
         <button className="btn" type="button" onClick={() => void refresh()}>
           刷新

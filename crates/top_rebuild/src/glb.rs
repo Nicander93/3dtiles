@@ -6,6 +6,8 @@ use crate::types::Mat4d;
 use byteorder::{LittleEndian, WriteBytesExt};
 use std::collections::BTreeMap;
 
+const KHR_TECHNIQUES_WEBGL: &str = "KHR_techniques_webgl";
+
 /// One triangulated primitive in a local (already scene-expanded) frame.
 #[derive(Clone, Debug, Default)]
 pub struct LoadedPrimitive {
@@ -32,10 +34,102 @@ pub struct LoadedMesh {
     pub textures: Vec<TextureData>,
 }
 
+fn parse_glb_json(glb: &[u8]) -> Result<(serde_json::Value, usize)> {
+    if glb.len() < 20 || &glb[0..4] != b"glTF" || &glb[16..20] != b"JSON" {
+        return Err(TopRebuildError::Other("invalid GLB header".into()));
+    }
+    let json_len = u32::from_le_bytes(glb[12..16].try_into().unwrap()) as usize;
+    let json_end = 20usize
+        .checked_add(json_len)
+        .filter(|end| *end <= glb.len())
+        .ok_or_else(|| TopRebuildError::Other("GLB JSON chunk out of bounds".into()))?;
+    let root = serde_json::from_slice(&glb[20..json_end])
+        .map_err(|e| TopRebuildError::Other(format!("GLB JSON parse: {e}")))?;
+    Ok((root, json_end))
+}
+
+fn replace_glb_json(
+    glb: &[u8],
+    old_json_end: usize,
+    root: &serde_json::Value,
+) -> Result<Vec<u8>> {
+    let mut json = serde_json::to_vec(root)?;
+    while json.len() % 4 != 0 {
+        json.push(b' ');
+    }
+    let total_len = 20usize
+        .checked_add(json.len())
+        .and_then(|len| len.checked_add(glb.len().saturating_sub(old_json_end)))
+        .ok_or_else(|| TopRebuildError::Other("GLB size overflow".into()))?;
+    let total_len = u32::try_from(total_len)
+        .map_err(|_| TopRebuildError::Other("GLB exceeds 4 GiB".into()))?;
+    let json_len = u32::try_from(json.len())
+        .map_err(|_| TopRebuildError::Other("GLB JSON exceeds 4 GiB".into()))?;
+
+    let mut out = Vec::with_capacity(total_len as usize);
+    out.extend_from_slice(&glb[..8]);
+    out.write_u32::<LittleEndian>(total_len)?;
+    out.write_u32::<LittleEndian>(json_len)?;
+    out.extend_from_slice(b"JSON");
+    out.extend_from_slice(&json);
+    out.extend_from_slice(&glb[old_json_end..]);
+    Ok(out)
+}
+
+fn reader_compatible_glb(glb: &[u8]) -> Result<Vec<u8>> {
+    let (mut root, json_end) = parse_glb_json(glb)?;
+    let Some(required) = root
+        .get_mut("extensionsRequired")
+        .and_then(|value| value.as_array_mut())
+    else {
+        return Ok(glb.to_vec());
+    };
+    let before = required.len();
+    required.retain(|value| value.as_str() != Some(KHR_TECHNIQUES_WEBGL));
+    if required.len() == before {
+        return Ok(glb.to_vec());
+    }
+    replace_glb_json(glb, json_end, &root)
+}
+
+fn legacy_material_images(glb: &[u8]) -> Result<BTreeMap<usize, usize>> {
+    let (root, _) = parse_glb_json(glb)?;
+    let textures = root
+        .get("textures")
+        .and_then(|value| value.as_array())
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let mut result = BTreeMap::new();
+
+    for (material_index, material) in root
+        .get("materials")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .enumerate()
+    {
+        let diffuse = material
+            .pointer("/extensions/KHR_techniques_webgl/values/u_diffuse");
+        let texture_index = diffuse
+            .and_then(|value| value.as_u64())
+            .or_else(|| diffuse.and_then(|value| value.get("index"))?.as_u64());
+        let image_index = texture_index
+            .and_then(|index| textures.get(index as usize))
+            .and_then(|texture| texture.get("source"))
+            .and_then(|value| value.as_u64());
+        if let Some(image_index) = image_index {
+            result.insert(material_index, image_index as usize);
+        }
+    }
+    Ok(result)
+}
+
 /// Load mesh + textures from GLB bytes.
 pub fn load_mesh_from_glb(glb: &[u8]) -> Result<LoadedMesh> {
-    let (textures, img_to_hash) = extract_textures_from_glb(glb)?;
-    let gltf = gltf::Gltf::from_slice(glb)
+    let glb = reader_compatible_glb(glb)?;
+    let legacy_material_images = legacy_material_images(&glb)?;
+    let (textures, img_to_hash) = extract_textures_from_glb(&glb)?;
+    let gltf = gltf::Gltf::from_slice(&glb)
         .map_err(|e| TopRebuildError::Other(format!("gltf parse: {e}")))?;
     let blob = gltf
         .blob
@@ -45,12 +139,13 @@ pub fn load_mesh_from_glb(glb: &[u8]) -> Result<LoadedMesh> {
     // Map material index → texture hash (baseColorTexture)
     let mut mat_tex: BTreeMap<usize, String> = BTreeMap::new();
     for (mi, mat) in gltf.document.materials().enumerate() {
-        if let Some(info) = mat.pbr_metallic_roughness().base_color_texture() {
-            let tex = info.texture();
-            let img_idx = tex.source().index();
-            if let Some(h) = img_to_hash.get(&img_idx) {
-                mat_tex.insert(mi, h.clone());
-            }
+        let image_index = mat
+            .pbr_metallic_roughness()
+            .base_color_texture()
+            .map(|info| info.texture().source().index())
+            .or_else(|| legacy_material_images.get(&mi).copied());
+        if let Some(hash) = image_index.and_then(|index| img_to_hash.get(&index)) {
+            mat_tex.insert(mi, hash.clone());
         }
     }
 
@@ -171,8 +266,8 @@ fn read_primitive(
     };
 
     if prim.mode() != gltf::mesh::Mode::Triangles {
-        return Err(TopRebuildError::Other(format!(
-            "unsupported primitive mode {:?}",
+        return Err(TopRebuildError::UnsupportedContent(format!(
+            "primitive mode {:?}",
             prim.mode()
         )));
     }
@@ -621,6 +716,32 @@ mod tests {
         let mesh = load_mesh_from_glb(&glb).unwrap();
         assert!(!mesh.textures.is_empty());
         assert!(mesh.primitives[0].uvs.is_some());
+        assert!(mesh.primitives[0].texture_hash.is_some());
+    }
+
+    #[test]
+    fn legacy_techniques_webgl_diffuse_texture_loads() {
+        let glb =
+            make_textured_box_glb(2.0, 2.0, 1.0, 2, "mat0:1,1,1,1", (80, 120, 160), 32)
+                .unwrap();
+        let (mut root, json_end) = parse_glb_json(&glb).unwrap();
+        root["extensionsUsed"] = serde_json::json!([KHR_TECHNIQUES_WEBGL]);
+        root["extensionsRequired"] = serde_json::json!([KHR_TECHNIQUES_WEBGL]);
+        root["extensions"] = serde_json::json!({ (KHR_TECHNIQUES_WEBGL): {} });
+        root["materials"][0]["pbrMetallicRoughness"]
+            .as_object_mut()
+            .unwrap()
+            .remove("baseColorTexture");
+        root["materials"][0]["extensions"] = serde_json::json!({
+            (KHR_TECHNIQUES_WEBGL): {
+                "technique": 0,
+                "values": { "u_diffuse": { "index": 0, "texCoord": 0 } }
+            }
+        });
+        let legacy = replace_glb_json(&glb, json_end, &root).unwrap();
+
+        let mesh = load_mesh_from_glb(&legacy).unwrap();
+        assert_eq!(mesh.textures.len(), 1);
         assert!(mesh.primitives[0].texture_hash.is_some());
     }
 

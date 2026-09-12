@@ -94,8 +94,7 @@ export function TilesPreview() {
     <div className="page">
       <div className="page-header">
         <div>
-          <h1>3D Tiles预览</h1>
-          <p>选择成果或填写 tileset URL，在 Cesium 中查看本地成果</p>
+          <h1>预览</h1>
         </div>
         <div className="row" style={{ gap: 8 }}>
           <Link className="btn" to="/tiles/process">

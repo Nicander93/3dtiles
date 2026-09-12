@@ -26,6 +26,15 @@ pub enum TopRebuildError {
     #[error("budget exceeded: {0}")]
     BudgetExceeded(String),
 
+    #[error("CONTENT_MISSING: {0}")]
+    ContentMissing(String),
+
+    #[error("CONTENT_UNREADABLE: {0}")]
+    ContentUnreadable(String),
+
+    #[error("UNSUPPORTED_CONTENT: {0}")]
+    UnsupportedContent(String),
+
     #[error("{0}")]
     Other(String),
 }

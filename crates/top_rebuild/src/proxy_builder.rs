@@ -8,7 +8,7 @@
 //! - Gap metrics maxGap / P95Gap (plan §15.3)
 //! - V1: no weld, no atlas, no remesh
 
-use crate::b3dm::load_content_glb;
+use crate::b3dm::load_content;
 use crate::error::{Result, TopRebuildError};
 use crate::gap::{compute_gap_metrics, GapMetrics};
 use crate::glb::{
@@ -119,8 +119,8 @@ fn build_proxy_with_work(
     let mut warnings = Vec::new();
 
     for (ci, child) in children.iter().enumerate() {
-        let glb = load_content_glb(&child.content_path)?;
-        let mut mesh = load_mesh_from_glb(&glb)?;
+        let loaded = load_content(&child.content_path)?;
+        let mut mesh = load_mesh_from_glb(&loaded.glb)?;
         if mesh.textures.is_empty() && budget.inject_test_textures {
             let (r, g, b) = (
                 (40 + ci * 40) as u8,
@@ -153,7 +153,11 @@ fn build_proxy_with_work(
         }
         all_textures.extend(mesh.textures);
 
-        let to_parent = parent_inv.mul(&child.world_transform);
+        let mut child_world = child.world_transform.clone();
+        if let Some([rx, ry, rz]) = loaded.rtc_center {
+            child_world = child_world.mul(&Mat4d::translation(rx, ry, rz));
+        }
+        let to_parent = parent_inv.mul(&child_world);
         let mut cpos = Vec::new();
         let mut cidx = Vec::new();
         let mut base = 0u32;
@@ -453,8 +457,8 @@ pub fn build_proxy_to_file(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::b3dm::pack_glb_as_b3dm;
-    use crate::glb::{make_box_primitive, make_textured_box_glb, write_glb};
+    use crate::b3dm::{pack_glb_as_b3dm, pack_glb_as_b3dm_with_rtc};
+    use crate::glb::{load_mesh_from_glb, make_box_primitive, make_textured_box_glb, write_glb};
     use std::fs;
 
     fn tmp_dir() -> PathBuf {
@@ -570,5 +574,35 @@ mod tests {
         assert!(result.texture.max_dimension_after <= 64);
         assert!(result.glb_bytes_len > 0);
         assert!(result.texture_bytes > 0);
+    }
+
+    #[test]
+    fn rtc_center_applied_into_parent_local() {
+        let dir = tmp_dir().join("rtc");
+        fs::create_dir_all(&dir).unwrap();
+        let prim = make_box_primitive(1.0, 1.0, 1.0, 2, "mat0:1,1,1,1");
+        let glb = write_glb(&[prim]).unwrap();
+        let b3dm = pack_glb_as_b3dm_with_rtc(&glb, Some([50.0, 0.0, 0.0])).unwrap();
+        let p = dir.join("c.b3dm");
+        fs::write(&p, b3dm).unwrap();
+        let children = vec![ChildContent {
+            content_path: p,
+            world_transform: Mat4d::identity(),
+        }];
+        let out = dir.join("proxy.glb");
+        let budget = ProxyBudget {
+            max_triangles: 20_000,
+            ..Default::default()
+        };
+        let result = build_proxy_to_file(&children, &Mat4d::identity(), &budget, &out).unwrap();
+        let mesh = load_mesh_from_glb(&result.glb_bytes).unwrap();
+        let mean_x: f32 = {
+            let xs: Vec<f32> = mesh.primitives[0].positions.iter().map(|v| v[0]).collect();
+            xs.iter().sum::<f32>() / xs.len() as f32
+        };
+        assert!(
+            (mean_x - 50.0).abs() < 2.0,
+            "expected RTC shift ~50, got mean_x={mean_x}"
+        );
     }
 }

@@ -51,8 +51,7 @@ export function Results() {
     <div className="page">
       <div className="page-header">
         <div>
-          <h1>处理成果</h1>
-          <p>已登记的 3D Tiles 输出，可预览、继续处理或复制路径</p>
+          <h1>成果</h1>
         </div>
         <Link className="btn btn-primary" to="/tiles/process">
           处理已有 Tiles

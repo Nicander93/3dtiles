@@ -69,22 +69,30 @@ fn stub_proxy_from_children(level: u32, px: i32, py: i32, children: &[TreeNode])
 }
 
 fn l0_nodes(blocks: &[SourceBlock], selections: &[(usize, Selection)]) -> Result<Vec<TreeNode>> {
+    let mut origin_x = i32::MAX;
+    let mut origin_y = i32::MAX;
+    for (bi, _) in selections {
+        let gx = blocks[*bi].grid_x.ok_or_else(|| {
+            TopRebuildError::Other(format!("block {} missing gridX", blocks[*bi].id))
+        })?;
+        let gy = blocks[*bi].grid_y.ok_or_else(|| {
+            TopRebuildError::Other(format!("block {} missing gridY", blocks[*bi].id))
+        })?;
+        origin_x = origin_x.min(gx);
+        origin_y = origin_y.min(gy);
+    }
     let mut nodes = Vec::with_capacity(selections.len());
     for (bi, sel) in selections {
         let block = &blocks[*bi];
-        let gx = block.grid_x.ok_or_else(|| {
-            TopRebuildError::Other(format!("block {} missing gridX", block.id))
-        })?;
-        let gy = block.grid_y.ok_or_else(|| {
-            TopRebuildError::Other(format!("block {} missing gridY", block.id))
-        })?;
+        let gx = block.grid_x.unwrap() - origin_x;
+        let gy = block.grid_y.unwrap() - origin_y;
         let rep = &block.representations[sel.representation_index];
         nodes.push(TreeNode {
             id: format!("L0_{}", block.id),
             level: 0,
             grid_x: gx,
             grid_y: gy,
-            bounds: block.bounds.clone(),
+            bounds: block.bounds.world_bounds(&block.world_transform),
             world_transform: block.world_transform.clone(),
             source_representation_ids: vec![rep.id.clone()],
             child_ids: vec![],
@@ -173,6 +181,7 @@ mod tests {
                 bounds: BoundingVolume::from_box(boxv),
                 world_transform: Mat4d::identity(),
             }],
+            source_tileset: None,
         }
     }
 
@@ -203,6 +212,16 @@ mod tests {
         let tree = build_tree(&blocks, &TreeBuildOptions::default()).unwrap();
         let counts = tree.level_counts();
         assert_eq!(counts, vec![(0, 16), (1, 4), (2, 1)]);
+    }
+
+    #[test]
+    fn offset_16x16_reaches_root() {
+        let blocks: Vec<_> = (5469..5485)
+            .flat_map(|y| (5567..5583).map(move |x| synth_block(x, y)))
+            .collect();
+        let tree = build_tree(&blocks, &TreeBuildOptions::default()).unwrap();
+        assert_eq!(tree.levels[0].len(), 256);
+        assert_eq!(tree.levels.last().unwrap().len(), 1);
     }
 
     #[test]

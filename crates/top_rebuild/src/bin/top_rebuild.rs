@@ -71,6 +71,10 @@ struct Args {
     /// Inject solid test textures when synthesizing empty leaves (off for release)
     #[arg(long, default_value_t = false)]
     inject_test_textures: bool,
+
+    /// Fixture/debug only: synthesize box mesh when content is missing or unreadable
+    #[arg(long, default_value_t = false)]
+    synthesize_if_empty: bool,
 }
 
 fn main() {
@@ -98,7 +102,7 @@ fn run(args: Args) -> top_rebuild::Result<()> {
         l1_max_triangles: args.l1_max_triangles,
         l2_max_triangles: args.l2_max_triangles,
         target_error_meters: args.target_error,
-        synthesize_if_empty: true,
+        synthesize_if_empty: args.synthesize_if_empty,
         box_segments: args.segments,
         source_error_ratio: args.source_error_ratio,
         max_texture_size: args.max_texture_size,

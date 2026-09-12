@@ -1,13 +1,11 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { isActiveStatus } from '../api/desktop';
 import { useTasks } from '../hooks/useTasks';
-import { isTauri } from '../lib/tauri';
 
 type NavItem = {
   to: string;
   label: string;
   end?: boolean;
-  icon: string;
   badge?: boolean;
 };
 
@@ -17,23 +15,23 @@ const navGroups: NavGroup[] = [
   {
     title: '浏览',
     items: [
-      { to: '/', label: '工作区', end: true, icon: '⌂' },
-      { to: '/preview/tiles', label: '3D Tiles预览', icon: '◇' },
+      { to: '/', label: '工作区', end: true },
+      { to: '/preview/tiles', label: '预览' },
     ],
   },
   {
     title: '处理',
     items: [
-      { to: '/osgb/convert', label: 'OSGB转换', icon: '⇄' },
-      { to: '/processing', label: '正在处理', icon: '⟳', badge: true },
-      { to: '/tiles/process', label: 'Tiles处理', icon: '▣' },
-      { to: '/history', label: '处理记录', icon: '☰' },
-      { to: '/results', label: '处理成果', icon: '▤' },
+      { to: '/osgb/convert', label: 'OSGB 转换' },
+      { to: '/processing', label: '任务', badge: true },
+      { to: '/tiles/process', label: 'Tiles 处理' },
+      { to: '/history', label: '记录' },
+      { to: '/results', label: '成果' },
     ],
   },
   {
     title: '系统',
-    items: [{ to: '/settings', label: '设置与帮助', icon: '⚙' }],
+    items: [{ to: '/settings', label: '设置' }],
   },
 ];
 
@@ -45,10 +43,8 @@ export function AppLayout() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">GF</div>
           <div className="brand-text">
             <strong>GeoForge 3D</strong>
-            <span>本地 · 高效 · 开放</span>
           </div>
         </div>
 
@@ -63,32 +59,15 @@ export function AppLayout() {
                   end={item.end}
                   className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
                 >
-                  <span className="nav-icon">{item.icon}</span>
                   <span className="nav-label">{item.label}</span>
                   {item.badge && activeCount > 0 ? (
-                    <span className="nav-badge" title={`${activeCount} 个进行中`}>
-                      {activeCount}
-                    </span>
+                    <span className="nav-badge">{activeCount}</span>
                   ) : null}
                 </NavLink>
               ))}
             </div>
           ))}
         </nav>
-
-        <div className="sidebar-foot">
-          <div className="sidebar-promo">
-            <div className="sidebar-promo-title">让三维数据</div>
-            <div className="sidebar-promo-sub">在本地创造更多可能</div>
-          </div>
-          <div className="brand-meta" style={{ marginTop: 10 }}>
-            <span className="pill">v0.1.0</span>
-            <span className="pill accent">● 本地模式</span>
-          </div>
-          <div className="sidebar-api-hint">
-            {isTauri() ? '桌面壳 · Tauri' : '浏览器'} · API 127.0.0.1:8787
-          </div>
-        </div>
       </aside>
 
       <main className="main">

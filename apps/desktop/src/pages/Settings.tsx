@@ -63,8 +63,7 @@ export function Settings() {
     <div className="page">
       <div className="page-header">
         <div>
-          <h1>设置与帮助</h1>
-          <p>默认转换参数与本地运行说明{isTauri() ? " · Tauri SQLite" : " · 浏览器 localStorage"}</p>
+          <h1>设置</h1>
         </div>
       </div>
 
@@ -146,8 +145,7 @@ export function Settings() {
           {healthError && <Alert kind="warn">{healthError}</Alert>}
           {resourceInfo && <Alert kind="success">{resourceInfo}</Alert>}
           <p className="muted" style={{ marginTop: 12 }}>
-            Phase 2：任务 / 成果 / 设置由 Rust SQLite 持久化；Cesium 预览走 Rust 127.0.0.1 资源服务。
-            转换执行仍可能桥接 Python desktop_server，直至 Phase 3 Processor。
+            任务和成果保存在本地。转换走 Processor；找不到 Processor 时才会用 Python 服务。
           </p>
         </aside>
       </div>

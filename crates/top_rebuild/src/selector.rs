@@ -2,7 +2,9 @@
 //!
 //! Rule: among representations with
 //!   sourceError <= targetProxyError * sourceErrorRatio
-//! pick the **coarsest** (largest geometricError). Fallback: coarsest overall.
+//! pick the **coarsest** (largest geometricError).
+//! If none satisfy, pick the **finest** (smallest geometricError) and warn
+//! `SOURCE_ERROR_TARGET_NOT_REACHED`.
 
 use crate::error::{Result, TopRebuildError};
 use crate::types::{Representation, SourceBlock};
@@ -17,6 +19,7 @@ pub struct Selection {
     pub source_error: f64,
     pub triangle_count: u64,
     pub texture_bytes: u64,
+    pub warning: Option<String>,
 }
 
 /// Select one Representation per SourceBlock for the first proxy layer.
@@ -57,20 +60,24 @@ pub fn select_one(
         }
     }
 
-    let (index, rep) = if let Some(v) = best_ok {
-        v
+    let (index, rep, warning) = if let Some((i, r)) = best_ok {
+        (i, r, None)
     } else {
-        // Fallback: coarsest (max GE) overall — still "complete coverage".
-        block
+        let (i, r) = block
             .representations
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| {
+            .min_by(|(_, a), (_, b)| {
                 a.geometric_error_meters
                     .partial_cmp(&b.geometric_error_meters)
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
-            .unwrap()
+            .unwrap();
+        let warning = Some(format!(
+            "SOURCE_ERROR_TARGET_NOT_REACHED: block={} representation={} threshold={} selected_error={}",
+            block.id, r.id, threshold, r.geometric_error_meters
+        ));
+        (i, r, warning)
     };
 
     Ok(Selection {
@@ -80,6 +87,7 @@ pub fn select_one(
         source_error: rep.geometric_error_meters,
         triangle_count: rep.triangle_count,
         texture_bytes: rep.texture_bytes,
+        warning,
     })
 }
 
@@ -120,6 +128,7 @@ mod tests {
             bounds: BoundingVolume::empty(),
             world_transform: Mat4d::identity(),
             representations: reps,
+            source_tileset: None,
         }
     }
 
@@ -134,9 +143,14 @@ mod tests {
 
     #[test]
     fn fallback_when_none_satisfy() {
-        // threshold = 5; all GE > 5 except none; pick coarsest 50
+        // threshold = 2.5; available 50/20/10 → pick finest 10
         let b = block_with(&[50.0, 20.0, 10.0]);
         let s = select_one(&b, 5.0, 0.5).unwrap();
-        assert_eq!(s.source_error, 50.0);
+        assert_eq!(s.source_error, 10.0);
+        let w = s.warning.expect("warning");
+        assert!(w.contains("SOURCE_ERROR_TARGET_NOT_REACHED"), "{w}");
+        assert!(w.contains("threshold=2.5"), "{w}");
+        assert!(w.contains("selected_error=10"), "{w}");
+        assert!(w.contains("block=B"), "{w}");
     }
 }

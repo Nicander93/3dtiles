@@ -24,9 +24,7 @@ pub fn tool_paths() -> &'static ToolPaths {
     static PATHS: OnceLock<ToolPaths> = OnceLock::new();
     PATHS.get_or_init(|| {
         let repo_root = discover_repo_root();
-        let convert_bin = std::env::var("GEOFORGE_3DTILE")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("/workspace/runtime/3dtile-bin/run.sh"));
+        let convert_bin = resolve_3dtile(&repo_root);
         let top_rebuild = resolve_top_rebuild(&repo_root);
         let rebuild_py = std::env::var("GEOFORGE_REBUILD_TOP")
             .map(PathBuf::from)
@@ -73,30 +71,64 @@ fn resolve_rebuild_py(repo_root: &Path) -> PathBuf {
     primary
 }
 
-/// Resolve release `top_rebuild` binary.
-/// Order: `GEOFORGE_TOP_REBUILD` → next to processor exe → repo target/{release,debug} → PATH name.
+fn first_existing(cands: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    cands.into_iter().find(|p| p.is_file())
+}
+
+fn bin_names(stem: &str) -> [String; 2] {
+    [stem.to_string(), format!("{stem}.exe")]
+}
+
+fn sibling_bins(dir: &Path, stem: &str) -> Vec<PathBuf> {
+    bin_names(stem).into_iter().map(|name| dir.join(name)).collect()
+}
+
+fn profile_bins(root: &Path, stem: &str) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for profile in ["release", "debug"] {
+        for name in bin_names(stem) {
+            out.push(root.join("target").join(profile).join(name));
+        }
+    }
+    out
+}
+
+/// Order: `GEOFORGE_3DTILE` → next to processor → repo target/{release,debug} → Linux wrapper → PATH.
+fn resolve_3dtile(repo_root: &Path) -> PathBuf {
+    if let Ok(p) = std::env::var("GEOFORGE_3DTILE") {
+        return PathBuf::from(p);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            if let Some(p) = first_existing(sibling_bins(dir, "_3dtile")) {
+                return p;
+            }
+        }
+    }
+    if let Some(p) = first_existing(profile_bins(repo_root, "_3dtile")) {
+        return p;
+    }
+    let linux_wrap = PathBuf::from("/workspace/runtime/3dtile-bin/run.sh");
+    if linux_wrap.is_file() {
+        return linux_wrap;
+    }
+    PathBuf::from("_3dtile")
+}
+
+/// Order: `GEOFORGE_TOP_REBUILD` → next to processor → repo target/{release,debug} → PATH.
 fn resolve_top_rebuild(repo_root: &Path) -> PathBuf {
     if let Ok(p) = std::env::var("GEOFORGE_TOP_REBUILD") {
         return PathBuf::from(p);
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            let sibling = dir.join("top_rebuild");
-            if sibling.is_file() {
-                return sibling;
-            }
-            // Windows
-            let sibling_exe = dir.join("top_rebuild.exe");
-            if sibling_exe.is_file() {
-                return sibling_exe;
+            if let Some(p) = first_existing(sibling_bins(dir, "top_rebuild")) {
+                return p;
             }
         }
     }
-    for profile in ["release", "debug"] {
-        let cand = repo_root.join("target").join(profile).join("top_rebuild");
-        if cand.is_file() {
-            return cand;
-        }
+    if let Some(p) = first_existing(profile_bins(repo_root, "top_rebuild")) {
+        return p;
     }
     PathBuf::from("top_rebuild")
 }
@@ -231,6 +263,8 @@ fn libc_kill(pid: i32, sig: i32) {
 }
 
 #[cfg(not(unix))]
+#[allow(dead_code)]
 fn libc_setpgid() {}
 #[cfg(not(unix))]
+#[allow(dead_code)]
 fn libc_kill(_pid: i32, _sig: i32) {}

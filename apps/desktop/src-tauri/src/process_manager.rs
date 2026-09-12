@@ -102,26 +102,27 @@ fn resolve_processor_bin() -> Option<PathBuf> {
           return Some(cand);
         }
       }
-      // Tauri target/debug sibling of geoforge-desktop — also try repo target
-      let cand = dir.join("../../../target/debug/processor");
-      if cand.is_file() {
-        return Some(cand);
+      for rel in [
+        "../../../target/debug/processor",
+        "../../../target/debug/processor.exe",
+        "../../../target/release/processor",
+        "../../../target/release/processor.exe",
+      ] {
+        let cand = dir.join(rel);
+        if cand.is_file() {
+          return Some(cand);
+        }
       }
     }
   }
-  // Repo-relative defaults
-  for cand in [
-    PathBuf::from("/workspace/repos/3dtiles/target/debug/processor"),
-    PathBuf::from("/workspace/repos/3dtiles/target/release/processor"),
-  ] {
-    if cand.is_file() {
-      return Some(cand);
-    }
-  }
-  // Walk up from CWD
   if let Ok(cwd) = std::env::current_dir() {
-    for anc in cwd.ancestors().take(6) {
-      for sub in ["target/debug/processor", "target/release/processor"] {
+    for anc in cwd.ancestors().take(8) {
+      for sub in [
+        "target/debug/processor",
+        "target/debug/processor.exe",
+        "target/release/processor",
+        "target/release/processor.exe",
+      ] {
         let cand = anc.join(sub);
         if cand.is_file() {
           return Some(cand);

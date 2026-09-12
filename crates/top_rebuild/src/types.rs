@@ -1,4 +1,12 @@
 //! Core SourceBlock / Representation / math types (plan §§9–11).
+//!
+//! Coordinate frames:
+//! - Mesh vertex = content local (glTF node / B3DM RTC already expanded on load)
+//! - Representation.world_transform = content local → world
+//! - SourceBlock.world_transform = block local → world
+//! - SourceBlock / Representation bounds = local to that world_transform
+//! - TreeBuilder spatial work uses world-space bounds
+//! - ProxyBuilder mesh = parent local
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -69,10 +77,12 @@ impl Mat4d {
     }
 }
 
-/// Cesium-style `boundingVolume.box`: center(3) + halfAxes(9).
+/// Cesium-style `boundingVolume.box`: center(3) + half-axis vectors (9).
+///
+/// Layout: `[cx, cy, cz, axx, axy, axz, ayx, ayy, ayz, azx, azy, azz]`.
+/// Frame is the owning node's local space (see crate-level coordinate notes).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BoundingVolume {
-    /// If present: [cx,cy,cz, hx,0,0, 0,hy,0, 0,0,hz] (or general half-axes).
     pub box_values: Option<[f64; 12]>,
 }
 
@@ -91,30 +101,81 @@ impl BoundingVolume {
         self.box_values.map(|b| (b[0], b[1], b[2]))
     }
 
-    /// AABB extents assuming (near-)diagonal half-axes, common in converter output.
-    pub fn aabb_min_max(&self) -> Option<((f64, f64, f64), (f64, f64, f64))> {
+    pub fn transformed_center(&self, m: &Mat4d) -> Option<(f64, f64, f64)> {
+        let (x, y, z) = self.center()?;
+        Some(m.transform_point(x, y, z))
+    }
+
+    /// Eight OBB corners: `center ± axisX ± axisY ± axisZ`.
+    pub fn corners(&self) -> Option<[(f64, f64, f64); 8]> {
         let b = self.box_values?;
-        let (cx, cy, cz) = (b[0], b[1], b[2]);
-        let hx = b[3].abs().max(b[4].abs()).max(b[5].abs());
-        let hy = b[6].abs().max(b[7].abs()).max(b[8].abs());
-        let hz = b[9].abs().max(b[10].abs()).max(b[11].abs());
-        // Prefer classic diagonal layout half-axes when present
-        let hx = if b[4].abs() < 1e-12 && b[5].abs() < 1e-12 {
-            b[3].abs()
-        } else {
-            hx
+        let c = (b[0], b[1], b[2]);
+        let ax = (b[3], b[4], b[5]);
+        let ay = (b[6], b[7], b[8]);
+        let az = (b[9], b[10], b[11]);
+        let mut out = [(0.0, 0.0, 0.0); 8];
+        let mut i = 0;
+        for sx in [-1.0, 1.0] {
+            for sy in [-1.0, 1.0] {
+                for sz in [-1.0, 1.0] {
+                    out[i] = (
+                        c.0 + sx * ax.0 + sy * ay.0 + sz * az.0,
+                        c.1 + sx * ax.1 + sy * ay.1 + sz * az.1,
+                        c.2 + sx * ax.2 + sy * ay.2 + sz * az.2,
+                    );
+                    i += 1;
+                }
+            }
+        }
+        Some(out)
+    }
+
+    pub fn aabb_min_max(&self) -> Option<((f64, f64, f64), (f64, f64, f64))> {
+        let corners = self.corners()?;
+        let mut amin = (f64::MAX, f64::MAX, f64::MAX);
+        let mut amax = (f64::MIN, f64::MIN, f64::MIN);
+        for (x, y, z) in corners {
+            amin.0 = amin.0.min(x);
+            amin.1 = amin.1.min(y);
+            amin.2 = amin.2.min(z);
+            amax.0 = amax.0.max(x);
+            amax.1 = amax.1.max(y);
+            amax.2 = amax.2.max(z);
+        }
+        Some((amin, amax))
+    }
+
+    fn from_aabb(min: (f64, f64, f64), max: (f64, f64, f64)) -> BoundingVolume {
+        let cx = (min.0 + max.0) * 0.5;
+        let cy = (min.1 + max.1) * 0.5;
+        let cz = (min.2 + max.2) * 0.5;
+        let hx = (max.0 - min.0) * 0.5;
+        let hy = (max.1 - min.1) * 0.5;
+        let hz = (max.2 - min.2) * 0.5;
+        BoundingVolume::from_box([cx, cy, cz, hx, 0.0, 0.0, 0.0, hy, 0.0, 0.0, 0.0, hz])
+    }
+
+    /// Transform this box to another frame via 8 corners, then wrap as world AABB.
+    pub fn transform_bounds(&self, m: &Mat4d) -> BoundingVolume {
+        let Some(corners) = self.corners() else {
+            return BoundingVolume::empty();
         };
-        let hy = if b[6].abs() < 1e-12 && b[8].abs() < 1e-12 {
-            b[7].abs()
-        } else {
-            hy
-        };
-        let hz = if b[9].abs() < 1e-12 && b[10].abs() < 1e-12 {
-            b[11].abs()
-        } else {
-            hz
-        };
-        Some(((cx - hx, cy - hy, cz - hz), (cx + hx, cy + hy, cz + hz)))
+        let mut amin = (f64::MAX, f64::MAX, f64::MAX);
+        let mut amax = (f64::MIN, f64::MIN, f64::MIN);
+        for (x, y, z) in corners {
+            let p = m.transform_point(x, y, z);
+            amin.0 = amin.0.min(p.0);
+            amin.1 = amin.1.min(p.1);
+            amin.2 = amin.2.min(p.2);
+            amax.0 = amax.0.max(p.0);
+            amax.1 = amax.1.max(p.1);
+            amax.2 = amax.2.max(p.2);
+        }
+        BoundingVolume::from_aabb(amin, amax)
+    }
+
+    pub fn world_bounds(&self, world_transform: &Mat4d) -> BoundingVolume {
+        self.transform_bounds(world_transform)
     }
 
     pub fn union(a: &BoundingVolume, b: &BoundingVolume) -> BoundingVolume {
@@ -126,13 +187,10 @@ impl BoundingVolume {
                 let max_x = amax.0.max(bmax.0);
                 let max_y = amax.1.max(bmax.1);
                 let max_z = amax.2.max(bmax.2);
-                let cx = (min_x + max_x) * 0.5;
-                let cy = (min_y + max_y) * 0.5;
-                let cz = (min_z + max_z) * 0.5;
-                let hx = (max_x - min_x) * 0.5;
-                let hy = (max_y - min_y) * 0.5;
-                let hz = (max_z - min_z) * 0.5;
-                BoundingVolume::from_box([cx, cy, cz, hx, 0.0, 0.0, 0.0, hy, 0.0, 0.0, 0.0, hz])
+                BoundingVolume::from_aabb(
+                    (min_x, min_y, min_z),
+                    (max_x, max_y, max_z),
+                )
             }
             (Some(_), None) => a.clone(),
             (None, Some(_)) => b.clone(),
@@ -157,7 +215,9 @@ pub struct Representation {
     pub geometric_error_meters: f64,
     pub triangle_count: u64,
     pub texture_bytes: u64,
+    /// Local to `world_transform`.
     pub bounds: BoundingVolume,
+    /// Content local → world.
     pub world_transform: Mat4d,
 }
 
@@ -167,9 +227,13 @@ pub struct SourceBlock {
     pub id: String,
     pub grid_x: Option<i32>,
     pub grid_y: Option<i32>,
+    /// Local to `world_transform`.
     pub bounds: BoundingVolume,
+    /// Block local → world.
     pub world_transform: Mat4d,
     pub representations: Vec<Representation>,
+    /// Original block `tileset.json`, if loaded from disk.
+    pub source_tileset: Option<PathBuf>,
 }
 
 /// One node in the bottom-up quadtree (Phase 5: hierarchy only, no mesh merge).
@@ -180,6 +244,7 @@ pub struct TreeNode {
     pub level: u32,
     pub grid_x: i32,
     pub grid_y: i32,
+    /// World-space AABB.
     pub bounds: BoundingVolume,
     pub world_transform: Mat4d,
     /// Selected / aggregated representation ids contributing to this node.
@@ -285,5 +350,33 @@ mod mat4_tests {
             let expect = if i % 5 == 0 { 1.0 } else { 0.0 };
             assert!((id.0[i] - expect).abs() < 1e-9, "i={i} got {}", id.0[i]);
         }
+    }
+
+    #[test]
+    fn obb_corners_and_translated_world_aabb() {
+        let local = BoundingVolume::from_box([
+            0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 2.0,
+        ]);
+        let corners = local.corners().unwrap();
+        assert!(corners.iter().any(|c| (c.0 - 10.0).abs() < 1e-12 && (c.1 - 5.0).abs() < 1e-12));
+        let world = local.world_bounds(&Mat4d::translation(100.0, 0.0, 0.0));
+        let c = world.center().unwrap();
+        assert!((c.0 - 100.0).abs() < 1e-9 && c.1.abs() < 1e-9);
+        let (amin, amax) = world.aabb_min_max().unwrap();
+        assert!((amin.0 - 90.0).abs() < 1e-9);
+        assert!((amax.0 - 110.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn rotated_half_axes_aabb_uses_corners() {
+        // axisX along (10,10,0), axisY along (-4,4,0)
+        let bv = BoundingVolume::from_box([
+            0.0, 0.0, 0.0, 10.0, 10.0, 0.0, -4.0, 4.0, 0.0, 0.0, 0.0, 1.0,
+        ]);
+        let (amin, amax) = bv.aabb_min_max().unwrap();
+        assert!((amin.0 + 14.0).abs() < 1e-9);
+        assert!((amax.0 - 14.0).abs() < 1e-9);
+        assert!((amin.1 + 14.0).abs() < 1e-9);
+        assert!((amax.1 - 14.0).abs() < 1e-9);
     }
 }

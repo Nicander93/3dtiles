@@ -108,20 +108,35 @@ fn load_json(path: &Path) -> Result<Value> {
     Ok(serde_json::from_str(&text)?)
 }
 
-/// Validate grid indices against spatial centers (plan §9.4).
-///
-/// Phase 10: V1 **stops** on `GRID_SPATIAL_MISMATCH` (no silent wrong tree).
-/// Sparse / irregular `Tile_*` sets (e.g. OSGBny 6 tiles) are a known limit of
-/// regular-grid Proxy HLOD — not covered by inventing partial coverage.
-/// Optional `--allow-partial-grid` was deferred; document refusal instead.
+fn world_center(block: &SourceBlock) -> Option<(f64, f64, f64)> {
+    block.bounds.transformed_center(&block.world_transform)
+}
+
+fn grid_xy_in_frame(block: &SourceBlock, frame_inv: &Mat4d) -> Option<(f64, f64)> {
+    let (wx, wy, wz) = world_center(block)?;
+    let p = frame_inv.transform_point(wx, wy, wz);
+    Some((p.0, p.1))
+}
+
+/// Validate grid indices against world-space centers, compared in the
+/// origin block's local frame (so a shared ECEF root does not distort XY).
 pub fn validate_grid_spatial(blocks: &[SourceBlock]) -> Result<()> {
     let with_grid: Vec<_> = blocks
         .iter()
-        .filter(|b| b.grid_x.is_some() && b.grid_y.is_some() && b.bounds.center().is_some())
+        .filter(|b| b.grid_x.is_some() && b.grid_y.is_some() && world_center(b).is_some())
         .collect();
     if with_grid.len() < 2 {
         return Ok(());
     }
+
+    let origin = with_grid
+        .iter()
+        .min_by_key(|b| (b.grid_x.unwrap(), b.grid_y.unwrap()))
+        .unwrap();
+    let frame_inv = origin
+        .world_transform
+        .inverse()
+        .unwrap_or_else(Mat4d::identity);
 
     let mut spacings_x = Vec::new();
     let mut spacings_y = Vec::new();
@@ -134,8 +149,8 @@ pub fn validate_grid_spatial(blocks: &[SourceBlock]) -> Result<()> {
             let b = with_grid[j];
             let (ax, ay) = (a.grid_x.unwrap(), a.grid_y.unwrap());
             let (bx, by) = (b.grid_x.unwrap(), b.grid_y.unwrap());
-            let (acx, acy, _) = a.bounds.center().unwrap();
-            let (bcx, bcy, _) = b.bounds.center().unwrap();
+            let (acx, acy) = grid_xy_in_frame(a, &frame_inv).unwrap();
+            let (bcx, bcy) = grid_xy_in_frame(b, &frame_inv).unwrap();
             let dxg = (bx - ax).abs();
             let dyg = (by - ay).abs();
             if dxg > 0 {
@@ -177,11 +192,7 @@ pub fn validate_grid_spatial(blocks: &[SourceBlock]) -> Result<()> {
         return Ok(());
     }
 
-    let origin = with_grid
-        .iter()
-        .min_by_key(|b| (b.grid_x.unwrap(), b.grid_y.unwrap()))
-        .unwrap();
-    let (ox, oy, _) = origin.bounds.center().unwrap();
+    let (ox, oy) = grid_xy_in_frame(origin, &frame_inv).unwrap();
     let (ogx, ogy) = (origin.grid_x.unwrap(), origin.grid_y.unwrap());
 
     let cell_x = if cell_x > 1e-6 { cell_x } else { cell_y };
@@ -189,7 +200,7 @@ pub fn validate_grid_spatial(blocks: &[SourceBlock]) -> Result<()> {
     let tol = (cell_x.max(cell_y) * 0.35).max(1.0);
     for b in &with_grid {
         let (gx, gy) = (b.grid_x.unwrap(), b.grid_y.unwrap());
-        let (cx, cy, _) = b.bounds.center().unwrap();
+        let (cx, cy) = grid_xy_in_frame(b, &frame_inv).unwrap();
         let expected_x = ox + (gx - ogx) as f64 * cell_x;
         let expected_y = oy + (gy - ogy) as f64 * cell_y;
         let dist = (cx - expected_x).hypot(cy - expected_y);
@@ -301,6 +312,7 @@ pub fn load_source_blocks(tileset_path: &Path) -> Result<Vec<SourceBlock>> {
             bounds,
             world_transform: child_world,
             representations,
+            source_tileset: Some(ext_path),
         });
     }
 
@@ -346,6 +358,7 @@ mod tests {
                 bounds: BoundingVolume::empty(),
                 world_transform: Mat4d::identity(),
             }],
+            source_tileset: None,
         };
         let blocks = vec![
             mk("A", 0, 0, 50.0, 50.0),
@@ -355,5 +368,62 @@ mod tests {
         let err = validate_grid_spatial(&blocks).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("GRID_SPATIAL_MISMATCH"), "{msg}");
+    }
+
+    #[test]
+    fn grid_spatial_valid_when_centers_come_from_tile_transform() {
+        let mk = |id: &str, gx: i32, gy: i32, tx: f64, ty: f64| SourceBlock {
+            id: id.into(),
+            grid_x: Some(gx),
+            grid_y: Some(gy),
+            bounds: BoundingVolume::from_box([
+                0.0, 0.0, 0.0, 50.0, 0.0, 0.0, 0.0, 50.0, 0.0, 0.0, 0.0, 10.0,
+            ]),
+            world_transform: Mat4d::translation(tx, ty, 0.0),
+            representations: vec![Representation {
+                id: format!("{id}#r0"),
+                content_path: "x.b3dm".into(),
+                geometric_error_meters: 10.0,
+                triangle_count: 0,
+                texture_bytes: 0,
+                bounds: BoundingVolume::empty(),
+                world_transform: Mat4d::translation(tx, ty, 0.0),
+            }],
+            source_tileset: None,
+        };
+        let blocks = vec![
+            mk("Tile_0_0", 0, 0, 0.0, 0.0),
+            mk("Tile_1_0", 1, 0, 100.0, 0.0),
+        ];
+        validate_grid_spatial(&blocks).expect("grid spatial valid");
+    }
+
+    #[test]
+    fn grid_spatial_valid_under_shared_ecef_rotation() {
+        let ecef = Mat4d([
+            0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 3_900_000.0,
+            1_000_000.0, 4_800_000.0, 1.0,
+        ]);
+        let mk = |id: &str, gx: i32, gy: i32, cx: f64, cy: f64| SourceBlock {
+            id: id.into(),
+            grid_x: Some(gx),
+            grid_y: Some(gy),
+            bounds: BoundingVolume::from_box([
+                cx, cy, 0.0, 50.0, 0.0, 0.0, 0.0, 50.0, 0.0, 0.0, 0.0, 10.0,
+            ]),
+            world_transform: ecef.clone(),
+            representations: vec![Representation {
+                id: format!("{id}#r0"),
+                content_path: "x.b3dm".into(),
+                geometric_error_meters: 10.0,
+                triangle_count: 0,
+                texture_bytes: 0,
+                bounds: BoundingVolume::empty(),
+                world_transform: ecef.clone(),
+            }],
+            source_tileset: None,
+        };
+        let blocks = vec![mk("A", 0, 0, 0.0, 0.0), mk("B", 1, 0, 100.0, 0.0)];
+        validate_grid_spatial(&blocks).expect("ecef rotation must not collapse grid xy");
     }
 }

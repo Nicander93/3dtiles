@@ -116,8 +116,7 @@ export function Processing() {
     <div className="page">
       <div className="page-header">
         <div>
-          <h1>正在处理</h1>
-          <p>任务队列与阶段进度（扫描 → 转换 → 重建 → 纹理 → 检查）</p>
+          <h1>任务</h1>
         </div>
         <div className="toolbar processing-toolbar" style={{ marginBottom: 0 }}>
           <button className="btn" type="button" onClick={() => void refresh()}>

@@ -6,8 +6,8 @@ import { Alert } from '../components/Alert';
 import { ktx2Etc1sEnabled, ktx2UastcEnabled } from '../lib/textureCaps';
 import { isTauri, selectInputDirectory, selectOutputDirectory, selectTilesetFile } from '../lib/tauri';
 
-const SAMPLE_INPUT = '/workspace/data/geoforge_outputs/osgbny_v1';
-const SAMPLE_OUTPUT = '/workspace/data/geoforge_outputs/osgbny_v1_process';
+const SAMPLE_INPUT = '';
+const SAMPLE_OUTPUT = '';
 
 type FormState = {
   input: string;
@@ -145,8 +145,7 @@ export function ProcessTiles() {
     <div className="page">
       <div className="page-header">
         <div>
-          <h1>处理已有 Tiles</h1>
-          <p>对已有 3D Tiles 目录执行顶层重建 / 纹理（process-tileset）</p>
+          <h1>Tiles 处理</h1>
         </div>
       </div>
 
@@ -240,21 +239,41 @@ export function ProcessTiles() {
                 checked={form.rebuildTop}
                 onChange={(e) => update('rebuildTop', e.target.checked)}
               />
-              顶层重建（rebuildTop）
+              顶层重建
             </label>
           </div>
           <div className="field">
-            <label>重建层数（rebuildTop.levels）</label>
+            <label>质量</label>
+            <select
+              className="select"
+              disabled={!form.rebuildTop}
+              value={form.rebuildLevels === 2 ? 'quality' : form.textureMode === 'keep' ? 'balanced' : 'speed'}
+              onChange={(e) => {
+                const v = e.target.value;
+                setForm((f) => ({
+                  ...f,
+                  rebuildLevels: v === 'quality' ? 2 : 1,
+                  textureMode:
+                    v === 'speed' && ktx2Etc1sEnabled(caps, true) ? 'ktx2-etc1s' : 'keep',
+                }));
+              }}
+            >
+              <option value="quality">质量优先</option>
+              <option value="balanced">均衡</option>
+              <option value="speed">性能优先</option>
+            </select>
+          </div>
+          <div className="field">
+            <label>重建层数</label>
             <select
               className="select"
               disabled={!form.rebuildTop}
               value={form.rebuildLevels === 2 ? 2 : 1}
               onChange={(e) => update('rebuildLevels', Number(e.target.value) === 2 ? 2 : 1)}
             >
-              <option value={1}>1 — 一层 2×2 合并（默认）</option>
-              <option value={2}>2 — 两层金字塔（--levels 2）</option>
+              <option value={1}>1</option>
+              <option value={2}>2</option>
             </select>
-            <div className="field-hint">对应 rebuild_top.py --levels；仅支持 1 或 2</div>
           </div>
           <div className="field">
             <label>纹理模式</label>
