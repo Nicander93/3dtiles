@@ -115,6 +115,47 @@ fn resolve_3dtile(repo_root: &Path) -> PathBuf {
     PathBuf::from("_3dtile")
 }
 
+pub fn docker_image() -> String {
+    std::env::var("GEOFORGE_3DTILE_IMAGE").unwrap_or_else(|_| "winner1/3dtiles:1.0".into())
+}
+
+pub fn docker_available() -> bool {
+    if std::env::var("GEOFORGE_DISABLE_DOCKER").ok().as_deref() == Some("1") {
+        return false;
+    }
+    Command::new("docker")
+        .args(["version", "--format", "{{.Server.Version}}"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+pub fn docker_volume_path(p: &Path) -> Result<String, String> {
+    let abs = if p.exists() {
+        std::fs::canonicalize(p).map_err(|e| format!("{}: {e}", p.display()))?
+    } else if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| e.to_string())?
+            .join(p)
+    };
+    Ok(to_docker_path(&abs))
+}
+
+fn to_docker_path(p: &Path) -> String {
+    let s = p.to_string_lossy().replace('\\', "/");
+    if let Some(rest) = s.strip_prefix("//?/UNC/") {
+        return format!("//{rest}");
+    }
+    if let Some(rest) = s.strip_prefix("//?/") {
+        return rest.to_string();
+    }
+    s
+}
+
 /// Order: `GEOFORGE_TOP_REBUILD` → next to processor → repo target/{release,debug} → PATH.
 fn resolve_top_rebuild(repo_root: &Path) -> PathBuf {
     if let Ok(p) = std::env::var("GEOFORGE_TOP_REBUILD") {
@@ -268,3 +309,16 @@ fn libc_setpgid() {}
 #[cfg(not(unix))]
 #[allow(dead_code)]
 fn libc_kill(_pid: i32, _sig: i32) {}
+
+#[cfg(test)]
+mod tests {
+    use super::to_docker_path;
+    use std::path::PathBuf;
+
+    #[cfg(windows)]
+    #[test]
+    fn docker_path_strips_windows_verbatim() {
+        let p = PathBuf::from(r"\\?\D:\code\3dtiles\data");
+        assert_eq!(to_docker_path(&p), "D:/code/3dtiles/data");
+    }
+}

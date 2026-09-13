@@ -53,7 +53,7 @@ export interface DesktopSettings {
 const settingsDefaults: DesktopSettings = {
   defaultOutputRoot: '',
   defaultRebuildTop: true,
-  defaultRebuildLevels: 1,
+  defaultRebuildLevels: 0,
   defaultTextureCompress: true,
   pythonServerUrl: 'http://127.0.0.1:8787',
   resourceServerPort: 0,

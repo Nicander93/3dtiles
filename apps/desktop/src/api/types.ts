@@ -99,9 +99,17 @@ export interface TextureModeInfo {
   processTileset?: { mode: string; supported: boolean; reason?: string };
 }
 
+export interface ConvertCapabilities {
+  bin?: string;
+  exists?: boolean;
+  docker?: boolean;
+  processor?: boolean;
+  image?: string;
+}
+
 export interface CapabilitiesResponse {
   ok?: boolean;
-  convert?: Record<string, unknown>;
+  convert?: ConvertCapabilities;
   textureModes?: TextureModeInfo[];
   aliases?: Record<string, string>;
   postprocessBasisu?: { available?: boolean; path?: string | null };

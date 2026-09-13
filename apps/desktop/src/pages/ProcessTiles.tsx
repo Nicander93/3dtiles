@@ -3,6 +3,11 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api, friendlyError } from '../api/desktop';
 import type { Artifact, CapabilitiesResponse, TextureMode } from '../api/types';
 import { Alert } from '../components/Alert';
+import {
+  rebuildLevelsLabel,
+  rebuildQualityOptions,
+  type RebuildQuality,
+} from '../lib/rebuildQuality';
 import { ktx2Etc1sEnabled, ktx2UastcEnabled } from '../lib/textureCaps';
 import { isTauri, selectInputDirectory, selectOutputDirectory, selectTilesetFile } from '../lib/tauri';
 
@@ -15,6 +20,7 @@ type FormState = {
   name: string;
   artifactId: string;
   rebuildTop: boolean;
+  quality: RebuildQuality;
   rebuildLevels: number;
   textureMode: TextureMode;
 };
@@ -25,7 +31,8 @@ const defaults: FormState = {
   name: 'Tiles处理',
   artifactId: '',
   rebuildTop: true,
-  rebuildLevels: 1,
+  quality: 'balanced',
+  rebuildLevels: 0,
   textureMode: 'keep',
 };
 
@@ -87,7 +94,7 @@ export function ProcessTiles() {
       input: form.input || '（未填写）',
       output: form.output || '（未填写）',
       options: [
-        form.rebuildTop ? `顶层重建 ×${form.rebuildLevels}` : '不重建',
+        form.rebuildTop ? rebuildLevelsLabel(form.rebuildLevels) : '不重建',
         form.textureMode === 'keep' ? '纹理 keep（跳过）' : `纹理 ${form.textureMode}`,
       ].join(' · '),
     }),
@@ -116,6 +123,7 @@ export function ProcessTiles() {
     }
     setSubmitting(true);
     try {
+      const preset = rebuildQualityOptions(form.quality, ktx2Etc1sEnabled(caps, true));
       const res = await api.createTask({
         operation: 'process-tileset',
         input: { path: form.input.trim() },
@@ -127,6 +135,8 @@ export function ProcessTiles() {
             levels: form.rebuildLevels,
             simplify: 0.5,
             textureScale: 0.5,
+            l1MaxTriangles: preset.l1MaxTriangles,
+            l2MaxTriangles: preset.l2MaxTriangles,
           },
           texture: { mode: form.textureMode },
         },
@@ -247,14 +257,15 @@ export function ProcessTiles() {
             <select
               className="select"
               disabled={!form.rebuildTop}
-              value={form.rebuildLevels === 2 ? 'quality' : form.textureMode === 'keep' ? 'balanced' : 'speed'}
+              value={form.quality}
               onChange={(e) => {
-                const v = e.target.value;
+                const quality = e.target.value as RebuildQuality;
+                const preset = rebuildQualityOptions(quality, ktx2Etc1sEnabled(caps, true));
                 setForm((f) => ({
                   ...f,
-                  rebuildLevels: v === 'quality' ? 2 : 1,
-                  textureMode:
-                    v === 'speed' && ktx2Etc1sEnabled(caps, true) ? 'ktx2-etc1s' : 'keep',
+                  quality,
+                  rebuildLevels: preset.levels,
+                  textureMode: preset.textureMode,
                 }));
               }}
             >
@@ -262,15 +273,20 @@ export function ProcessTiles() {
               <option value="balanced">均衡</option>
               <option value="speed">性能优先</option>
             </select>
+            <div className="field-hint">
+              三档都建到根。质量/均衡保留原纹理，性能优先会压代理三角数
+              {ktx2Etc1sEnabled(caps, true) ? '并尝试 KTX2' : ''}。
+            </div>
           </div>
           <div className="field">
             <label>重建层数</label>
             <select
               className="select"
               disabled={!form.rebuildTop}
-              value={form.rebuildLevels === 2 ? 2 : 1}
-              onChange={(e) => update('rebuildLevels', Number(e.target.value) === 2 ? 2 : 1)}
+              value={form.rebuildLevels}
+              onChange={(e) => update('rebuildLevels', Number(e.target.value))}
             >
+              <option value={0}>自动到根</option>
               <option value={1}>1</option>
               <option value={2}>2</option>
             </select>

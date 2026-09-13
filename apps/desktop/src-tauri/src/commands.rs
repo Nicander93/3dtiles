@@ -7,6 +7,8 @@ use crate::state::AppState;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 use tauri::AppHandle;
 use tauri::State;
 use tauri_plugin_dialog::{DialogExt, FilePath};
@@ -468,22 +470,102 @@ fn regex_lite_tile() -> impl Fn(&str) -> bool {
   }
 }
 
+fn resolve_convert_bin() -> PathBuf {
+  if let Ok(p) = std::env::var("GEOFORGE_3DTILE") {
+    return PathBuf::from(p);
+  }
+  if let Ok(exe) = std::env::current_exe() {
+    if let Some(dir) = exe.parent() {
+      for name in ["_3dtile", "_3dtile.exe"] {
+        let cand = dir.join(name);
+        if cand.is_file() {
+          return cand;
+        }
+      }
+      for rel in [
+        "../../../target/release/_3dtile",
+        "../../../target/release/_3dtile.exe",
+        "../../../target/debug/_3dtile",
+        "../../../target/debug/_3dtile.exe",
+      ] {
+        let cand = dir.join(rel);
+        if cand.is_file() {
+          return cand;
+        }
+      }
+    }
+  }
+  if let Ok(cwd) = std::env::current_dir() {
+    for anc in cwd.ancestors().take(8) {
+      for sub in [
+        "target/release/_3dtile",
+        "target/release/_3dtile.exe",
+        "target/debug/_3dtile",
+        "target/debug/_3dtile.exe",
+      ] {
+        let cand = anc.join(sub);
+        if cand.is_file() {
+          return cand;
+        }
+      }
+    }
+  }
+  PathBuf::from("_3dtile")
+}
+
+fn docker_engine_available() -> bool {
+  static CACHE: OnceLock<bool> = OnceLock::new();
+  *CACHE.get_or_init(|| {
+    if std::env::var("GEOFORGE_DISABLE_DOCKER").ok().as_deref() == Some("1") {
+      return false;
+    }
+    Command::new("docker")
+      .args(["version", "--format", "{{.Server.Version}}"])
+      .stdout(Stdio::null())
+      .stderr(Stdio::null())
+      .status()
+      .map(|s| s.success())
+      .unwrap_or(false)
+  })
+}
+
+fn convert_image() -> String {
+  std::env::var("GEOFORGE_3DTILE_IMAGE").unwrap_or_else(|_| "winner1/3dtiles:1.0".into())
+}
+
+fn convert_status() -> Value {
+  let bin = resolve_convert_bin();
+  let exists = bin.is_file();
+  let docker = !exists && docker_engine_available();
+  json!({
+    "bin": bin.to_string_lossy(),
+    "exists": exists,
+    "docker": docker,
+    "processor": ProcessManager::processor_available(),
+    "image": convert_image(),
+  })
+}
+
 #[tauri::command]
 pub fn health(state: State<'_, AppState>) -> Result<Value, String> {
-  let convert = std::env::var("GEOFORGE_3DTILE")
-    .unwrap_or_else(|_| "/workspace/runtime/3dtile-bin/run.sh".into());
+  let convert = convert_status();
   let processor = ProcessManager::processor_available();
+  let convert_ok = convert.get("exists").and_then(|v| v.as_bool()).unwrap_or(false)
+    || convert.get("docker").and_then(|v| v.as_bool()).unwrap_or(false);
   Ok(json!({
     "ok": true,
     "status": "ok",
     "product": "geoforge-desktop",
     "version": "0.1.0-phase3",
-    "message": if processor {
-      "Tauri + processor (Python HTTP not required for convert/process)"
-    } else {
+    "message": if !processor {
       "Tauri ready; processor binary missing — convert falls back to Python HTTP"
+    } else if convert_ok {
+      "Tauri + processor"
+    } else {
+      "Processor 已找到，但没有 _3dtile / Docker，OSGB 转换会失败"
     },
-    "convertBin": convert,
+    "convertBin": convert.get("bin").and_then(|v| v.as_str()).unwrap_or(""),
+    "convert": convert,
     "processorAvailable": processor,
     "resourceServer": {
       "port": state.resource.port,
@@ -541,13 +623,7 @@ pub fn capabilities() -> Result<Value, String> {
   ];
   Ok(json!({
     "ok": true,
-    "convert": {
-      "bin": std::env::var("GEOFORGE_3DTILE").unwrap_or_else(|_| "/workspace/runtime/3dtile-bin/run.sh".into()),
-      "exists": PathBuf::from(
-        std::env::var("GEOFORGE_3DTILE").unwrap_or_else(|_| "/workspace/runtime/3dtile-bin/run.sh".into())
-      ).is_file(),
-      "processor": ProcessManager::processor_available(),
-    },
+    "convert": convert_status(),
     "textureModes": modes,
     "aliases": { "ktx2": "ktx2-etc1s" },
     "postprocessBasisu": {

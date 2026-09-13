@@ -38,7 +38,8 @@ Real 5×4: [`../REAL_DATA_VALIDATION.md`](../REAL_DATA_VALIDATION.md).
 | **D** | OSGBny 决策 | **Done** — 保持诚实失败；不改 TreeBuilder |
 | **E** | 规模放大 | **8×8 + 16×16 real PASS**；L0 本地原点；城区/百平方公里停止 |
 | **F** | 质量参数 | **Partial** — UI 三档；数值未按城区标定 |
-| **G** | Desktop 打包 | **Partial** — Windows sidecar 查找；无安装包冒烟 |
+| **G** | Desktop 打包 | **Usable candidate** — NSIS 隔离安装与启动通过；Processor + TopRebuild + 离线 Cesium 已内置；转换仍依赖 Docker 或外置 `_3dtile.exe` |
+| **H** | GE 标定 / 离线预览 | **Done** — 真实 5×4 中景 20 原始块，远景 6×L1，超远景 2×L2；Cesium 本地打包 |
 
 ## Phase 10 numbers (record)
 
@@ -65,6 +66,10 @@ Real 5×4: [`../REAL_DATA_VALIDATION.md`](../REAL_DATA_VALIDATION.md).
 - Invented coverage / silent regrouping on mismatch
 - Real urban / 百平方公里 production rebuild
 - Atlas / remesh / cross-tile weld / adaptive trees
+
+## Phase H 调度证据
+
+真实香港 5×4 数据重新生成后，GE 从 leaf 约 164–198 m，递增至 L1 339–447 m、L2 745–894 m、L3 1788 m。Cesium 调试观测显示中景使用 20 个原始块、远景使用 6 个 L1 代理、超远景使用 2 个 L2 代理。详见 [phase-h.md](./phase-h.md)。
 
 ## How to verify quickly
 ```bash

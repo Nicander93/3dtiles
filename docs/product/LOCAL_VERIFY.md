@@ -41,6 +41,18 @@ bash scripts/run_geoforge.sh --legacy-server   # :8787
 
 Task DB and preview cache live under `.geoforge` (gitignored).
 
+### Windows bundle
+
+```powershell
+cd apps/desktop
+npm run prepare:sidecars
+npx tauri build --bundles nsis
+```
+
+`prepare:sidecars` 会把 `processor.exe` 和 `top_rebuild.exe` 编译并复制成 Tauri sidecar。当前安装包尚未内置 `_3dtile.exe`；转换页会检测本机转换器，找不到时使用正在运行的 Docker Desktop。Cesium 运行时已经随应用打包，可离线加载本地 3D Tiles。
+
+NSIS 产物位于 `src-tauri/target/release/bundle/nsis/`。2026-09-12 的 `0.1.0` 包已通过隔离静默安装和首次启动冒烟。
+
 ## 5. Smoke keep + ktx2
 
 1. Convert page: input OSGB root, scan (CRS/origin).

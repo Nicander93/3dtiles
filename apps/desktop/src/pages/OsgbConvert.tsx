@@ -3,6 +3,13 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api, friendlyError } from '../api/desktop';
 import type { CapabilitiesResponse, OsgbScanResult, TextureMode } from '../api/types';
 import { Alert } from '../components/Alert';
+import { convertReady } from '../lib/convertReady';
+import {
+  inferRebuildQuality,
+  rebuildLevelsLabel,
+  rebuildQualityOptions,
+  type RebuildQuality,
+} from '../lib/rebuildQuality';
 import { ktx2Etc1sEnabled, ktx2UastcEnabled } from '../lib/textureCaps';
 import { isTauri, selectInputDirectory, selectOutputDirectory } from '../lib/tauri';
 
@@ -15,6 +22,7 @@ type FormState = {
   output: string;
   name: string;
   rebuildTop: boolean;
+  quality: RebuildQuality;
   rebuildLevels: number;
   textureMode: TextureMode;
   crsOverride: string;
@@ -29,7 +37,8 @@ const defaults: FormState = {
   output: SAMPLE_OUTPUT,
   name: '',
   rebuildTop: true,
-  rebuildLevels: 1,
+  quality: 'balanced',
+  rebuildLevels: 0,
   textureMode: 'keep',
   crsOverride: '',
   originX: '',
@@ -44,7 +53,13 @@ function loadConfig(): FormState {
     if (!raw) return defaults;
     const parsed = JSON.parse(raw) as Partial<FormState> & { originOverride?: string };
     const next: FormState = { ...defaults, ...parsed };
-    next.rebuildLevels = next.rebuildLevels === 2 ? 2 : 1;
+    const savedQuality = (parsed as { quality?: RebuildQuality }).quality;
+    next.quality = savedQuality ?? inferRebuildQuality(next.rebuildLevels, next.textureMode);
+    if (savedQuality) {
+      next.rebuildLevels = [0, 1, 2].includes(next.rebuildLevels) ? next.rebuildLevels : 0;
+    } else {
+      next.rebuildLevels = 0;
+    }
     // migrate old comma originOverride → x/y/z
     if ((!next.originX || !next.originY || !next.originZ) && parsed.originOverride) {
       const parts = String(parsed.originOverride)
@@ -157,7 +172,7 @@ export function OsgbConvert() {
       output: form.output || '（未填写）',
       name: form.name || '自动命名',
       options: [
-        form.rebuildTop ? `顶层重建 ×${form.rebuildLevels}` : '不重建顶层',
+        form.rebuildTop ? rebuildLevelsLabel(form.rebuildLevels) : '不重建顶层',
         form.textureMode === 'keep'
           ? '纹理 keep（保留原图）'
           : `纹理 ${form.textureMode}`,
@@ -235,6 +250,7 @@ export function OsgbConvert() {
         geo.originZ = Number(form.originZ.trim());
         geo.origin = `${form.originX.trim()},${form.originY.trim()},${form.originZ.trim()}`;
       }
+      const preset = rebuildQualityOptions(form.quality, ktx2Etc1sEnabled(caps));
       const res = await api.createTask({
         operation: 'convert-osgb',
         input: { path: form.input.trim() },
@@ -246,6 +262,8 @@ export function OsgbConvert() {
             levels: form.rebuildLevels,
             simplify: 0.5,
             textureScale: 0.5,
+            l1MaxTriangles: preset.l1MaxTriangles,
+            l2MaxTriangles: preset.l2MaxTriangles,
           },
           texture: { mode: form.textureMode },
           geo,
@@ -263,6 +281,7 @@ export function OsgbConvert() {
   }
 
   const checksPassed = checklist.every((c) => c.ok === true);
+  const convertHint = convertReady(caps);
 
   return (
     <div className="page">
@@ -280,6 +299,16 @@ export function OsgbConvert() {
       {message ? (
         <div style={{ marginBottom: 12 }}>
           <Alert kind="success">{message}</Alert>
+        </div>
+      ) : null}
+      {convertHint.via === 'docker' ? (
+        <div style={{ marginBottom: 12 }}>
+          <Alert kind="warn">{convertHint.message}</Alert>
+        </div>
+      ) : null}
+      {convertHint.via === 'none' ? (
+        <div style={{ marginBottom: 12 }}>
+          <Alert kind="error">{convertHint.message}</Alert>
         </div>
       ) : null}
 
@@ -387,14 +416,15 @@ export function OsgbConvert() {
             <select
               className="select"
               disabled={!form.rebuildTop}
-              value={form.rebuildLevels === 2 ? 'quality' : form.textureMode === 'keep' ? 'balanced' : 'speed'}
+              value={form.quality}
               onChange={(e) => {
-                const v = e.target.value;
+                const quality = e.target.value as RebuildQuality;
+                const preset = rebuildQualityOptions(quality, ktx2Etc1sEnabled(caps));
                 setForm((f) => ({
                   ...f,
-                  rebuildLevels: v === 'quality' ? 2 : 1,
-                  textureMode:
-                    v === 'speed' && ktx2Etc1sEnabled(caps) ? 'ktx2-etc1s' : 'keep',
+                  quality,
+                  rebuildLevels: preset.levels,
+                  textureMode: preset.textureMode,
                 }));
               }}
             >
@@ -402,16 +432,20 @@ export function OsgbConvert() {
               <option value="balanced">均衡</option>
               <option value="speed">性能优先</option>
             </select>
-            <div className="field-hint">内部仍映射到重建层数和纹理模式，数值尚未按城区数据标定。</div>
+            <div className="field-hint">
+              三档都建到根。质量/均衡保留原纹理，性能优先会压代理三角数
+              {ktx2Etc1sEnabled(caps) ? '并尝试 KTX2' : ''}。
+            </div>
           </div>
           <div className="field">
             <label>重建层数</label>
             <select
               className="select"
               disabled={!form.rebuildTop}
-              value={form.rebuildLevels === 2 ? 2 : 1}
-              onChange={(e) => update('rebuildLevels', Number(e.target.value) === 2 ? 2 : 1)}
+              value={form.rebuildLevels}
+              onChange={(e) => update('rebuildLevels', Number(e.target.value))}
             >
+              <option value={0}>自动到根</option>
               <option value={1}>1</option>
               <option value={2}>2</option>
             </select>

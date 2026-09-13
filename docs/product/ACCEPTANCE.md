@@ -3,6 +3,8 @@
 > Top rebuild scale: **4×4 + 16×16 synthetic demonstrated**; sparse OSGBny **rejected** (`GRID_SPATIAL_MISMATCH`); **城区 / 百平方公里 NOT demonstrated** — do not treat historical “Top rebuild | pass” row as large-area production acceptance.  
 > Status line: *V1 algorithm complete for continuous regular grids (≤16×16 synthetic); large-scale validation pending.*
 
+> **2026-09-12 current evidence:** real contiguous HK OSGB has passed at 5×4, 8×8 and 16×16. The 5×4 Processor path was rerun end-to-end on Windows: Docker convert → validate/commit → Rust rebuild → validate/commit → local Cesium load. GE calibration now selects 20 original blocks at medium range, 6 L1 proxies at far range and 2 L2 proxies at very far range. Cesium is bundled locally. A 12,509,605-byte NSIS installer passed isolated silent installation and first-start/database initialization; it includes the desktop app, Processor and TopRebuild. Native `_3dtile` packaging remains open, so OSGB conversion currently requires Docker Desktop or `GEOFORGE_3DTILE`; see `PHASE_REPORTS/phase-g.md` and `phase-h.md`.
+
 > **CANCELLED FOR V1 — HISTORICAL ONLY.**  
 > Prior acceptance table included OSGB native / Qt shell as partial. Those rows are cancelled for new V1; do not use this file as final V1 acceptance.  
 > Qt main window, Qt WebEngine, OSGB native preview, `apps/geoforge_shell`, and `apps/osgb_viewer` are **out of V1 scope**. Code is **not deleted** in Phase 0.  
@@ -48,7 +50,7 @@ P4 closed via basisu. Later push list: `PUSH_CANDIDATES.md` (no push this batch)
 
 ## Non-claims
 
-- No Windows installer
+- Windows NSIS exists and passes isolated install/start smoke; native `_3dtile` is not bundled
 - No full / linked Qt WebEngine shell (`geoforge_shell` = browser fallback + OSGB embed)
 - Optional Qt osgb_viewer + geoforge_shell (DISPLAY often :2)
 - Native in-binary `--enable-texture-compress` still absent on Aug-2023 `_3dtile`;

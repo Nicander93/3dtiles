@@ -30,6 +30,7 @@ pub use selector::{select_for_blocks, select_one, Selection, DEFAULT_SOURCE_ERRO
 pub use texture::{find_basisu, process_textures, ProcessedTexture, TextureData, TextureMetrics};
 pub use tileset_writer::{
     assert_world_transform_invariant, box_diagonal, bv_world_to_local, geometric_error_proxy,
+    leaf_geometric_error,
     probe_tileset_structure, rebuild_tileset, relative_transform, ProxyWriteMetrics, RebuildReport,
     TilesetProbe, WriteOptions,
 };

@@ -5,7 +5,7 @@ import { Alert } from "../components/Alert";
 const defaults: DesktopSettings = {
   defaultOutputRoot: "",
   defaultRebuildTop: true,
-  defaultRebuildLevels: 1,
+  defaultRebuildLevels: 0,
   defaultTextureCompress: true,
   pythonServerUrl: "http://127.0.0.1:8787",
   resourceServerPort: 0,
@@ -94,16 +94,17 @@ export function Settings() {
             <label>默认重建层数（rebuildTop.levels）</label>
             <select
               className="select"
-              value={form.defaultRebuildLevels === 2 ? 2 : 1}
+              value={form.defaultRebuildLevels}
               onChange={(e) =>
                 setForm({
                   ...form,
-                  defaultRebuildLevels: Number(e.target.value) === 2 ? 2 : 1,
+                  defaultRebuildLevels: Number(e.target.value),
                 })
               }
             >
-              <option value={1}>1 — 默认</option>
-              <option value={2}>2 — 两层金字塔</option>
+              <option value={0}>自动到根</option>
+              <option value={1}>1</option>
+              <option value={2}>2</option>
             </select>
           </div>
           <div className="field">
@@ -145,7 +146,7 @@ export function Settings() {
           {healthError && <Alert kind="warn">{healthError}</Alert>}
           {resourceInfo && <Alert kind="success">{resourceInfo}</Alert>}
           <p className="muted" style={{ marginTop: 12 }}>
-            任务和成果保存在本地。转换走 Processor；找不到 Processor 时才会用 Python 服务。
+            任务和成果保存在本地。转换走 Processor；找不到 _3dtile 时会尝试 Docker。找不到 Processor 时才会用 Python 服务。
           </p>
         </aside>
       </div>

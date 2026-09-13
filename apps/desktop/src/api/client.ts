@@ -122,7 +122,7 @@ export function deriveStages(api: ApiTask): TaskStageInfo[] {
   const op = (api.operation || '').toLowerCase();
   const rebuildOpts = opts.rebuildTop as { enabled?: boolean; levels?: number } | undefined;
   const rebuildOn = rebuildOpts?.enabled === true;
-  const rebuildLevels = rebuildOpts?.levels === 2 ? 2 : 1;
+  const rebuildLevels = Number(rebuildOpts?.levels || 0);
   const keepTexture = textureIsKeep(opts);
   const skipConvert = op === 'process-tileset' || op === 'rebuild-top';
   const skipRebuild = !rebuildOn && op !== 'rebuild-top';
@@ -153,7 +153,9 @@ export function deriveStages(api: ApiTask): TaskStageInfo[] {
   return STAGE_DEFS.map((def, i) => {
     const label =
       def.id === 'rebuild' && (rebuildOn || op === 'rebuild-top')
-        ? `顶层重建 · L${rebuildLevels}`
+        ? rebuildLevels > 0
+          ? `顶层重建 · L${rebuildLevels}`
+          : '顶层重建 · 到根'
         : def.label;
 
     if (status === 'failed' && stage === def.id) {

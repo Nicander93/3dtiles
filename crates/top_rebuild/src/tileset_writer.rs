@@ -121,10 +121,30 @@ pub fn box_diagonal(bv: &BoundingVolume) -> f64 {
     2.0 * (hx * hx + hy * hy + hz * hz).sqrt()
 }
 
-/// Plan §17.3: `proxyError = max(childSourceError) + simplificationError`,
-/// with strict parent > child and upward monotonicity.
-/// A mild diagonal floor assists when simplification error is ~0
-/// (not the Python 0.25 smoke heuristic alone).
+/// Converter Block roots often stamp a constant GE (e.g. 1000 on a ~150 m tile).
+/// That is far larger than the block, so parent proxies can only add +1 / +1%.
+/// Cap the leaf to the block's own size so the HLOD ladder has room to grow.
+pub fn leaf_geometric_error(source_error: f64, bounds: &BoundingVolume) -> f64 {
+    let src = if source_error.is_finite() && source_error > 0.0 {
+        source_error
+    } else {
+        1.0
+    };
+    let diag = box_diagonal(bounds);
+    if !diag.is_finite() || diag <= 0.0 {
+        return src;
+    }
+    let spatial = (diag * 0.75).max(1.0);
+    if src > spatial * 2.0 {
+        spatial
+    } else {
+        src
+    }
+}
+
+/// Parent GE must be clearly larger than children so Cesium SSE can stop on
+/// a proxy in the far field. `max(child)*2` and `diag*0.75` give a usable ladder;
+/// `+ simplificationError` is kept as a lower bound.
 pub fn geometric_error_proxy(
     child_errors: &[f64],
     simplification_error: f64,
@@ -133,9 +153,12 @@ pub fn geometric_error_proxy(
     let max_child = child_errors.iter().copied().fold(0.0_f64, f64::max);
     let from_simp = max_child + simplification_error.max(0.0);
     let diag = box_diagonal(bounds);
-    let from_diag = if diag > 0.0 { diag * 0.05 } else { 0.0 };
-    let floor = (max_child * 1.01 + 1e-3).max(max_child + 1.0);
-    let ge = from_simp.max(floor).max(from_diag);
+    let from_diag = if diag > 0.0 { diag * 0.75 } else { 0.0 };
+    let from_ratio = max_child * 2.0;
+    let ge = from_simp
+        .max(from_ratio)
+        .max(from_diag)
+        .max(max_child + 1.0);
     if ge <= max_child {
         max_child + 1.0
     } else {
@@ -386,7 +409,10 @@ fn ensure_leaf_content(
 
     let sel_rep = &block.representations[sel.representation_index];
     let sel_path = out_block_dir.join(content_rel(block, &sel_rep.content_path));
-    Ok((sel_path, sel.source_error))
+    Ok((
+        sel_path,
+        leaf_geometric_error(sel.source_error, &block.bounds),
+    ))
 }
 
 fn write_proxy_bytes(
@@ -829,6 +855,33 @@ mod tests {
         assert!(ge > 50.0);
         let ge2 = geometric_error_proxy(&[ge], 1.0, &bv);
         assert!(ge2 > ge);
+    }
+
+    #[test]
+    fn leaf_ge_clamps_converter_constant() {
+        let bv = BoundingVolume::from_box([
+            0.0, 0.0, 0.0, 75.0, 0.0, 0.0, 0.0, 75.0, 0.0, 0.0, 0.0, 10.0,
+        ]);
+        let ge = leaf_geometric_error(1000.0, &bv);
+        assert!(ge < 300.0 && ge > 50.0, "ge={ge}");
+        assert!((ge - leaf_geometric_error(1000.0, &bv)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn leaf_ge_keeps_plausible_source() {
+        let bv = BoundingVolume::from_box([
+            0.0, 0.0, 0.0, 75.0, 0.0, 0.0, 0.0, 75.0, 0.0, 0.0, 0.0, 10.0,
+        ]);
+        assert!((leaf_geometric_error(50.0, &bv) - 50.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn geometric_error_has_spatial_ladder() {
+        let parent = BoundingVolume::from_box([
+            0.0, 0.0, 0.0, 150.0, 0.0, 0.0, 0.0, 150.0, 0.0, 0.0, 0.0, 20.0,
+        ]);
+        let ge = geometric_error_proxy(&[80.0], 0.5, &parent);
+        assert!(ge >= 160.0, "ge={ge}");
     }
 
     #[test]

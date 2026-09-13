@@ -4,8 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>GeoForge Cesium Preview</title>
-  <script src="https://cesium.com/downloads/cesiumjs/releases/1.125/Build/Cesium/Cesium.js"></script>
-  <link href="https://cesium.com/downloads/cesiumjs/releases/1.125/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <script>window.CESIUM_BASE_URL = './vendor/cesium/';</script>
+  <script src="./vendor/cesium/Cesium.js"></script>
+  <link href="./vendor/cesium/Widgets/widgets.css" rel="stylesheet" />
   <style>
     html, body, #cesiumContainer { width:100%; height:100%; margin:0; overflow:hidden; }
     #hud {
@@ -32,6 +33,13 @@
     <div>加载：<code id="tilesetLabel">…</code></div>
     <div class="meta" id="statusLine">初始化…</div>
     <div class="meta" id="debugLine" style="display:none"></div>
+    <div id="debugControls" style="display:none">
+      <button data-range="2">近景</button>
+      <button data-range="10">中景</button>
+      <button data-range="40">远景</button>
+      <button data-range="100">超远景</button>
+      <pre id="renderMetrics" style="white-space:pre-wrap"></pre>
+    </div>
     <div id="errorBanner"></div>
   </div>
   <div id="cesiumContainer"></div>
@@ -60,13 +68,13 @@
     const viewer = new Cesium.Viewer('cesiumContainer', {
       animation: false,
       timeline: false,
-      baseLayerPicker: true,
+      baseLayerPicker: false,
       geocoder: false,
       homeButton: true,
       sceneModePicker: true,
       navigationHelpButton: false,
       fullscreenButton: true,
-      imageryProvider: false,
+      baseLayer: false,
       terrainProvider: undefined,
       infoBox: false,
       selectionIndicator: false,
@@ -74,7 +82,8 @@
     viewer.scene.globe.depthTestAgainstTerrain = false;
     viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#1a2333');
     viewer.imageryLayers.removeAll();
-    try {
+    // Online imagery is opt-in; local tilesets work without network access.
+    if (q('basemap') === 'osm') try {
       viewer.imageryLayers.addImageryProvider(
         new Cesium.UrlTemplateImageryProvider({
           url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -179,6 +188,44 @@
       return new Cesium.HeadingPitchRange(0.25, -0.55, Math.max(r * 2.0, 150));
     }
 
+    function observeRendering(tileset) {
+      if (!debugExtent) return;
+      document.getElementById('debugControls').style.display = 'block';
+      const visible = new Set();
+      let frames = 0;
+      let sampleStart = performance.now();
+      viewer.scene.preUpdate.addEventListener(() => visible.clear());
+      tileset.tileVisible.addEventListener((tile) => {
+        const url = tile.content && tile.content.url;
+        if (url) visible.add(url);
+      });
+      viewer.scene.postRender.addEventListener(() => {
+        frames++;
+        const now = performance.now();
+        if (now - sampleStart < 1000) return;
+        const proxies = [...visible].filter((url) => /Proxy_L\d+/.test(url));
+        const metrics = {
+          loaded: tileset.tilesLoaded,
+          visibleTiles: visible.size,
+          proxyTiles: proxies.length,
+          originalTiles: visible.size - proxies.length,
+          fps: Math.round(frames * 1000 / (now - sampleStart)),
+          proxyLevels: [...new Set(proxies.map((url) => url.match(/Proxy_L(\d+)/)[1]))],
+        };
+        document.getElementById('renderMetrics').textContent = JSON.stringify(metrics, null, 2);
+        frames = 0;
+        sampleStart = now;
+      });
+      document.querySelectorAll('[data-range]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const sphere = tileset.boundingSphere;
+          viewer.camera.viewBoundingSphere(sphere, new Cesium.HeadingPitchRange(
+            0.25, -0.55, sphere.radius * Number(button.dataset.range)));
+          viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+        });
+      });
+    }
+
     async function fitToTileset(tileset, duration) {
       const sphere = tileset.boundingSphere;
       if (!sphere || !(sphere.radius > 0)) {
@@ -227,6 +274,7 @@
       });
       currentTileset = tileset;
       viewer.scene.primitives.add(tileset);
+      observeRendering(tileset);
 
       let sphere = tileset.boundingSphere;
       let enuApplied = null;
