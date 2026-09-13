@@ -105,6 +105,47 @@ impl ArtifactStore {
     let root = PathBuf::from(path);
     let canon = root.canonicalize().unwrap_or(root.clone());
     let path_str = canon.to_string_lossy().into_owned();
+
+    // Re-register same path: update metadata, do not duplicate
+    if let Ok(Some(existing)) = self.find_by_path(&path_str) {
+      let id = existing.id.clone();
+      let now = now_secs();
+      let label = if label.is_empty() {
+        existing.label.clone()
+      } else {
+        label.to_string()
+      };
+      let kind = if kind.is_empty() {
+        existing.kind.clone()
+      } else {
+        kind.to_string()
+      };
+      {
+        let conn = self.conn.lock();
+        conn
+          .execute(
+            "UPDATE artifacts SET task_id = COALESCE(?1, task_id), kind = ?2, label = ?3, available = ?4 WHERE id = ?5",
+            params![
+              task_id,
+              kind,
+              label,
+              if canon.exists() { 1 } else { 0 },
+              id
+            ],
+          )
+          .map_err(|e| e.to_string())?;
+      }
+      self.roots.write().insert(id.clone(), canon.clone());
+      return Ok(make_artifact(
+        id,
+        task_id.map(|s| s.to_string()).or(existing.task_id),
+        path_str,
+        kind,
+        label,
+        existing.created_at.max(now),
+      ));
+    }
+
     let id = format!("art-{}", &Uuid::new_v4().to_string().replace('-', "")[..12]);
     let now = now_secs();
     let label = if label.is_empty() {
@@ -143,6 +184,17 @@ impl ArtifactStore {
       label,
       now,
     ))
+  }
+
+  pub fn find_by_path(&self, path: &str) -> Result<Option<ArtifactRecord>, String> {
+    let list = self.list_raw()?;
+    let target = PathBuf::from(path);
+    let target_canon = target.canonicalize().unwrap_or(target);
+    Ok(list.into_iter().find(|a| {
+      let p = PathBuf::from(&a.path);
+      let c = p.canonicalize().unwrap_or(p);
+      c == target_canon
+    }))
   }
 
   pub fn get(&self, id: &str) -> Result<Option<ArtifactRecord>, String> {

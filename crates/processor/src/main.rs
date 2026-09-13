@@ -2,7 +2,7 @@
 
 use clap::{Parser, Subcommand};
 use processor::{
-    run_task, scan_osgb, CancelFlag, TaskConfig, EXIT_FAILED,
+    capabilities_json, run_task, scan_osgb, CancelFlag, TaskConfig, EXIT_FAILED,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -55,6 +55,11 @@ enum Commands {
     ScanOsgb {
         #[arg(long)]
         path: PathBuf,
+    },
+    /// Probe bundled tools (JSON). Same source as desktop capabilities.
+    Capabilities {
+        #[arg(long, default_value_t = true)]
+        json: bool,
     },
 }
 
@@ -136,6 +141,15 @@ fn main() -> ExitCode {
             let result = scan_osgb(&path.to_string_lossy());
             println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
             if result.get("valid").and_then(|v| v.as_bool()).unwrap_or(false) {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(EXIT_FAILED as u8)
+            }
+        }
+        Commands::Capabilities { json: _ } => {
+            let caps = capabilities_json();
+            println!("{}", serde_json::to_string_pretty(&caps).unwrap_or_default());
+            if caps.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::from(EXIT_FAILED as u8)

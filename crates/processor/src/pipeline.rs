@@ -2,6 +2,7 @@
 
 use crate::cancel::CancelFlag;
 use crate::geo::{build_tile_config_json, missing_crs_message, resolve_effective_geo};
+use crate::path_policy;
 use crate::protocol::{Emitter, Stage, TaskConfig, EXIT_CANCELLED, EXIT_FAILED, EXIT_OK};
 use crate::stages::{commit, convert, rebuild, scan, texture, validate};
 use serde_json::json;
@@ -17,6 +18,14 @@ pub fn run_task(config: TaskConfig, cancel: CancelFlag) -> RunOutcome {
     let emitter = Arc::new(Emitter::new(config.task_id.clone()));
     cancel.install_watchers();
 
+    if let Err(msg) = config.validate_schema() {
+        emitter.error("UNSUPPORTED_SCHEMA", &msg);
+        return RunOutcome {
+            exit_code: EXIT_FAILED,
+            final_path: None,
+        };
+    }
+
     let result = match config.operation.as_str() {
         "convert-osgb" => run_convert_osgb(&config, &emitter, &cancel),
         "process-tileset" => run_process_tileset(&config, &emitter, &cancel),
@@ -25,19 +34,12 @@ pub fn run_task(config: TaskConfig, cancel: CancelFlag) -> RunOutcome {
 
     match result {
         Ok(path) => {
-            if cancel.is_cancelled() {
-                emitter.error("CANCELLED", "task cancelled");
-                RunOutcome {
-                    exit_code: EXIT_CANCELLED,
-                    final_path: None,
-                }
-            } else {
-                emitter.stage(Stage::Done, "succeeded");
-                emitter.result(&path.to_string_lossy());
-                RunOutcome {
-                    exit_code: EXIT_OK,
-                    final_path: Some(path),
-                }
+            // After successful commit, cancel must not rewrite outcome.
+            emitter.stage(Stage::Done, "succeeded");
+            emitter.result(&path.to_string_lossy());
+            RunOutcome {
+                exit_code: EXIT_OK,
+                final_path: Some(path),
             }
         }
         Err(msg) => {
@@ -77,14 +79,19 @@ fn run_convert_osgb(
     cancel: &CancelFlag,
 ) -> Result<PathBuf, String> {
     let options = config.options_obj();
-    let final_out = PathBuf::from(config.output_path());
+    let validated = path_policy::validate_io_paths(
+        Path::new(config.input_path()),
+        Path::new(config.output_path()),
+        &config.task_id,
+    )?;
+    let final_out = validated.output.clone();
     let temp = commit::prepare_temp(&final_out, &config.task_id)?;
     // Work subdirs inside temp
     let convert_dir = temp.join("convert");
     std::fs::create_dir_all(&convert_dir).map_err(|e| e.to_string())?;
 
     emitter.stage(Stage::Scan, "Validating OSGB root");
-    let scan_result = scan::scan_osgb(config.input_path());
+    let scan_result = scan::scan_osgb(validated.input_root.to_string_lossy().as_ref());
     let tile_count = scan_result
         .get("summary")
         .and_then(|s| s.get("tileCount"))
@@ -182,11 +189,10 @@ fn run_convert_osgb(
         })?;
     }
 
-    validate::validate_tileset_dir(emitter, &staged)?;
+    validate::validate_tileset_dir_cancellable(emitter, &staged, Some(cancel))?;
     check_cancel(cancel)?;
 
-    // Move staged up: commit expects temp_dir contents to become final_out
-    // So rename temp's staged to be the only content — simplest: commit `staged` as final
+    // Brief non-cancellable publish window
     commit::commit_rename(emitter, &staged, &final_out)?;
     // Cleanup leftover temp shell
     commit::cleanup_temp(&temp);
@@ -211,22 +217,27 @@ fn run_process_tileset(
         );
     }
 
+    let validated = path_policy::validate_io_paths(
+        Path::new(config.input_path()),
+        Path::new(config.output_path()),
+        &config.task_id,
+    )?;
     emitter.stage(Stage::Scan, "Checking tileset input");
-    let tileset = scan::resolve_tileset(config.input_path())?;
+    let tileset = scan::resolve_tileset(validated.input_root.to_string_lossy().as_ref())?;
     let in_dir = tileset
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .to_path_buf();
     check_cancel(cancel)?;
 
-    let final_out = PathBuf::from(config.output_path());
+    let final_out = validated.output.clone();
     let temp = commit::prepare_temp(&final_out, &config.task_id)?;
     let work = temp.join("work");
 
     if want_rebuild {
         rebuild::run_rebuild(emitter, cancel, &in_dir, &work, &rebuild_opts)?;
     } else {
-        // texture-only: copy input tree
+        // texture-only: copy input tree (work is outside input_root by path_policy)
         emitter.log(&format!(
             "[texture] copy {} -> {}",
             in_dir.display(),
@@ -243,7 +254,7 @@ fn run_process_tileset(
         texture::finish_texture(emitter, cancel, &work, "keep")?;
     }
 
-    validate::validate_tileset_dir(emitter, &work)?;
+    validate::validate_tileset_dir_cancellable(emitter, &work, Some(cancel))?;
     check_cancel(cancel)?;
     commit::commit_rename(emitter, &work, &final_out)?;
     commit::cleanup_temp(&temp);

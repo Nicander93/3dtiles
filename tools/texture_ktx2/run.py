@@ -1,20 +1,74 @@
 #!/usr/bin/env python3
-"""CLI wrapper for KTX2 post-process (loads experiments desktop_server_py module)."""
+"""Product CLI for KTX2 post-process (tools/texture_ktx2)."""
 from __future__ import annotations
-import runpy
+
+import json
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-CANDIDATES = [
-    ROOT / "tools" / "experiments" / "desktop_server_py" / "app" / "texture_ktx2.py",
-    ROOT / "apps" / "desktop_server" / "app" / "texture_ktx2.py",  # one-release fallback
-]
-script = next((p for p in CANDIDATES if p.is_file()), None)
-if script is None:
-    print("texture_ktx2.py not found under tools/experiments/desktop_server_py or apps/desktop_server", file=sys.stderr)
-    sys.exit(2)
-# Ensure sibling imports under app/ resolve if any; module is mostly stdlib-only.
-sys.path.insert(0, str(script.parents[1]))  # .../desktop_server_py or .../desktop_server
-sys.path.insert(0, str(ROOT))
-runpy.run_path(str(script), run_name="__main__")
+# Prefer local package module; fall back to experiments copy once.
+_HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE))
+
+from texture_ktx2 import (  # noqa: E402
+    copy_and_process,
+    find_basisu,
+    process_tileset_dir,
+)
+
+
+def main() -> int:
+    import argparse
+
+    ap = argparse.ArgumentParser(description="GeoForge texture KTX2 post-process")
+    ap.add_argument("-i", "--input", required=True, help="input tileset directory")
+    ap.add_argument("-o", "--output", help="output directory (copy then process); default=in-place")
+    ap.add_argument("--mode", default="ktx2-etc1s", choices=["ktx2", "ktx2-etc1s", "ktx2-uastc"])
+    ap.add_argument("-q", "--quality", type=int, default=128)
+    ap.add_argument("--basisu", help="absolute path to basisu")
+    ap.add_argument("--report", help="write JSON report to this path")
+    args = ap.parse_args()
+
+    def _print(m: str) -> None:
+        print(m, flush=True)
+
+    basisu = Path(args.basisu) if args.basisu else find_basisu()
+    if not basisu or not Path(basisu).is_file():
+        print("basisu not found (pass --basisu or set GEOFORGE_BASISU)", file=sys.stderr)
+        return 2
+
+    if args.output:
+        st = copy_and_process(
+            Path(args.input),
+            Path(args.output),
+            mode=args.mode,
+            quality=args.quality,
+            log=_print,
+        )
+    else:
+        st = process_tileset_dir(
+            Path(args.input),
+            mode=args.mode,
+            basisu=Path(basisu),
+            quality=args.quality,
+            log=_print,
+        )
+
+    # Fail if any per-file errors
+    if st.get("errors"):
+        print(json.dumps(st, indent=2))
+        if args.report:
+            Path(args.report).write_text(json.dumps(st, indent=2), encoding="utf-8")
+        return 1
+
+    print(json.dumps(st, indent=2))
+    if args.report:
+        Path(args.report).write_text(json.dumps(st, indent=2), encoding="utf-8")
+
+    if st["texturesConverted"] > 0 or st["filesSeen"] == 0:
+        return 0
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

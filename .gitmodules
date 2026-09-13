@@ -1,6 +1,6 @@
-[submodule "thirdparty/ufbx"]
-	path = thirdparty/ufbx
+[submodule "engines/3dtiles-converter/thirdparty/ufbx"]
+	path = engines/3dtiles-converter/thirdparty/ufbx
 	url = https://github.com/ufbx/ufbx.git
-[submodule "thirdparty/base64"]
-	path = thirdparty/base64
+[submodule "engines/3dtiles-converter/thirdparty/base64"]
+	path = engines/3dtiles-converter/thirdparty/base64
 	url = https://github.com/tobiaslocker/base64.git

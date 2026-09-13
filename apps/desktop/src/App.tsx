@@ -1,10 +1,9 @@
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import { AppLayout } from "./layouts/AppLayout";
 import { Workspace } from "./pages/Workspace";
 import { OsgbConvert } from "./pages/OsgbConvert";
 import { Processing } from "./pages/Processing";
 import { TilesPreview } from "./pages/TilesPreview";
-import { History } from "./pages/History";
 import { Results } from "./pages/Results";
 import { Settings } from "./pages/Settings";
 import { ProcessTiles } from "./pages/ProcessTiles";
@@ -17,7 +16,7 @@ export default function App() {
         <Route path="osgb/convert" element={<OsgbConvert />} />
         <Route path="processing" element={<Processing />} />
         <Route path="preview/tiles" element={<TilesPreview />} />
-        <Route path="history" element={<History />} />
+        <Route path="history" element={<Navigate to="/processing" replace />} />
         <Route path="results" element={<Results />} />
         <Route path="tiles/process" element={<ProcessTiles />} />
         <Route path="settings" element={<Settings />} />

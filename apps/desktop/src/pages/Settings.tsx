@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { api, friendlyError, isTauri, type DesktopSettings } from "../api/desktop";
 import { Alert } from "../components/Alert";
+import { FormSection } from "../components/FormSection";
+import { PathField } from "../components/PathField";
+import { Switch } from "../components/Switch";
+import { selectOutputDirectory } from "../lib/tauri";
 
 const defaults: DesktopSettings = {
   defaultOutputRoot: "",
@@ -17,6 +21,7 @@ export function Settings() {
   const [health, setHealth] = useState<string | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
   const [resourceInfo, setResourceInfo] = useState<string | null>(null);
+  const [capsText, setCapsText] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -29,17 +34,28 @@ export function Settings() {
       }
       try {
         const h = await api.health();
-        setHealth(`状态：${h.status}${h.version ? ` · 版本 ${h.version}` : ""}`);
+        setHealth(`状态：${h.status || (h.ok ? "ok" : "unknown")}${h.version ? ` · 版本 ${h.version}` : ""}`);
         setHealthError(null);
       } catch (e) {
         setHealth(null);
         setHealthError(friendlyError(e));
       }
+      try {
+        const caps = await api.capabilities();
+        const parts: string[] = [];
+        if (caps.convert?.exists) parts.push("本机转换器可用");
+        else if (caps.convert?.docker) parts.push("Docker 转换可用");
+        else parts.push("转换器不可用");
+        if (caps.postprocessBasisu?.available) parts.push("basisu 可用");
+        setCapsText(parts.join(" · "));
+      } catch {
+        setCapsText(null);
+      }
       if (isTauri()) {
         try {
           const info = await api.getResourceServerInfo();
           if (info) {
-            setResourceInfo(`Rust artifact server ${info.baseUrl} · data ${info.dataDir}`);
+            setResourceInfo(`${info.baseUrl} · ${info.dataDir}`);
           }
         } catch {
           setResourceInfo(null);
@@ -67,31 +83,39 @@ export function Settings() {
         </div>
       </div>
 
-      <div className="page-with-aside">
-        <div className="card card-pad">
-          <div className="section-title">默认参数</div>
-          {loadError && <Alert kind="error">{loadError}</Alert>}
-          <div className="field">
-            <label>默认输出根目录</label>
-            <input
-              className="input"
-              value={form.defaultOutputRoot}
-              onChange={(e) => setForm({ ...form, defaultOutputRoot: e.target.value })}
-              placeholder="例如 /data/outputs"
-            />
+      <div className="page-form">
+        {loadError ? (
+          <div style={{ marginBottom: 12 }}>
+            <Alert kind="error">{loadError}</Alert>
           </div>
+        ) : null}
+
+        <FormSection title="默认参数">
+          <PathField
+            label="默认输出根目录"
+            value={form.defaultOutputRoot}
+            placeholder="例如 D:\\output"
+            onChange={(v) => setForm({ ...form, defaultOutputRoot: v })}
+            onPick={
+              isTauri()
+                ? () =>
+                    void selectOutputDirectory().then((p) => {
+                      if (p) setForm({ ...form, defaultOutputRoot: p });
+                    })
+                : undefined
+            }
+            hint="新建任务时用于建议输出路径"
+          />
           <div className="field">
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={form.defaultRebuildTop}
-                onChange={(e) => setForm({ ...form, defaultRebuildTop: e.target.checked })}
-              />
+            <Switch
+              checked={form.defaultRebuildTop}
+              onChange={(v) => setForm({ ...form, defaultRebuildTop: v })}
+            >
               默认开启顶层重建
-            </label>
+            </Switch>
           </div>
           <div className="field">
-            <label>默认重建层数（rebuildTop.levels）</label>
+            <label>默认重建层数</label>
             <select
               className="select"
               value={form.defaultRebuildLevels}
@@ -108,47 +132,60 @@ export function Settings() {
             </select>
           </div>
           <div className="field">
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={form.defaultTextureCompress}
-                onChange={(e) => setForm({ ...form, defaultTextureCompress: e.target.checked })}
-              />
+            <Switch
+              checked={form.defaultTextureCompress}
+              onChange={(v) => setForm({ ...form, defaultTextureCompress: v })}
+            >
               默认开启纹理压缩（KTX2）
-            </label>
+            </Switch>
           </div>
-          {isTauri() && (
-            <div className="field">
-              <label>Python desktop_server URL（Phase 2 执行桥）</label>
-              <input
-                className="input"
-                value={form.pythonServerUrl}
-                onChange={(e) => setForm({ ...form, pythonServerUrl: e.target.value })}
-                placeholder="http://127.0.0.1:8787"
-              />
-            </div>
-          )}
           <div className="actions">
             <button type="button" className="btn btn-primary" onClick={() => void save()}>
               保存
             </button>
-            {saved && <span className="muted">已保存</span>}
+            {saved ? <span className="muted">已保存</span> : null}
           </div>
-        </div>
+        </FormSection>
 
-        <aside className="card card-pad">
-          <div className="section-title">运行时</div>
-          <div className="field">
-            <label>API / Desktop</label>
-            <input className="input" value={api.baseUrl} readOnly />
+        <details className="advanced-block" style={{ marginTop: 8 }}>
+          <summary>运行环境 / 诊断</summary>
+          <div className="advanced-block__body">
+            <div className="field">
+              <label>API</label>
+              <input className="input" value={api.baseUrl} readOnly />
+            </div>
+            {health ? <Alert kind="success">{health}</Alert> : null}
+            {healthError ? <Alert kind="warn">{healthError}</Alert> : null}
+            {capsText ? (
+              <div className="field-hint" style={{ marginBottom: 12 }}>
+                {capsText}
+              </div>
+            ) : null}
+            {resourceInfo ? (
+              <div className="field">
+                <label>资源服务</label>
+                <input className="input" value={resourceInfo} readOnly />
+              </div>
+            ) : null}
+            {isTauri() ? (
+              <div className="field">
+                <label>执行服务 URL</label>
+                <input
+                  className="input"
+                  value={form.pythonServerUrl}
+                  onChange={(e) => setForm({ ...form, pythonServerUrl: e.target.value })}
+                  placeholder="http://127.0.0.1:8787"
+                />
+                <div className="field-hint">仅在本机转换器不可用时作为后备</div>
+              </div>
+            ) : null}
+            <div className="actions">
+              <button type="button" className="btn" onClick={() => void save()}>
+                保存诊断项
+              </button>
+            </div>
           </div>
-          {health && <Alert kind="success">{health}</Alert>}
-          {healthError && <Alert kind="warn">{healthError}</Alert>}
-          {resourceInfo && <Alert kind="success">{resourceInfo}</Alert>}
-          <p className="muted" style={{ marginTop: 12 }}>
-            任务和成果保存在本地。转换走 Processor；找不到 _3dtile 时会尝试 Docker。找不到 Processor 时才会用 Python 服务。
-          </p>
-        </aside>
+        </details>
       </div>
     </div>
   );

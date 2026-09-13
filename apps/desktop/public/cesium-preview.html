@@ -48,15 +48,25 @@
       const u = new URL(window.location.href);
       return u.searchParams.get(name);
     }
+    function postParent(msg) {
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage(msg, '*');
+        }
+      } catch (e) { /* ignore */ }
+    }
     function showError(err) {
       const el = document.getElementById('errorBanner');
-      el.textContent = '加载失败: ' + (err && err.message ? err.message : String(err));
+      const message = (err && err.message ? err.message : String(err));
+      el.textContent = '加载失败: ' + message;
       el.classList.add('show');
       document.getElementById('statusLine').textContent = '失败';
+      postParent({ type: 'geoforge-preview-error', message: message });
     }
     function setStatus(text) {
       document.getElementById('statusLine').textContent = text;
     }
+    postParent({ type: 'geoforge-preview-loading' });
 
     const tilesetUrl = q('tileset') || './tiles/tileset.json';
     const debugExtent = q('debug') === '1' || q('debug') === 'true';
@@ -349,6 +359,14 @@
         enuApplied,
       });
       window.__geoforgePreview = { tileset, viewer, enuApplied };
+      var diag = enuApplied
+        ? ('ENU ' + enuApplied.lat.toFixed(5) + ',' + enuApplied.lon.toFixed(5))
+        : '';
+      postParent({
+        type: 'geoforge-preview-ready',
+        tilesLoaded: !!loaded,
+        diag: diag || undefined,
+      });
       return tileset;
     }
 

@@ -41,6 +41,7 @@ chrono = { version = "0.4", features = ["serde"] }
 opener = "0.7"
 thiserror = "1"
 bytes = "1"
+processor = { path = "../../../crates/processor" }
 
-# Independent from repo-root _3dtile workspace
+# Independent from repo-root product workspace
 [workspace]

@@ -1,66 +1,57 @@
-import { useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '../api/desktop';
-
-const entries = [
-  { to: '/osgb/convert', title: 'OSGB 转换', desc: '倾斜摄影 OSGB → 3D Tiles' },
-  { to: '/tiles/process', title: 'Tiles 处理', desc: '对已有 tileset 做顶层重建或纹理处理' },
-  { to: '/preview/tiles', title: '预览', desc: '用 Cesium 打开本地 tileset' },
-  { to: '/processing', title: '任务', desc: '查看进行中和排队的任务' },
-  { to: '/results', title: '成果', desc: '已登记的输出目录' },
-  { to: '/history', title: '记录', desc: '已完成任务与重跑' },
-];
+import { MagnifyingGlass } from '@phosphor-icons/react';
+import { filterToolGroups } from '../lib/tools';
 
 export function Workspace() {
-  const [taskCount, setTaskCount] = useState<number | null>(null);
-  const [artCount, setArtCount] = useState<number | null>(null);
-  const [activeCount, setActiveCount] = useState<number | null>(null);
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const [tasks, arts] = await Promise.all([api.listTasks(), api.listArtifacts()]);
-        setTaskCount(tasks.length);
-        setArtCount(arts.length);
-        setActiveCount(
-          tasks.filter((t) => t.status === 'running' || t.status === 'queued' || t.status === 'cancelling')
-            .length,
-        );
-      } catch {
-        /* ignore */
-      }
-    })();
-  }, []);
+  const [query, setQuery] = useState('');
+  const groups = useMemo(() => filterToolGroups(query), [query]);
 
   return (
     <div className="page">
-      <div className="page-header">
+      <div className="page-header full-width">
         <div>
-          <h1>工作区</h1>
+          <h1>工具</h1>
         </div>
-        <Link className="btn btn-primary" to="/osgb/convert">
-          新建转换
-        </Link>
+        <div className="search-wrap">
+          <span className="search-wrap__icon" aria-hidden>
+            <MagnifyingGlass size={16} />
+          </span>
+          <input
+            className="input"
+            placeholder="搜索工具…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label="搜索工具"
+          />
+        </div>
       </div>
 
-      <p className="muted" style={{ marginBottom: 16 }}>
-        进行中 {activeCount ?? '—'} · 任务 {taskCount ?? '—'} · 成果 {artCount ?? '—'}
-      </p>
-
-      <div className="card">
-        <table className="table">
-          <tbody>
-            {entries.map((item) => (
-              <tr key={item.to}>
-                <td style={{ width: 140 }}>
-                  <Link to={item.to}>{item.title}</Link>
-                </td>
-                <td className="muted">{item.desc}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {groups.length === 0 ? (
+        <p className="muted">未找到工具</p>
+      ) : (
+        groups.map((group) => (
+          <section className="tool-group" key={group.id}>
+            <h2 className="tool-group__title">{group.title}</h2>
+            <div className="tool-grid">
+              {group.tools.map((tool) => {
+                const Icon = tool.icon;
+                return (
+                  <Link key={tool.id} className="tool-entry" to={tool.to}>
+                    <span className="tool-entry__icon" aria-hidden>
+                      <Icon size={20} weight="regular" />
+                    </span>
+                    <span className="tool-entry__body">
+                      <h3>{tool.title}</h3>
+                      <p>{tool.desc}</p>
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        ))
+      )}
     </div>
   );
 }

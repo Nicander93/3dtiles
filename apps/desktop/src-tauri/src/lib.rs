@@ -2,7 +2,6 @@ mod artifact_store;
 mod commands;
 mod db;
 mod process_manager;
-mod python_bridge;
 mod resource_server;
 mod settings_store;
 mod state;

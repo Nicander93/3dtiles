@@ -6,7 +6,7 @@
 use crate::cancel::CancelFlag;
 use crate::protocol::{Emitter, Stage};
 use crate::util::{run_logged, tool_paths};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -23,16 +23,102 @@ pub fn run_rebuild(
     output_dir: &Path,
     rebuild: &Value,
 ) -> Result<(), String> {
+    precheck_rebuild_input(emitter, input_dir)?;
+    let rebuild = apply_quality_preset(rebuild);
+
     if output_dir.exists() {
         std::fs::remove_dir_all(output_dir).map_err(|e| e.to_string())?;
     }
 
     let engine = rebuild_engine();
     if engine == "python" || engine == "py" || engine == "baseline" {
-        run_rebuild_python(emitter, cancel, input_dir, output_dir, rebuild)
+        run_rebuild_python(emitter, cancel, input_dir, output_dir, &rebuild)
     } else {
-        run_rebuild_rust(emitter, cancel, input_dir, output_dir, rebuild)
+        run_rebuild_rust(emitter, cancel, input_dir, output_dir, &rebuild)
     }
+}
+
+fn apply_quality_preset(rebuild: &Value) -> Value {
+    let mut obj = rebuild.as_object().cloned().unwrap_or_default();
+    let quality = obj
+        .get("quality")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if obj.get("l1MaxTriangles").is_none() && obj.get("l1_max_triangles").is_none() {
+        let (l1, l2) = match quality.as_str() {
+            "quality" => (8000u64, 4000u64),
+            "speed" => (2000, 1000),
+            "balanced" => (4000, 2000),
+            _ => (4000, 2000),
+        };
+        if !quality.is_empty() {
+            obj.insert("l1MaxTriangles".into(), json!(l1));
+            obj.insert("l2MaxTriangles".into(), json!(l2));
+        }
+    }
+    Value::Object(obj)
+}
+
+/// Reject sparse / non Tile_* grids before invoking the engine (T08).
+fn precheck_rebuild_input(emitter: &Arc<Emitter>, input_dir: &Path) -> Result<(), String> {
+    let tileset = if input_dir.is_file() {
+        input_dir.to_path_buf()
+    } else {
+        input_dir.join("tileset.json")
+    };
+    if !tileset.is_file() {
+        return Err(format!("rebuild precheck: tileset.json missing at {}", tileset.display()));
+    }
+    emitter.log(&format!("[rebuild] precheck {}", tileset.display()));
+
+    // Collect Tile_+X_+Y style folder names under input
+    let root = tileset.parent().unwrap_or(input_dir);
+    let re = regex::Regex::new(r"(?i)^Tile_([+\-]?\d+)_([+\-]?\d+)$").unwrap();
+    let mut coords: Vec<(i32, i32)> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(root) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if let Some(c) = re.captures(&name) {
+                let x: i32 = c[1].parse().unwrap_or(0);
+                let y: i32 = c[2].parse().unwrap_or(0);
+                coords.push((x, y));
+            }
+        }
+    }
+    if coords.is_empty() {
+        // External tileset refs may use nested structure — let engine fail with its own message
+        emitter.log("[rebuild] precheck: no Tile_* siblings; deferring to top_rebuild");
+        return Ok(());
+    }
+    coords.sort();
+    coords.dedup();
+    let min_x = coords.iter().map(|c| c.0).min().unwrap();
+    let max_x = coords.iter().map(|c| c.0).max().unwrap();
+    let min_y = coords.iter().map(|c| c.1).min().unwrap();
+    let max_y = coords.iter().map(|c| c.1).max().unwrap();
+    let w = (max_x - min_x + 1) as usize;
+    let h = (max_y - min_y + 1) as usize;
+    let expected = w.saturating_mul(h);
+    if coords.len() != expected {
+        return Err(format!(
+            "不支持的数据布局：检测到稀疏或不连续的 Tile 网格（有 {} 块，矩形范围期望 {} = {}×{}）。V1 顶层重建仅支持规则块数据。",
+            coords.len(),
+            expected,
+            w,
+            h
+        ));
+    }
+    if w > 16 || h > 16 {
+        emitter.log(&format!(
+            "[rebuild] warning: grid {w}×{h} exceeds documented 16×16 verification envelope"
+        ));
+    }
+    emitter.log(&format!(
+        "[rebuild] precheck OK continuous grid {w}×{h} ({} tiles)",
+        coords.len()
+    ));
+    Ok(())
 }
 
 fn run_rebuild_rust(

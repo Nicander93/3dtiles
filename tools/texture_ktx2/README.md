@@ -1,17 +1,18 @@
 # texture_ktx2
 
-Post-process 3D Tiles textures to KTX2 via vcpkg basisu (KHR_texture_basisu).
-
-Implementation lives in `tools/experiments/desktop_server_py/app/texture_ktx2.py`
-(legacy path was `apps/desktop_server`).
+产品路径的 3D Tiles 纹理 KTX2 后处理（BasisU / `KHR_texture_basisu`）。
 
 ```bash
-# preferred wrapper
-python tools/texture_ktx2/run.py -i TILESET_DIR --mode ktx2-etc1s
-python tools/texture_ktx2/run.py -i TILESET_DIR -o OUT_DIR --mode ktx2-etc1s
-
-# or run module file directly
-python tools/experiments/desktop_server_py/app/texture_ktx2.py -i TILESET_DIR --mode ktx2-etc1s
+python tools/texture_ktx2/run.py -i TILESET_DIR --mode ktx2-etc1s --basisu /path/to/basisu
+python tools/texture_ktx2/run.py -i TILESET_DIR -o OUT --mode ktx2-uastc --report report.json
 ```
 
-Env: `GEOFORGE_BASISU` overrides basisu path.
+打包：用 PyInstaller onedir 生成 `geoforge-texture.exe`，与 BasisU 一并放入 `resources/runtime/texture/`。
+
+```powershell
+# 构建机示例（需已安装 pyinstaller）
+cd tools/texture_ktx2
+pyinstaller --onedir --name geoforge-texture run.py
+```
+
+环境变量：`GEOFORGE_BASISU`、`GEOFORGE_TEXTURE`（正式包指向 geoforge-texture.exe）。

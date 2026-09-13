@@ -1,7 +1,6 @@
 //! Tauri commands — §5.4 desktop API surface.
 
 use crate::process_manager::ProcessManager;
-use crate::python_bridge::{cancel_python_task, spawn_python_task_follower};
 use crate::settings_store::AppSettings;
 use crate::state::AppState;
 use serde::Deserialize;
@@ -89,11 +88,26 @@ impl PathOrObject {
 
 #[tauri::command]
 pub fn submit_task(state: State<'_, AppState>, config: SubmitTaskConfig) -> Result<Value, String> {
+  if !ProcessManager::processor_available() {
+    return Err(
+      "找不到 processor 组件，无法创建任务。请修复安装或设置环境变量 GEOFORGE_PROCESSOR。"
+        .into(),
+    );
+  }
   let name = config
     .task_name
     .or(config.name)
     .unwrap_or_default();
   let options = config.options.unwrap_or(json!({}));
+  // Preflight path policy (same rules as processor); provisional id for validation only
+  let provisional_id = "task-preflight0";
+  processor::validate_io_paths(
+    std::path::Path::new(&config.input.path()),
+    std::path::Path::new(&config.output.path()),
+    provisional_id,
+  )
+  .map_err(|e| format!("路径校验失败: {e}"))?;
+
   let task = state.tasks.create(
     &config.operation,
     &config.input.path(),
@@ -102,29 +116,16 @@ pub fn submit_task(state: State<'_, AppState>, config: SubmitTaskConfig) -> Resu
     &name,
   )?;
 
-  if ProcessManager::processor_available() {
-    let _ = state.tasks.append_log(
-      &task.id,
-      "[desktop] Phase 3: executing via local processor binary (no Python HTTP)",
-    );
-    state.processes.spawn_task(
-      state.tasks.clone(),
-      state.artifacts.clone(),
-      task.id.clone(),
-      state.data_dir.clone(),
-    );
-  } else {
-    let _ = state.tasks.append_log(
-      &task.id,
-      "[desktop] processor binary unavailable; falling back to Python desktop_server HTTP bridge",
-    );
-    spawn_python_task_follower(
-      state.tasks.clone(),
-      state.artifacts.clone(),
-      task.id.clone(),
-      state.python_base(),
-    );
-  }
+  let _ = state.tasks.append_log(
+    &task.id,
+    "[desktop] queued for local processor (serial)",
+  );
+  state.processes.spawn_task(
+    state.tasks.clone(),
+    state.artifacts.clone(),
+    task.id.clone(),
+    state.data_dir.clone(),
+  );
   Ok(json!({ "ok": true, "task": task, "id": task.id }))
 }
 
@@ -134,11 +135,18 @@ pub fn cancel_task(state: State<'_, AppState>, task_id: String) -> Result<Value,
     .tasks
     .request_cancel(&task_id)?
     .ok_or_else(|| "task not found".to_string())?;
-  // Prefer local processor cancel
+  // Cooperative cancel — do not block UI
   let _ = state.processes.cancel(&task_id);
-  if let Some(ref py_id) = task.python_task_id {
-    let _ = cancel_python_task(&state.python_base(), py_id);
+  // Queued-only tasks never start
+  if task.status == "queued" || task.stage == "queued" {
+    let _ = state.tasks.update_fields(&task_id, |t| {
+      t.status = "cancelled".into();
+      t.stage = "cancelled".into();
+      t.finished_at = Some(crate::db::now_secs());
+    });
+    state.processes.notify_idle();
   }
+  let task = state.tasks.get(&task_id)?.unwrap_or(task);
   Ok(json!({ "ok": true, "task": task }))
 }
 
@@ -275,199 +283,29 @@ pub fn get_resource_server_info(state: State<'_, AppState>) -> Result<Value, Str
 }
 
 
-/// OSGB scan in-process (Rust port of desktop_server osgb_scan — no Python).
+/// OSGB scan via processor CLI (single scan implementation).
 #[tauri::command]
 pub fn scan_osgb(path: String) -> Result<Value, String> {
-  Ok(scan_osgb_impl(&path))
-}
-
-fn scan_osgb_impl(path: &str) -> Value {
-  // Inline lightweight port matching processor::stages::scan (keep desktop crate independent).
-  use std::fs;
-  use std::path::PathBuf;
-
-  let tile_re = regex_lite_tile();
-  let expanded = PathBuf::from(path);
-  if !expanded.exists() {
-    return json!({
-      "ok": false,
-      "valid": false,
-      "path": expanded.to_string_lossy(),
-      "errors": [format!("Path does not exist: {}", expanded.display())],
-      "warnings": [],
-      "summary": {},
-    });
+  let bin = ProcessManager::processor_bin().ok_or_else(|| {
+    "找不到 processor 组件，无法扫描。请修复安装或设置 GEOFORGE_PROCESSOR。".to_string()
+  })?;
+  let output = Command::new(&bin)
+    .args(["scan-osgb", "--path", &path])
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .output()
+    .map_err(|e| format!("启动 processor 扫描失败: {e}"))?;
+  let stdout = String::from_utf8_lossy(&output.stdout);
+  let stderr = String::from_utf8_lossy(&output.stderr);
+  if stdout.trim().is_empty() {
+    return Err(format!(
+      "processor 扫描无输出 (exit {:?}): {stderr}",
+      output.status.code()
+    ));
   }
-
-  let mut root = expanded.canonicalize().unwrap_or(expanded.clone());
-  let mut warnings: Vec<String> = Vec::new();
-  if root.file_name().and_then(|n| n.to_str()) == Some("Data")
-    && root.parent().map(|p| p.join("metadata.xml").is_file()).unwrap_or(false)
-  {
-    warnings.push("Selected Data/ directory; normalized to dataset root.".into());
-    root = root.parent().unwrap().to_path_buf();
-  }
-
-  let mut errors: Vec<String> = Vec::new();
-  let meta_path = root.join("metadata.xml");
-  let data_dir = root.join("Data");
-  if !meta_path.is_file() {
-    errors.push(format!("Missing metadata.xml under {}", root.display()));
-  }
-  if !data_dir.is_dir() {
-    errors.push(format!("Missing Data/ directory under {}", root.display()));
-  }
-
-  let mut metadata = json!({});
-  if meta_path.is_file() {
-    if let Ok(text) = fs::read_to_string(&meta_path) {
-      let srs = extract_xml_tag(&text, "SRS");
-      let origin = extract_xml_tag(&text, "SRSOrigin");
-      metadata = json!({
-        "path": meta_path.to_string_lossy(),
-        "srs": srs,
-        "srsOrigin": origin,
-      });
-      if srs.is_none() {
-        warnings.push("metadata.xml has no SRS; local preview ok, geographic export needs CRS.".into());
-      }
-    }
-  }
-
-  let mut tiles = Vec::new();
-  let mut total_osgb: u64 = 0;
-  let mut total_bytes: u64 = 0;
-  if data_dir.is_dir() {
-    let mut children: Vec<_> = fs::read_dir(&data_dir)
-      .into_iter()
-      .flatten()
-      .flatten()
-      .filter(|e| e.path().is_dir())
-      .collect();
-    children.sort_by_key(|e| e.file_name());
-    for child in children {
-      let name = child.file_name().to_string_lossy().into_owned();
-      if !tile_re(&name) {
-        warnings.push(format!("Non-standard directory under Data/: {name}"));
-        continue;
-      }
-      let entry = child.path().join(format!("{name}.osgb"));
-      let entry_ok = entry.is_file();
-      let osgb_files: Vec<_> = fs::read_dir(child.path())
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|e| {
-          e.path()
-            .extension()
-            .and_then(|x| x.to_str())
-            .map(|x| x.eq_ignore_ascii_case("osgb"))
-            .unwrap_or(false)
-        })
-        .collect();
-      let file_count = osgb_files.len() as u64;
-      let size: u64 = osgb_files
-        .iter()
-        .filter_map(|e| e.metadata().ok().map(|m| m.len()))
-        .sum();
-      total_osgb += file_count;
-      total_bytes += size;
-      if !entry_ok {
-        errors.push(format!("Missing entry OSGB (must match folder name): {}", entry.display()));
-      }
-      tiles.push(json!({
-        "name": name,
-        "entryExists": entry_ok,
-        "osgbCount": file_count,
-        "bytes": size,
-      }));
-    }
-  }
-  if data_dir.is_dir() && tiles.is_empty() {
-    errors.push("No Tile_* directories found under Data/".into());
-  }
-
-  let valid = errors.is_empty();
-  let srs = metadata.get("srs").cloned().unwrap_or(Value::Null);
-  let unit_hint = match srs.as_str() {
-    Some(s) if s.to_uppercase().starts_with("ENU:") => {
-      "ENU 局部坐标：米（东/北/天）；地理原点为经纬度（度）"
-    }
-    Some(_) => "自定义 CRS：请确认单位与轴序；高程基准独立",
-    None => "未知单位（缺 SRS）",
-  };
-  let geo = json!({
-    "scanSrs": srs,
-    "scanOrigin": metadata.get("srsOrigin"),
-    "effectiveCrs": srs,
-    "effectiveOrigin": metadata.get("srsOrigin").and_then(|o| o.as_str()).map(|text| {
-      let parts: Vec<_> = text.split(',').collect();
-      json!({
-        "x": parts.get(0).and_then(|p| p.parse::<f64>().ok()),
-        "y": parts.get(1).and_then(|p| p.parse::<f64>().ok()),
-        "z": parts.get(2).and_then(|p| p.parse::<f64>().ok()),
-        "source": "metadata",
-        "text": text,
-      })
-    }),
-    "unitHint": unit_hint,
-    "hasCrs": srs.as_str().map(|s| !s.is_empty()).unwrap_or(false),
-    "geographicExport": false,
-  });
-
-  json!({
-    "ok": valid,
-    "valid": valid,
-    "path": root.to_string_lossy(),
-    "requestedPath": path,
-    "errors": errors,
-    "warnings": warnings,
-    "metadata": metadata,
-    "summary": {
-      "root": root.to_string_lossy(),
-      "tileCount": tiles.len(),
-      "osgbFileCount": total_osgb,
-      "totalBytes": total_bytes,
-      "srs": srs,
-      "srsOrigin": metadata.get("srsOrigin"),
-    },
-    "tiles": tiles,
-    "hasMetadata": meta_path.is_file(),
-    "hasDataDir": data_dir.is_dir(),
-    "tileCount": tiles.len(),
-    "unitHint": unit_hint,
-    "geo": geo,
-    "message": if valid { "OSGB root OK" } else { "OSGB validation failed" },
+  serde_json::from_str(stdout.trim()).map_err(|e| {
+    format!("解析扫描结果失败: {e}; stderr={stderr}; stdout={}", stdout.chars().take(400).collect::<String>())
   })
-}
-
-fn extract_xml_tag(xml: &str, tag: &str) -> Option<String> {
-  let open = format!("<{tag}>");
-  let close = format!("</{tag}>");
-  let start = xml.find(&open)? + open.len();
-  let end = xml[start..].find(&close)? + start;
-  let val = xml[start..end].trim();
-  if val.is_empty() { None } else { Some(val.to_string()) }
-}
-
-fn regex_lite_tile() -> impl Fn(&str) -> bool {
-  |name: &str| {
-    let n = name.as_bytes();
-    // Tile_+digits_+digits (case-insensitive Tile_)
-    let lower = name.to_ascii_lowercase();
-    if !lower.starts_with("tile_") {
-      return false;
-    }
-    let rest = &name[5..];
-    let parts: Vec<&str> = rest.split('_').collect();
-    if parts.len() != 2 {
-      return false;
-    }
-    parts.iter().all(|p| {
-      let p = p.strip_prefix('+').or_else(|| p.strip_prefix('-')).unwrap_or(p);
-      !p.is_empty() && p.chars().all(|c| c.is_ascii_digit())
-    }) && !n.is_empty()
-  }
 }
 
 fn resolve_convert_bin() -> PathBuf {
@@ -487,6 +325,10 @@ fn resolve_convert_bin() -> PathBuf {
         "../../../target/release/_3dtile.exe",
         "../../../target/debug/_3dtile",
         "../../../target/debug/_3dtile.exe",
+        "../../../engines/3dtiles-converter/target/release/_3dtile",
+        "../../../engines/3dtiles-converter/target/release/_3dtile.exe",
+        "../../../engines/3dtiles-converter/target/debug/_3dtile",
+        "../../../engines/3dtiles-converter/target/debug/_3dtile.exe",
       ] {
         let cand = dir.join(rel);
         if cand.is_file() {
@@ -502,6 +344,10 @@ fn resolve_convert_bin() -> PathBuf {
         "target/release/_3dtile.exe",
         "target/debug/_3dtile",
         "target/debug/_3dtile.exe",
+        "engines/3dtiles-converter/target/release/_3dtile",
+        "engines/3dtiles-converter/target/release/_3dtile.exe",
+        "engines/3dtiles-converter/target/debug/_3dtile",
+        "engines/3dtiles-converter/target/debug/_3dtile.exe",
       ] {
         let cand = anc.join(sub);
         if cand.is_file() {
@@ -558,7 +404,7 @@ pub fn health(state: State<'_, AppState>) -> Result<Value, String> {
     "product": "geoforge-desktop",
     "version": "0.1.0-phase3",
     "message": if !processor {
-      "Tauri ready; processor binary missing — convert falls back to Python HTTP"
+      "找不到 processor 组件。请修复安装或设置 GEOFORGE_PROCESSOR。"
     } else if convert_ok {
       "Tauri + processor"
     } else {
@@ -589,46 +435,21 @@ pub fn health(state: State<'_, AppState>) -> Result<Value, String> {
 
 #[tauri::command]
 pub fn capabilities() -> Result<Value, String> {
-  let basisu = PathBuf::from(
-    "/workspace/repos/3dtiles/vcpkg_installed/x64-linux/tools/basisu/basisu",
-  );
-  let basisu_ok = basisu.is_file()
-    || std::env::var("GEOFORGE_BASISU").map(|p| PathBuf::from(p).is_file()).unwrap_or(false);
-  let modes = vec![
-    json!({ "mode": "keep", "supported": true, "cliFlags": [], "postprocess": false }),
-    json!({
-      "mode": "ktx2-etc1s",
-      "supported": basisu_ok,
-      "cliFlags": [],
-      "postprocess": true,
-      "reason": if basisu_ok { Value::Null } else { json!("basisu not found") },
-      "processTileset": { "mode": "ktx2-etc1s", "supported": basisu_ok },
-    }),
-    json!({
-      "mode": "ktx2-uastc",
-      "supported": basisu_ok,
-      "cliFlags": [],
-      "postprocess": true,
-      "reason": if basisu_ok { Value::Null } else { json!("basisu not found") },
-      "processTileset": { "mode": "ktx2-uastc", "supported": basisu_ok },
-    }),
-    json!({
-      "mode": "ktx2",
-      "supported": basisu_ok,
-      "cliFlags": [],
-      "postprocess": true,
-      "reason": if basisu_ok { Value::Null } else { json!("basisu not found") },
-      "processTileset": { "mode": "ktx2", "supported": basisu_ok },
-    }),
-  ];
-  Ok(json!({
-    "ok": true,
-    "convert": convert_status(),
-    "textureModes": modes,
-    "aliases": { "ktx2": "ktx2-etc1s" },
-    "postprocessBasisu": {
-      "available": basisu_ok,
-      "path": if basisu_ok { json!(basisu.to_string_lossy()) } else { Value::Null },
-    },
-  }))
+  // Prefer spawning processor capabilities so probe matches task execution env
+  if let Some(bin) = ProcessManager::processor_bin() {
+    let out = Command::new(&bin)
+      .args(["capabilities", "--json"])
+      .stdout(Stdio::piped())
+      .stderr(Stdio::piped())
+      .output();
+    if let Ok(o) = out {
+      if o.status.success() {
+        if let Ok(v) = serde_json::from_slice::<Value>(&o.stdout) {
+          return Ok(v);
+        }
+      }
+    }
+  }
+  // Fallback: in-process (same crate rules)
+  Ok(processor::capabilities_json())
 }

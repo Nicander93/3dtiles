@@ -24,16 +24,21 @@ pub fn run_convert(
     emitter.stage(Stage::Convert, "OSGB → 3D Tiles");
     let rc = if tools.convert_bin.is_file() {
         run_native(emitter, cancel, &tools.convert_bin, osgb_root, out_dir, &extra)?
-    } else if docker_available() {
+    } else if !tools.packaged && docker_available() {
         let image = docker_image();
         emitter.log(&format!(
             "[convert] 本机无 _3dtile（{}），改用 Docker {image}",
             tools.convert_bin.display()
         ));
         run_docker(emitter, cancel, osgb_root, out_dir, &extra, &image)?
+    } else if tools.packaged {
+        return Err(format!(
+            "组件缺失，请修复安装（转换器 _3dtile 未找到：{}）",
+            tools.convert_bin.display()
+        ));
     } else {
         return Err(format!(
-            "找不到转换器 _3dtile（查过 {}）。本机也没有可用的 Docker。请安装 Docker Desktop 后重试（镜像 {}），或设置 GEOFORGE_3DTILE 指向转换器。",
+            "找不到转换器 _3dtile（查过 {}）。开发环境可设置 GEOFORGE_3DTILE，或安装 Docker（镜像 {}）。",
             tools.convert_bin.display(),
             docker_image()
         ));
@@ -116,10 +121,19 @@ fn run_docker(
 ) -> Result<i32, String> {
     let input = docker_volume_path(Path::new(osgb_root))?;
     let output = docker_volume_path(out_dir)?;
+    let name = format!(
+        "geoforge-convert-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0)
+    );
     let mut cmd = vec![
         "docker".into(),
         "run".into(),
         "--rm".into(),
+        "--name".into(),
+        name.clone(),
         "-e".into(),
         "LD_LIBRARY_PATH=/3dtiles/lib".into(),
         "-w".into(),
@@ -164,5 +178,12 @@ fn run_docker(
 
     cmd.push(image.into());
     cmd.extend(tile_args);
-    run_logged(emitter, cancel, &cmd, None)
+    // Wrap run_logged: on cancel, also docker stop the named container
+    let result = run_logged(emitter, cancel, &cmd, None);
+    if cancel.is_cancelled() {
+        let _ = std::process::Command::new("docker")
+            .args(["stop", "-t", "2", &name])
+            .status();
+    }
+    result
 }

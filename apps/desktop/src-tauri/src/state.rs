@@ -53,20 +53,6 @@ impl AppState {
       processes: ProcessManager::new(),
     })
   }
-
-  pub fn python_base(&self) -> String {
-    self
-      .settings
-      .get()
-      .map(|s| {
-        if s.python_server_url.is_empty() {
-          crate::python_bridge::python_base_default()
-        } else {
-          s.python_server_url
-        }
-      })
-      .unwrap_or_else(|_| crate::python_bridge::python_base_default())
-  }
 }
 
 /// Headless init for smoke tests / examples (no Tauri).

@@ -1,5 +1,6 @@
-//! Temp dir → final output rename/commit (plan §7.4).
+//! Temp dir → final output rename/commit (plan §7.4 / T01).
 
+use crate::path_policy::{self, validate_task_id};
 use crate::protocol::{Emitter, Stage};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,6 +12,7 @@ pub fn temp_work_dir(final_output: &Path, task_id: &str) -> PathBuf {
 }
 
 pub fn prepare_temp(final_output: &Path, task_id: &str) -> Result<PathBuf, String> {
+    validate_task_id(task_id)?;
     let temp = temp_work_dir(final_output, task_id);
     if temp.exists() {
         fs::remove_dir_all(&temp).map_err(|e| format!("clean temp: {e}"))?;
@@ -19,7 +21,7 @@ pub fn prepare_temp(final_output: &Path, task_id: &str) -> Result<PathBuf, Strin
     Ok(temp)
 }
 
-/// Commit temp directory to final output path.
+/// Commit temp directory to final output path (no-replace; no copy fallback).
 pub fn commit_rename(
     emitter: &Emitter,
     temp_dir: &Path,
@@ -41,17 +43,7 @@ pub fn commit_rename(
         .to_string(),
     );
 
-    if final_output.exists() {
-        remove_path(final_output)?;
-    }
-
-    match fs::rename(temp_dir, final_output) {
-        Ok(()) => {}
-        Err(_) => {
-            copy_dir_recursive(temp_dir, final_output)?;
-            let _ = fs::remove_dir_all(temp_dir);
-        }
-    }
+    path_policy::rename_no_replace(temp_dir, final_output)?;
 
     emitter.log(&format!("[commit] {}", final_output.display()));
     Ok(())
@@ -61,27 +53,4 @@ pub fn cleanup_temp(temp_dir: &Path) {
     if temp_dir.exists() {
         let _ = fs::remove_dir_all(temp_dir);
     }
-}
-
-fn remove_path(p: &Path) -> Result<(), String> {
-    if p.is_dir() {
-        fs::remove_dir_all(p).map_err(|e| e.to_string())
-    } else {
-        fs::remove_file(p).map_err(|e| e.to_string())
-    }
-}
-
-fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
-    fs::create_dir_all(dst).map_err(|e| e.to_string())?;
-    for entry in fs::read_dir(src).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let ty = entry.file_type().map_err(|e| e.to_string())?;
-        let to = dst.join(entry.file_name());
-        if ty.is_dir() {
-            copy_dir_recursive(&entry.path(), &to)?;
-        } else {
-            fs::copy(entry.path(), &to).map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(())
 }

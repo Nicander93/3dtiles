@@ -1,9 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api, friendlyError } from '../api/desktop';
 import type { CapabilitiesResponse, OsgbScanResult, TextureMode } from '../api/types';
+import { AdvancedBlock } from '../components/AdvancedBlock';
 import { Alert } from '../components/Alert';
+import { FormSection } from '../components/FormSection';
+import { PathField } from '../components/PathField';
+import { SubmitBar } from '../components/SubmitBar';
+import { Switch } from '../components/Switch';
 import { convertReady } from '../lib/convertReady';
+import { pathsEqual, suggestOutputPath, useDebouncedValue } from '../lib/formUtils';
 import {
   inferRebuildQuality,
   rebuildLevelsLabel,
@@ -14,8 +20,7 @@ import { ktx2Etc1sEnabled, ktx2UastcEnabled } from '../lib/textureCaps';
 import { isTauri, selectInputDirectory, selectOutputDirectory } from '../lib/tauri';
 
 const CONFIG_KEY = 'geoforge.osgb.convert.config';
-const SAMPLE_INPUT = '';
-const SAMPLE_OUTPUT = '';
+const OUTPUT_TOUCHED_KEY = 'geoforge.osgb.convert.outputTouched';
 
 type FormState = {
   input: string;
@@ -33,8 +38,8 @@ type FormState = {
 };
 
 const defaults: FormState = {
-  input: SAMPLE_INPUT,
-  output: SAMPLE_OUTPUT,
+  input: '',
+  output: '',
   name: '',
   rebuildTop: true,
   quality: 'balanced',
@@ -60,7 +65,6 @@ function loadConfig(): FormState {
     } else {
       next.rebuildLevels = 0;
     }
-    // migrate old comma originOverride → x/y/z
     if ((!next.originX || !next.originY || !next.originZ) && parsed.originOverride) {
       const parts = String(parsed.originOverride)
         .split(/[,;\s]+/)
@@ -79,12 +83,7 @@ function loadConfig(): FormState {
 
 function scanSrs(scan: OsgbScanResult | null): string | null {
   if (!scan) return null;
-  return (
-    scan.geo?.effectiveCrs ||
-    scan.summary?.srs ||
-    scan.metadata?.srs ||
-    null
-  );
+  return scan.geo?.effectiveCrs || scan.summary?.srs || scan.metadata?.srs || null;
 }
 
 function scanOriginText(scan: OsgbScanResult | null): string | null {
@@ -98,19 +97,41 @@ function scanOriginText(scan: OsgbScanResult | null): string | null {
 }
 
 export function OsgbConvert() {
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [form, setForm] = useState<FormState>(() => loadConfig());
+  const [outputTouched, setOutputTouched] = useState(() => {
+    try {
+      return localStorage.getItem(OUTPUT_TOUCHED_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
   const [scan, setScan] = useState<OsgbScanResult | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<ReactNode>(null);
   const [error, setError] = useState<string | null>(null);
   const [caps, setCaps] = useState<CapabilitiesResponse | null>(null);
+  const [defaultOutputRoot, setDefaultOutputRoot] = useState('');
+  const scanSeq = useRef(0);
+  const debouncedInput = useDebouncedValue(form.input, 500);
 
   useEffect(() => {
     void api.capabilities().then(setCaps).catch(() => setCaps(null));
+    void api.getSettings().then((s) => setDefaultOutputRoot(s.defaultOutputRoot || '')).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CONFIG_KEY, JSON.stringify(form));
+      localStorage.setItem(OUTPUT_TOUCHED_KEY, outputTouched ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  }, [form, outputTouched]);
 
   useEffect(() => {
     const input = searchParams.get('input') || searchParams.get('path');
@@ -123,23 +144,56 @@ export function OsgbConvert() {
       ...(output ? { output } : {}),
       ...(name ? { name } : {}),
     }));
+    if (output) setOutputTouched(true);
   }, [searchParams]);
 
-  const checklist = useMemo(() => {
-    const hasMeta = scan
-      ? Boolean(scan.metadata?.path || scan.hasMetadata || (scan.valid && !(scan.errors || []).some((e) => e.includes('metadata'))))
-      : null;
-    const hasData = scan
-      ? Boolean(scan.hasDataDir ?? !(scan.errors || []).some((e) => e.includes('Data/')))
-      : null;
-    const tileCount = scan?.tileCount ?? scan?.summary?.tileCount ?? scan?.tiles?.length;
-    const hasTiles = scan ? (tileCount ?? 0) > 0 : null;
-    return [
-      { key: 'metadata', label: 'metadata.xml', ok: hasMeta },
-      { key: 'data', label: 'Data 目录', ok: hasData },
-      { key: 'tiles', label: 'Tile_* 瓦片', ok: hasTiles, detail: tileCount != null ? `${tileCount} 个` : undefined },
-    ];
-  }, [scan]);
+  // Auto-suggest output when input changes and user hasn't touched output
+  useEffect(() => {
+    if (outputTouched) return;
+    const suggested = suggestOutputPath(form.input, defaultOutputRoot, '_tiles');
+    if (suggested && suggested !== form.output) {
+      setForm((f) => ({ ...f, output: suggested }));
+    }
+  }, [form.input, defaultOutputRoot, outputTouched]);
+
+  async function runScan(path: string) {
+    const trimmed = path.trim();
+    if (!trimmed) {
+      setScan(null);
+      setScanError(null);
+      return;
+    }
+    const seq = ++scanSeq.current;
+    setScanning(true);
+    setScanError(null);
+    try {
+      const result = await api.scanOsgb(trimmed);
+      if (seq !== scanSeq.current) return;
+      setScan(result);
+      if (!result.valid) {
+        setScanError(result.message || (result.errors || []).join('; ') || '输入目录校验未通过。');
+      } else {
+        setScanError(null);
+        if (result.path && result.path !== form.input) {
+          setForm((f) => ({ ...f, input: result.path }));
+        }
+        if (!scanSrs(result) && form.geographicExport) {
+          setAdvancedOpen(true);
+        }
+      }
+    } catch (e) {
+      if (seq !== scanSeq.current) return;
+      setScan(null);
+      setScanError(friendlyError(e));
+    } finally {
+      if (seq === scanSeq.current) setScanning(false);
+    }
+  }
+
+  useEffect(() => {
+    void runScan(debouncedInput);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedInput]);
 
   const effectiveCrs = useMemo(() => {
     const override = form.crsOverride.trim();
@@ -154,75 +208,31 @@ export function OsgbConvert() {
     return scanOriginText(scan);
   }, [form.originX, form.originY, form.originZ, scan]);
 
-  const unitHint = useMemo(() => {
-    if (scan?.unitHint && !form.crsOverride.trim()) return scan.unitHint;
-    if (scan?.geo?.unitHint && !form.crsOverride.trim()) return scan.geo.unitHint;
-    const crs = effectiveCrs || '';
-    if (!crs) return '未知单位（缺 SRS）';
-    if (/^\s*ENU\s*:/i.test(crs)) return 'ENU 局部坐标：米（东/北/天）；地理原点为经纬度（度）';
-    if (/^\s*EPSG\s*:/i.test(crs)) return 'EPSG：请确认投影米或地理度；高程基准独立';
-    return '自定义 CRS：请确认单位与轴序；高程基准独立';
-  }, [scan, form.crsOverride, effectiveCrs]);
-
   const missingCrsForGeo = form.geographicExport && !effectiveCrs;
-
-  const summary = useMemo(
-    () => ({
-      input: form.input || '（未填写）',
-      output: form.output || '（未填写）',
-      name: form.name || '自动命名',
-      options: [
-        form.rebuildTop ? rebuildLevelsLabel(form.rebuildLevels) : '不重建顶层',
-        form.textureMode === 'keep'
-          ? '纹理 keep（保留原图）'
-          : `纹理 ${form.textureMode}`,
-        form.geographicExport ? '地理导出' : '本地/非强制地理',
-      ].join(' · '),
-      crs: effectiveCrs || '（缺 CRS）',
-      origin: effectiveOrigin || '（缺原点）',
-    }),
-    [form, effectiveCrs, effectiveOrigin],
-  );
+  const convertHint = convertReady(caps);
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => ({ ...f, [key]: value }));
-  }
-
-  async function handleScan() {
-    setError(null);
-    setMessage(null);
-    if (!form.input.trim()) {
-      setError('请先填写 OSGB 输入目录路径。');
-      return;
-    }
-    setScanning(true);
-    try {
-      const result = await api.scanOsgb(form.input.trim());
-      setScan(result);
-      if (!result.valid) {
-        setError(result.message || (result.errors || []).join('; ') || '输入目录校验未通过。');
-      } else {
-        const srs = scanSrs(result) || '（缺失）';
-        const origin = scanOriginText(result) || '（缺失）';
-        setMessage(
-          `${result.message || '输入目录校验通过。'} 实际 CRS：${srs}；原点：${origin}`,
-        );
-        if (result.path && result.path !== form.input) {
-          update('input', result.path);
-        }
-      }
-    } catch (e) {
+    if (key === 'input') {
       setScan(null);
-      setError(friendlyError(e));
-    } finally {
-      setScanning(false);
+      setScanError(null);
     }
   }
 
-  function handleSave() {
-    localStorage.setItem(CONFIG_KEY, JSON.stringify(form));
-    setMessage('配置已保存到本地浏览器。');
+  function handleReset() {
+    setForm({ ...defaults });
+    setOutputTouched(false);
+    setScan(null);
+    setScanError(null);
+    setMessage(null);
     setError(null);
+    setAdvancedOpen(false);
+    try {
+      localStorage.removeItem(CONFIG_KEY);
+      localStorage.removeItem(OUTPUT_TOUCHED_KEY);
+    } catch {
+      /* ignore */
+    }
   }
 
   async function handleSubmit() {
@@ -232,10 +242,17 @@ export function OsgbConvert() {
       setError('请填写输入目录与输出路径。');
       return;
     }
+    if (pathsEqual(form.input, form.output)) {
+      setError('输出目录不能与输入目录相同，请更换输出位置。');
+      return;
+    }
     if (missingCrsForGeo) {
-      setError(
-        '缺参数阻止地理导出：扫描未得到 SRS，且未填写 CRS 覆盖。请先扫描或填写 CRS，或关闭「地理导出」。',
-      );
+      setAdvancedOpen(true);
+      setError('缺少坐标信息，请补充坐标系，或关闭地理导出。');
+      return;
+    }
+    if (scan && !scan.valid) {
+      setError(scanError || '输入校验未通过，请修正后再提交。');
       return;
     }
     setSubmitting(true);
@@ -271,8 +288,20 @@ export function OsgbConvert() {
         },
       });
       const id = res.task?.id || res.id;
-      setMessage(id ? `任务已提交：${id}` : '任务已提交。');
-      navigate('/processing');
+      setMessage(
+        id ? (
+          <>
+            任务已创建{' '}
+            <Link to={`/processing?task=${encodeURIComponent(id)}`}>查看任务</Link>
+          </>
+        ) : (
+          '任务已创建'
+        ),
+      );
+      // Refresh output suggestion to avoid overwriting just-created output
+      setOutputTouched(false);
+      const nextOut = suggestOutputPath(form.input, defaultOutputRoot, `_tiles_${Date.now().toString(36)}`);
+      if (nextOut) setForm((f) => ({ ...f, output: nextOut }));
     } catch (e) {
       setError(friendlyError(e));
     } finally {
@@ -280,360 +309,264 @@ export function OsgbConvert() {
     }
   }
 
-  const checksPassed = checklist.every((c) => c.ok === true);
-  const convertHint = convertReady(caps);
+  const inputFeedback = scanning ? (
+    <div className="input-feedback muted">正在识别…</div>
+  ) : scanError ? (
+    <div className="input-feedback bad">{scanError}</div>
+  ) : scan?.valid ? (
+    <div className="input-feedback ok">
+      <span>已识别 OSGB 数据</span>
+      <button className="btn-ghost btn-sm" type="button" onClick={() => setDetailsOpen((v) => !v)}>
+        {detailsOpen ? '收起' : '详情'}
+      </button>
+    </div>
+  ) : null;
 
   return (
     <div className="page">
       <div className="page-header">
         <div>
+          <div className="page-crumb">
+            <Link to="/">← 返回工具</Link>
+            <span>/</span>
+            <span>OSGB 转换</span>
+          </div>
           <h1>OSGB 转换</h1>
         </div>
       </div>
 
-      {error ? (
-        <div style={{ marginBottom: 12 }}>
-          <Alert kind="error">{error}</Alert>
-        </div>
-      ) : null}
-      {message ? (
-        <div style={{ marginBottom: 12 }}>
-          <Alert kind="success">{message}</Alert>
-        </div>
-      ) : null}
-      {convertHint.via === 'docker' ? (
-        <div style={{ marginBottom: 12 }}>
-          <Alert kind="warn">{convertHint.message}</Alert>
-        </div>
-      ) : null}
-      {convertHint.via === 'none' ? (
-        <div style={{ marginBottom: 12 }}>
-          <Alert kind="error">{convertHint.message}</Alert>
-        </div>
-      ) : null}
+      <div className="page-form">
+        {error ? (
+          <div style={{ marginBottom: 12 }}>
+            <Alert kind="error">{error}</Alert>
+          </div>
+        ) : null}
+        {message ? (
+          <div style={{ marginBottom: 12 }}>
+            <Alert kind="success">{message}</Alert>
+          </div>
+        ) : null}
+        {convertHint.via === 'docker' ? (
+          <div style={{ marginBottom: 12 }}>
+            <Alert kind="warn">
+              {convertHint.message}{' '}
+              <Link to="/settings">打开设置</Link>
+            </Alert>
+          </div>
+        ) : null}
+        {convertHint.via === 'none' ? (
+          <div style={{ marginBottom: 12 }}>
+            <Alert kind="error">
+              {convertHint.message}{' '}
+              <Link to="/settings">打开设置</Link>
+            </Alert>
+          </div>
+        ) : null}
 
-      <div className="steps-3">
-        <div className="card card-pad step-card">
-          <h2>
-            <span className="step-num">1</span> 输入
-          </h2>
-          <div className="field">
-            <label>OSGB 根目录</label>
-            <div className="row">
-              <input
-                className="input"
-                placeholder="含 Data/ + metadata.xml"
-                value={form.input}
-                onChange={(e) => update('input', e.target.value)}
-              />
-              {isTauri() ? (
-                <button
-                  className="btn"
-                  type="button"
-                  onClick={() =>
+        <FormSection title="输入">
+          <PathField
+            label="数据目录"
+            value={form.input}
+            placeholder="含 Data/ 与 metadata.xml"
+            onChange={(v) => update('input', v)}
+            onBlur={() => void runScan(form.input)}
+            onPick={
+              isTauri()
+                ? () =>
                     void selectInputDirectory().then((p) => {
                       if (p) update('input', p);
                     })
-                  }
-                >
-                  浏览…
-                </button>
-              ) : null}
-              <button className="btn" type="button" onClick={() => void handleScan()} disabled={scanning}>
-                {scanning ? '扫描中…' : '扫描'}
-              </button>
-            </div>
-            <div className="field-hint">目录内需要 Data/ 和 metadata.xml</div>
-          </div>
-
-          <div className="section-title" style={{ marginBottom: 8 }}>
-            校验清单
-          </div>
-          <div className="check-cards">
-            {checklist.map((c) => {
-              const state = c.ok == null ? 'pending' : c.ok ? 'ok' : 'bad';
-              const mark = c.ok == null ? '○' : c.ok ? '✓' : '✗';
-              const status =
-                c.ok == null ? '待扫描' : c.ok ? (c.detail ? `已找到 · ${c.detail}` : '已找到') : '缺失';
-              return (
-                <div key={c.key} className={`check-card ${state}`}>
-                  <div className="check-mark">{mark}</div>
-                  <div className="check-body">
-                    <strong>{c.label}</strong>
-                    <span>{status}</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="summary-box" style={{ marginTop: 12, borderColor: 'var(--accent, #2563eb)' }}>
-            <div className="section-title" style={{ marginBottom: 8 }}>
-              实际采用的 CRS / 原点
-            </div>
-            {scan || form.crsOverride.trim() || (form.originX && form.originY && form.originZ) ? (
+                : undefined
+            }
+            feedback={inputFeedback}
+          />
+          {detailsOpen && scan ? (
+            <div className="summary-box" style={{ marginTop: 8 }}>
               <dl>
                 <dt>CRS</dt>
-                <dd style={{ fontWeight: 600 }}>{effectiveCrs || '（缺失）'}</dd>
-                <dt>原点 (SRSOrigin)</dt>
-                <dd style={{ fontWeight: 600 }}>{effectiveOrigin || '（缺失）'}</dd>
-                <dt>单位提示</dt>
-                <dd>{unitHint}</dd>
-                <dt>扫描 SRS</dt>
-                <dd>{scanSrs(scan) || '（未扫描或缺失）'}</dd>
-                <dt>扫描原点</dt>
-                <dd>{scanOriginText(scan) || '（未扫描或缺失）'}</dd>
+                <dd>{effectiveCrs || '（缺失）'}</dd>
+                <dt>原点</dt>
+                <dd>{effectiveOrigin || '（缺失）'}</dd>
+                <dt>瓦片</dt>
+                <dd>{scan.tileCount ?? scan.summary?.tileCount ?? '—'}</dd>
                 <dt>OSGB 文件</dt>
-                <dd>{scan?.summary?.osgbFileCount ?? '—'}</dd>
+                <dd>{scan.summary?.osgbFileCount ?? '—'}</dd>
               </dl>
-            ) : (
-              <div className="muted">点击「扫描」后显示实际采用的 CRS、原点与单位提示。</div>
-            )}
-            {scan && !scanSrs(scan) && !form.crsOverride.trim() ? (
-              <div className="field-hint" style={{ marginTop: 8, color: 'var(--danger, #b45309)' }}>
-                缺少 SRS：可继续本地转换/预览；若勾选地理导出，须填写 CRS 覆盖。
-              </div>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="card card-pad step-card">
-          <h2>
-            <span className="step-num">2</span> 处理
-          </h2>
-          <div className="field">
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={form.rebuildTop}
-                onChange={(e) => update('rebuildTop', e.target.checked)}
-              />
-              顶层重建
-            </label>
-          </div>
-          <div className="field">
-            <label>质量</label>
-            <select
-              className="select"
-              disabled={!form.rebuildTop}
-              value={form.quality}
-              onChange={(e) => {
-                const quality = e.target.value as RebuildQuality;
-                const preset = rebuildQualityOptions(quality, ktx2Etc1sEnabled(caps));
-                setForm((f) => ({
-                  ...f,
-                  quality,
-                  rebuildLevels: preset.levels,
-                  textureMode: preset.textureMode,
-                }));
-              }}
-            >
-              <option value="quality">质量优先</option>
-              <option value="balanced">均衡</option>
-              <option value="speed">性能优先</option>
-            </select>
-            <div className="field-hint">
-              三档都建到根。质量/均衡保留原纹理，性能优先会压代理三角数
-              {ktx2Etc1sEnabled(caps) ? '并尝试 KTX2' : ''}。
+              {!scanSrs(scan) && !form.crsOverride.trim() ? (
+                <div className="field-hint" style={{ marginTop: 8, color: 'var(--warning)' }}>
+                  缺少坐标信息，请补充坐标系。可继续本地转换；若需要地理定位，请在高级设置中填写 CRS。
+                </div>
+              ) : null}
             </div>
+          ) : null}
+        </FormSection>
+
+        <FormSection title="处理选项">
+          <div className="field">
+            <Switch checked={form.rebuildTop} onChange={(v) => update('rebuildTop', v)}>
+              顶层重建
+            </Switch>
           </div>
           <div className="field">
-            <label>重建层数</label>
-            <select
-              className="select"
-              disabled={!form.rebuildTop}
-              value={form.rebuildLevels}
-              onChange={(e) => update('rebuildLevels', Number(e.target.value))}
-            >
-              <option value={0}>自动到根</option>
-              <option value={1}>1</option>
-              <option value={2}>2</option>
-            </select>
-          </div>
-          <div className="field">
-            <label>纹理模式</label>
+            <label>纹理处理</label>
             <select
               className="select"
               value={form.textureMode}
-              onChange={(e) => update('textureMode', e.target.value as FormState['textureMode'])}
+              onChange={(e) => update('textureMode', e.target.value as TextureMode)}
             >
               <option value="keep">保留原纹理</option>
               <option value="ktx2-etc1s" disabled={!ktx2Etc1sEnabled(caps)}>
                 KTX2 ETC1S{ktx2Etc1sEnabled(caps) ? '' : '（不可用）'}
               </option>
               <option value="ktx2" disabled={!ktx2Etc1sEnabled(caps)}>
-                KTX2
+                KTX2{ktx2Etc1sEnabled(caps) ? '' : '（不可用）'}
               </option>
-              <option
-                value="ktx2-uastc"
-                disabled={!ktx2UastcEnabled(caps)}
-              >
-                ktx2-uastc — Basis UASTC（质量优先）
-                {!ktx2UastcEnabled(caps)
-                  ? ' — 当前不可用'
-                  : caps?.postprocessBasisu?.available
-                    ? ' — basisu 后处理'
-                    : ''}
+              <option value="ktx2-uastc" disabled={!ktx2UastcEnabled(caps)}>
+                KTX2 UASTC{ktx2UastcEnabled(caps) ? '' : '（不可用）'}
               </option>
             </select>
             <div className="field-hint">
               {form.textureMode === 'keep'
-                ? '默认 keep：不压缩，已在样例验证。'
+                ? '保留原始纹理，体积较大。'
                 : form.textureMode === 'ktx2-uastc'
-                  ? caps?.textureModes?.find((m) => m.mode === 'ktx2-uastc')?.supported
-                    ? '将在转换后用 basisu -uastc 后处理为 KTX2（KHR_texture_basisu），并校验证据。'
-                    : 'UASTC 需要 basisu 后处理工具；当前不可用。'
-                  : caps?.textureModes?.find((m) => m.mode === 'ktx2-etc1s')?.supported
-                    ? caps?.textureModes?.find((m) => m.mode === 'ktx2-etc1s')?.postprocess
-                      ? '转换保持原纹理，随后用 basisu 后处理为 KTX2 ETC1S（KHR_texture_basisu），并校验证据。'
-                      : '将向 3dtile 传递 --enable-texture-compress（ETC1S / KHR_texture_basisu），并校验输出证据。'
-                    : caps?.textureModes?.find((m) => m.mode === 'ktx2-etc1s')?.reason ||
-                      '当前无 KTX2 能力（二进制 flag 与 basisu 后处理均不可用）。'}
+                  ? 'UASTC 质量优先，体积介于原图与 ETC1S 之间。'
+                  : 'ETC1S / KTX2 可明显减小体积，适合网络分发。'}
             </div>
           </div>
 
-          <div className="field">
-            <label className="switch">
-              <input
-                type="checkbox"
+          <AdvancedBlock
+            open={advancedOpen}
+            onToggle={setAdvancedOpen}
+            title="高级设置"
+          >
+            <div className="field">
+              <label>重建质量</label>
+              <select
+                className="select"
+                disabled={!form.rebuildTop}
+                value={form.quality}
+                onChange={(e) => {
+                  const quality = e.target.value as RebuildQuality;
+                  const preset = rebuildQualityOptions(quality, ktx2Etc1sEnabled(caps));
+                  setForm((f) => ({
+                    ...f,
+                    quality,
+                    rebuildLevels: preset.levels,
+                  }));
+                }}
+              >
+                <option value="quality">质量优先</option>
+                <option value="balanced">均衡</option>
+                <option value="speed">性能优先</option>
+              </select>
+            </div>
+            <div className="field">
+              <label>重建层数</label>
+              <select
+                className="select"
+                disabled={!form.rebuildTop}
+                value={form.rebuildLevels}
+                onChange={(e) => update('rebuildLevels', Number(e.target.value))}
+              >
+                <option value={0}>自动到根</option>
+                <option value={1}>1</option>
+                <option value={2}>2</option>
+              </select>
+              <div className="field-hint">
+                {form.rebuildTop ? rebuildLevelsLabel(form.rebuildLevels) : '未启用顶层重建'}
+              </div>
+            </div>
+            <div className="field">
+              <Switch
                 checked={form.geographicExport}
-                onChange={(e) => update('geographicExport', e.target.checked)}
-              />
-              地理导出 / 强制要求 CRS
-            </label>
-            <div className="field-hint">
-              勾选后：若扫描无 SRS 且未填写 CRS 覆盖，提交将被阻止（缺参数阻止地理导出）。
+                onChange={(v) => {
+                  update('geographicExport', v);
+                  if (v && !effectiveCrs) setAdvancedOpen(true);
+                }}
+              >
+                地理导出（要求坐标系）
+              </Switch>
             </div>
-          </div>
-
-          <div className="field">
-            <label>CRS 覆盖（可选）</label>
-            <input
-              className="input"
-              placeholder="例如 ENU:35.9,117.1 或 EPSG:4547 / WKT 文本"
-              value={form.crsOverride}
-              onChange={(e) => update('crsOverride', e.target.value)}
-            />
-            <div className="field-hint">
-              ENU:lat,lon 会映射到 3dtile <code>-c</code> 的 x/y（经度/纬度）。EPSG/WKT
-              写入任务选项；当前运行时二进制仍以 metadata.xml 为准（无独立 CRS CLI 标志）。
-            </div>
-          </div>
-          <div className="field">
-            <label>原点覆盖 X / Y / Z（可选，对应 SRSOrigin）</label>
-            <div className="row">
+            <div className="field">
+              <label>CRS 覆盖</label>
               <input
                 className="input"
-                placeholder="X"
-                value={form.originX}
-                onChange={(e) => update('originX', e.target.value)}
+                placeholder="例如 ENU:35.9,117.1 或 EPSG:4547"
+                value={form.crsOverride}
+                onChange={(e) => update('crsOverride', e.target.value)}
               />
-              <input
-                className="input"
-                placeholder="Y"
-                value={form.originY}
-                onChange={(e) => update('originY', e.target.value)}
-              />
-              <input
-                className="input"
-                placeholder="Z"
-                value={form.originZ}
-                onChange={(e) => update('originZ', e.target.value)}
-              />
-            </div>
-            <div className="field-hint">
-              写入任务选项；Z 可映射为 <code>-c offset</code>。局部东/北偏移 CLI 无独立标志，仍读
-              metadata.xml。高程基准独立，首版不自动猜测。
-            </div>
-          </div>
-          {missingCrsForGeo ? (
-            <Alert kind="warn">
-              已启用地理导出，但尚无有效 CRS。请扫描含 SRS 的数据，或填写 CRS 覆盖后再提交。
-            </Alert>
-          ) : null}
-        </div>
-
-        <div className="card card-pad step-card">
-          <h2>
-            <span className="step-num">3</span> 输出
-          </h2>
-          <div className="field">
-            <label>输出路径</label>
-            <div className="row">
-              <input
-                className="input"
-                placeholder={SAMPLE_OUTPUT}
-                value={form.output}
-                onChange={(e) => update('output', e.target.value)}
-              />
-              {isTauri() ? (
-                <button
-                  className="btn"
-                  type="button"
-                  onClick={() =>
-                    void selectOutputDirectory().then((p) => {
-                      if (p) update('output', p);
-                    })
-                  }
-                >
-                  浏览…
-                </button>
+              {!effectiveCrs ? (
+                <div className="field-error">缺少坐标信息，请补充坐标系</div>
               ) : null}
             </div>
-            <div className="field-hint">启用重建时成果目录为 输出路径_rebuild</div>
-          </div>
-          <div className="field">
-            <label>任务名</label>
-            <input
-              className="input"
-              placeholder="可选"
-              value={form.name}
-              onChange={(e) => update('name', e.target.value)}
-            />
-          </div>
-          <div className="summary-box">
-            <div className="section-title" style={{ marginBottom: 8 }}>
-              任务摘要
+            <div className="field">
+              <label>原点覆盖 X / Y / Z</label>
+              <div className="row">
+                <input
+                  className="input"
+                  placeholder="X"
+                  value={form.originX}
+                  onChange={(e) => update('originX', e.target.value)}
+                />
+                <input
+                  className="input"
+                  placeholder="Y"
+                  value={form.originY}
+                  onChange={(e) => update('originY', e.target.value)}
+                />
+                <input
+                  className="input"
+                  placeholder="Z"
+                  value={form.originZ}
+                  onChange={(e) => update('originZ', e.target.value)}
+                />
+              </div>
             </div>
-            <dl>
-              <dt>输入</dt>
-              <dd>{summary.input}</dd>
-              <dt>输出</dt>
-              <dd>{summary.output}</dd>
-              <dt>名称</dt>
-              <dd>{summary.name}</dd>
-              <dt>选项</dt>
-              <dd>{summary.options}</dd>
-              <dt>实际 CRS</dt>
-              <dd>{summary.crs}</dd>
-              <dt>实际原点</dt>
-              <dd>{summary.origin}</dd>
-            </dl>
-          </div>
-        </div>
-      </div>
+            <details>
+              <summary className="muted" style={{ cursor: 'pointer', fontSize: 13 }}>
+                任务信息
+              </summary>
+              <div className="field" style={{ marginTop: 8 }}>
+                <label>任务名</label>
+                <input
+                  className="input"
+                  placeholder="可选，自动命名"
+                  value={form.name}
+                  onChange={(e) => update('name', e.target.value)}
+                />
+              </div>
+            </details>
+          </AdvancedBlock>
+        </FormSection>
 
-      <div className="footer-actions">
-        <div className="muted" style={{ flex: 1 }}>
-          {missingCrsForGeo
-            ? '地理导出缺 CRS，无法提交'
-            : scan
-              ? checksPassed
-                ? '检查通过，可以提交任务'
-                : '校验未通过，请修正输入后再提交'
-              : '建议先扫描再提交'}
-        </div>
-        <button className="btn" type="button" onClick={handleSave}>
-          保存配置
-        </button>
-        <button
-          className="btn btn-primary"
-          type="button"
-          onClick={() => void handleSubmit()}
-          disabled={submitting || missingCrsForGeo}
-        >
-          {submitting ? '提交中…' : '提交任务'}
-        </button>
+        <FormSection title="输出">
+          <PathField
+            label="输出目录"
+            value={form.output}
+            onChange={(v) => {
+              setOutputTouched(true);
+              update('output', v);
+            }}
+            onPick={
+              isTauri()
+                ? () =>
+                    void selectOutputDirectory().then((p) => {
+                      if (p) {
+                        setOutputTouched(true);
+                        update('output', p);
+                      }
+                    })
+                : undefined
+            }
+          />
+        </FormSection>
+
+        <SubmitBar
+          onReset={handleReset}
+          primaryLabel={submitting ? '提交中…' : '开始转换'}
+          onPrimary={() => void handleSubmit()}
+          primaryDisabled={submitting || convertHint.via === 'none'}
+        />
       </div>
     </div>
   );

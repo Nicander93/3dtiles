@@ -7,6 +7,8 @@
     "predev": "node scripts/prepare-cesium.mjs",
     "prebuild": "node scripts/prepare-cesium.mjs",
     "prepare:sidecars": "node scripts/prepare-sidecars.mjs",
+    "prepare:runtime": "powershell -File scripts/prepare-runtime.ps1",
+    "package:windows": "powershell -File scripts/package-windows.ps1",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
@@ -18,6 +20,7 @@
     "tauri:check": "tauri build --debug --no-bundle"
   },
   "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.3",
     "cesium": "1.125.0",

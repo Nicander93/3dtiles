@@ -5,14 +5,16 @@ export function ktx2Etc1sEnabled(caps: CapabilitiesResponse | null, forProcessTi
   if (!caps) return true;
   if (caps.postprocessBasisu?.available) return true;
   const mode = caps.textureModes?.find((m) => m.mode === 'ktx2-etc1s');
-  if (forProcessTileset) return mode?.processTileset?.supported !== false;
-  return mode?.supported !== false;
+  if (!mode) return false;
+  if (forProcessTileset && mode.processTileset) return mode.processTileset.supported !== false;
+  return mode.supported === true;
 }
 
 export function ktx2UastcEnabled(caps: CapabilitiesResponse | null, forProcessTileset = false): boolean {
   if (!caps) return true;
   if (caps.postprocessBasisu?.available) return true;
   const mode = caps.textureModes?.find((m) => m.mode === 'ktx2-uastc');
-  if (forProcessTileset) return mode?.processTileset?.supported !== false;
-  return mode?.supported !== false;
+  if (!mode) return false;
+  if (forProcessTileset && mode.processTileset) return mode.processTileset.supported !== false;
+  return mode.supported === true;
 }

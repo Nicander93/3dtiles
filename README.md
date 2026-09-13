@@ -1,74 +1,85 @@
-# 3dtiles (fork)
+# GeoForge 3D
 
-> **Fork goals (v0):** [V0 scope](./docs/V0_SCOPE.md) · [rebuild-top](./docs/REBUILD_TOP.md) · [UI plan](./docs/UI_PLAN.md) · [可运行指南](./docs/RUN.md)  
-> Upstream: [fanvanzh/3dtiles](https://github.com/fanvanzh/3dtiles) (Apache-2.0).
+本地三维地理数据工具箱：OSGB → 3D Tiles 转换、顶层重建、KTX2 纹理处理、Cesium 预览。
 
-**[English](./README_EN.md) | [简体中文](./README_ZH.md)**
+正式任务路径：**Desktop → Processor → 引擎**。缺 Processor 时明确失败，不再回退 Python HTTP 任务服务。
 
-# 3D Tiles Converter
+上游转换器源码隔离在 [`engines/3dtiles-converter`](./engines/3dtiles-converter)（独立构建，**不**参与产品默认 `cargo build`）。
 
-[![glTF status](https://img.shields.io/badge/glTF-2%2E0-green.svg?style=flat)](https://github.com/KhronosGroup/glTF)
-[![Action status](https://github.com/fanvanzh/3dtiles/actions/workflows/linux.yml/badge.svg)](https://github.com/fanvanzh/3dtiles/actions/workflows/linux.yml)
-[![Action status](https://github.com/fanvanzh/3dtiles/actions/workflows/windows.yml/badge.svg)](https://github.com/fanvanzh/3dtiles/actions/workflows/windows.yml)
-[![Action status](https://github.com/fanvanzh/3dtiles/actions/workflows/macOS-arm64.yml/badge.svg)](https://github.com/fanvanzh/3dtiles/actions/workflows/macOS-arm64.yml)
-[![Action status](https://github.com/fanvanzh/3dtiles/actions/workflows/macOS-intel.yml/badge.svg)](https://github.com/fanvanzh/3dtiles/actions/workflows/macOS-intel.yml)
+## 仓库结构
 
-A powerful 3D-Tiles converter toolkit for efficient conversion of large-scale 3D geospatial data.
+| 路径 | 职责 |
+| --- | --- |
+| `apps/desktop` | React UI + Tauri 外壳、任务/成果、本地预览 |
+| `crates/protocol` | 任务配置与事件契约（`geoforge-protocol`） |
+| `crates/processor` | 任务进程：扫描、转换、重建、纹理、校验、提交 |
+| `crates/top_rebuild` | 自研顶层重建（Proxy HLOD） |
+| `engines/3dtiles-converter` | 上游 `_3dtile`（CMake / vcpkg / OSG） |
+| `tools/texture_ktx2` | KTX2 后处理（可封装为 `geoforge-texture`） |
+| `docs/product/` | 产品、重构与 V1 补齐说明 |
 
-## Features
-
-- **Osgb to 3D-Tiles**: Convert OpenSceneGraph Binary format to 3D-Tiles format
-- **Shapefile to 3D-Tiles**: Convert Esri Shapefile data to 3D-Tiles format
-- **Mesh Optimization**: Optional mesh simplification using meshoptimizer for reduced polygon count
-- **Draco Compression**: Optional Google Draco compression for 3-6x geometry size reduction
-- **Texture Compression**: Optional KTX2 texture compression for faster GPU loading
-- **Multi-platform**: Support for Linux, macOS, and Windows
-- **Docker Support**: Containerized build and deployment
-
-## Quick Start
-
-- **[English Documentation](./README_EN.md)** - Complete build and usage guide in English
-- **[中文文档](./README_ZH.md)** - 完整的编译和使用指南（中文）
-
-## Release
-
-To create a new release:
+## 快速开始（产品核心）
 
 ```bash
-# Create and push a version tag
-git tag v0.5.0
-git push origin v0.5.0
+# 协议 / Processor / TopRebuild（不触发 OSG/GDAL）
+cargo build
+cargo test -p geoforge-protocol
+cargo test -p processor --lib
+
+# 桌面
+cd apps/desktop
+npm install
+npm run prepare:sidecars
+npm run tauri:dev
 ```
 
-The GitHub Actions will automatically:
-- Build for all platforms (Linux, macOS ARM64, macOS x86_64, Windows)
-- Package binaries with version numbers
-- Generate release notes
-- Create GitHub Release
-- Upload platform-specific binaries
+可选环境变量（开发覆盖；正式安装包应自带 runtime，一般不必设置）：
 
-### Pre-release Versions
+| 变量 | 含义 |
+| --- | --- |
+| `GEOFORGE_PROCESSOR` | processor 可执行文件 |
+| `GEOFORGE_3DTILE` | `_3dtile` 可执行文件 |
+| `GEOFORGE_TOP_REBUILD` | top_rebuild 可执行文件 |
+| `GEOFORGE_RUNTIME_ROOT` | 打包 runtime 根目录 |
+| `GEOFORGE_TEXTURE` / `GEOFORGE_BASISU` | 纹理工具与 BasisU |
+| `GEOFORGE_DATA_DIR` | 用户数据目录 |
 
-For pre-release versions (alpha, beta, rc):
+探测与任务共用同一套定位：
 
 ```bash
-# Alpha version
-git tag v0.5.0-alpha.1
-git push origin v0.5.0-alpha.1
-
-# Beta version
-git tag v0.5.0-beta.1
-git push origin v0.5.0-beta.1
-
-# Release candidate
-git tag v0.5.0-rc.1
-git push origin v0.5.0-rc.1
+cargo run -p processor -- capabilities --json
 ```
 
-Pre-release versions will be automatically marked as "Pre-release" on GitHub.
+## 转换器（独立）
 
-## Resources
+```bash
+cd engines/3dtiles-converter
+# 需本机 MSVC + vcpkg / OSG；详见引擎 README
+cargo build --release
+```
 
-- [How to build?](https://github.com/fanvanzh/3dtiles/wiki/How-to-build)
-- [How to debug?](https://github.com/fanvanzh/3dtiles/wiki/How-to-debug)
+开发机可将产物暂存为可搬迁 runtime：
 
+```powershell
+powershell -File apps/desktop/scripts/prepare-runtime.ps1
+```
+
+完整 Windows 安装包入口（缺必需组件则失败）：
+
+```powershell
+cd apps/desktop
+npm run package:windows
+# 或: powershell -File scripts/package-windows.ps1
+```
+
+说明见 [engines/3dtiles-converter/README.md](./engines/3dtiles-converter/README.md)。
+
+## 文档
+
+- [仓库重构验收](./docs/product/REPO_REFACTOR_REPORT.md)
+- [V1 补齐进度](./docs/product/V1_COMPLETION_REPORT.md)
+- 历史阶段报告已归档至 [`docs/product/archive/`](./docs/product/archive/)，入口可能失效
+
+## 许可证
+
+转换器与上游组件保留原有许可证与版权声明。产品代码见仓库内各 crate 声明。

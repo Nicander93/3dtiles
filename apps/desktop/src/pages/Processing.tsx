@@ -1,4 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  CheckCircle,
+  Clock,
+  Cube,
+  Image,
+  Stack,
+  XCircle,
+} from '@phosphor-icons/react';
 import { api, friendlyError, isActiveStatus, isDoneStatus } from '../api/desktop';
 import type { Task, TaskStatus } from '../api/types';
 import { Alert } from '../components/Alert';
@@ -6,75 +15,112 @@ import { EmptyState } from '../components/EmptyState';
 import { StageStepper } from '../components/StageStepper';
 import { StatusBadge } from '../components/StatusBadge';
 import { useTasks } from '../hooks/useTasks';
+import { cloneOutputPath, realProgressPercent } from '../lib/formUtils';
 
-type Tab = 'all' | 'running' | 'queued' | 'done';
+type StatusFilter = 'all' | 'active' | 'done' | 'failed';
 
-const tabFilter: Record<Tab, (t: Task) => boolean> = {
+const statusFilter: Record<StatusFilter, (t: Task) => boolean> = {
   all: () => true,
-  running: (t) => t.status === 'running' || t.status === 'cancelling',
-  queued: (t) => t.status === 'queued',
-  done: (t) => isDoneStatus(t.status),
+  active: (t) => t.status === 'running' || t.status === 'queued' || t.status === 'cancelling',
+  done: (t) => t.status === 'completed' || t.status === 'succeeded',
+  failed: (t) => t.status === 'failed' || t.status === 'cancelled' || t.status === 'interrupted',
 };
 
-function progressOf(t: Task): number {
-  if (typeof t.progress === 'number' && !Number.isNaN(t.progress)) {
-    const n = t.progress <= 1 ? t.progress * 100 : t.progress;
-    return Math.max(0, Math.min(100, Math.round(n)));
-  }
-  if (t.progress && typeof t.progress === 'object') {
-    const rec = t.progress as Record<string, unknown>;
-    const raw = rec.percent ?? rec.pct ?? rec.value;
-    if (typeof raw === 'number' && !Number.isNaN(raw)) {
-      const n = raw <= 1 ? raw * 100 : raw;
-      return Math.max(0, Math.min(100, Math.round(n)));
-    }
-  }
-  if (t.status === 'completed' || t.status === 'succeeded') return 100;
-  if (t.status === 'failed' || t.status === 'cancelled') return 100;
-  if (t.status === 'queued') return 0;
-  const stages = t.stages || [];
-  if (stages.length) {
-    const done = stages.filter((s) => s.status === 'done' || s.status === 'skipped').length;
-    const running = stages.some((s) => s.status === 'running') ? 0.45 : 0;
-    return Math.round(((done + running) / stages.length) * 100);
-  }
-  if (t.stage === 'done' || t.stage === 'check') return t.stage === 'done' ? 100 : 90;
-  return 35;
+function opLabel(op?: string): string {
+  if (op === 'convert-osgb') return 'OSGB 转换';
+  if (op === 'process-tileset') return 'Tiles 处理';
+  return op || '—';
 }
 
+function TaskIcon({ operation }: { operation?: string }) {
+  if (operation === 'convert-osgb') return <Stack size={18} />;
+  if (operation === 'process-tileset') return <Cube size={18} />;
+  return <Image size={18} />;
+}
 
-function rebuildTopSummary(opts: Record<string, unknown> | undefined): string | null {
-  const rt = opts?.rebuildTop as { enabled?: boolean; levels?: number } | undefined;
-  if (!rt || rt.enabled !== true) return null;
-  const levels = rt.levels === 2 ? 2 : 1;
-  return `启用 · levels=${levels}`;
+function fmtTime(v?: string | number) {
+  if (v == null || v === '') return '—';
+  const d = typeof v === 'number' ? new Date(v * (v < 1e12 ? 1000 : 1)) : new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v);
+  return d.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+}
+
+function statusLine(t: Task): { text: string; pct: number | null } {
+  const pct = realProgressPercent(t.progress, t.status);
+  if (t.status === 'running' || t.status === 'cancelling') {
+    const stage = t.stage ? String(t.stage) : '处理中';
+    if (pct != null) return { text: `${stage} · ${pct}%`, pct };
+    return { text: stage, pct: null };
+  }
+  if (t.status === 'queued') return { text: '排队中', pct: null };
+  if (t.status === 'completed' || t.status === 'succeeded') return { text: '已完成', pct: 100 };
+  if (t.status === 'failed') {
+    const reason = t.error || t.message;
+    return { text: reason ? `失败 · ${reason}` : '失败', pct: null };
+  }
+  if (t.status === 'cancelled') return { text: '已取消', pct: null };
+  if (t.status === 'interrupted') return { text: '已中断', pct: null };
+  return { text: t.status, pct };
+}
+
+function StatusIcon({ status }: { status: string }) {
+  if (status === 'running' || status === 'cancelling') return <Clock size={16} />;
+  if (status === 'queued') return <Clock size={16} />;
+  if (status === 'completed' || status === 'succeeded') return <CheckCircle size={16} color="var(--success)" />;
+  if (status === 'failed' || status === 'cancelled' || status === 'interrupted') {
+    return <XCircle size={16} color="var(--danger)" />;
+  }
+  return null;
+}
+
+function rebuildHref(t: Task): string {
+  const params = new URLSearchParams();
+  if (t.input) params.set('input', t.input);
+  if (t.output) params.set('output', cloneOutputPath(t.output));
+  if (t.name) params.set('name', t.name);
+  const q = params.toString();
+  if (t.operation === 'process-tileset') return `/tiles/process?${q}`;
+  return `/osgb/convert?${q}`;
 }
 
 export function Processing() {
   const { tasks, loading, error, refresh } = useTasks(2000);
-  const [tab, setTab] = useState<Tab>('all');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const [tab, setTab] = useState<StatusFilter>('all');
+  const [typeFilter, setTypeFilter] = useState<string>('all');
+  const [selectedId, setSelectedId] = useState<string | null>(searchParams.get('task'));
   const [actionError, setActionError] = useState<string | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
-  const [logText, setLogText] = useState<string>('');
-  const [logOpen, setLogOpen] = useState(true);
+  const [logText, setLogText] = useState('');
+  const [logOpen, setLogOpen] = useState(false);
+  const [query, setQuery] = useState('');
 
-  const counts = useMemo(
-    () => ({
-      all: tasks.length,
-      running: tasks.filter((t) => t.status === 'running' || t.status === 'cancelling').length,
-      queued: tasks.filter((t) => t.status === 'queued').length,
-      done: tasks.filter((t) => isDoneStatus(t.status)).length,
-    }),
-    [tasks],
-  );
+  useEffect(() => {
+    const id = searchParams.get('task');
+    if (id) setSelectedId(id);
+  }, [searchParams]);
 
-  const filtered = useMemo(() => tasks.filter(tabFilter[tab]), [tasks, tab]);
-  const selected =
-    filtered.find((t) => t.id === selectedId) ||
-    tasks.find((t) => t.id === selectedId) ||
-    filtered[0] ||
-    null;
+  const filtered = useMemo(() => {
+    let list = tasks.filter(statusFilter[tab]);
+    if (typeFilter !== 'all') {
+      list = list.filter((t) => t.operation === typeFilter);
+    }
+    const q = query.trim().toLowerCase();
+    if (q) {
+      list = list.filter(
+        (t) =>
+          (t.name || '').toLowerCase().includes(q) ||
+          (t.operation || '').toLowerCase().includes(q) ||
+          (t.input || '').toLowerCase().includes(q),
+      );
+    }
+    return list;
+  }, [tasks, tab, typeFilter, query]);
+
+  const selected = selectedId
+    ? tasks.find((t) => t.id === selectedId) || null
+    : null;
 
   useEffect(() => {
     if (!selected) {
@@ -112,16 +158,76 @@ export function Processing() {
     }
   }
 
+  function selectTask(id: string | null) {
+    setSelectedId(id);
+    setLogOpen(false);
+    if (id) {
+      setSearchParams({ task: id }, { replace: true });
+    } else {
+      setSearchParams({}, { replace: true });
+    }
+  }
+
+  function rowActions(t: Task) {
+    if (isActiveStatus(t.status)) {
+      return (
+        <button
+          className="btn btn-sm"
+          type="button"
+          disabled={cancellingId === t.id || t.status === 'cancelling'}
+          onClick={(e) => {
+            e.stopPropagation();
+            void cancel(t.id);
+          }}
+        >
+          {t.status === 'cancelling' || cancellingId === t.id ? '取消中…' : '取消'}
+        </button>
+      );
+    }
+    if (t.status === 'completed' || t.status === 'succeeded') {
+      return (
+        <div className="row wrap" style={{ gap: 6 }} onClick={(e) => e.stopPropagation()}>
+          {t.artifactId || t.output ? (
+            <Link className="btn btn-sm" to="/results">
+              查看成果
+            </Link>
+          ) : null}
+          <button className="btn btn-sm" type="button" onClick={() => navigate(rebuildHref(t))}>
+            重新处理
+          </button>
+        </div>
+      );
+    }
+    if (t.status === 'failed' || t.status === 'cancelled' || t.status === 'interrupted') {
+      return (
+        <div className="row wrap" style={{ gap: 6 }} onClick={(e) => e.stopPropagation()}>
+          <button className="btn btn-sm" type="button" onClick={() => selectTask(t.id)}>
+            查看详情
+          </button>
+          <button className="btn btn-sm" type="button" onClick={() => navigate(rebuildHref(t))}>
+            重新处理
+          </button>
+        </div>
+      );
+    }
+    return null;
+  }
+
   return (
-    <div className="page">
-      <div className="page-header">
+    <div className="page" style={{ display: 'flex', flexDirection: 'column' }}>
+      <div className="page-header full-width">
         <div>
           <h1>任务</h1>
         </div>
-        <div className="toolbar processing-toolbar" style={{ marginBottom: 0 }}>
-          <button className="btn" type="button" onClick={() => void refresh()}>
-            刷新
-          </button>
+        <div className="search-wrap">
+          <input
+            className="input"
+            placeholder="搜索任务…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label="搜索任务"
+            style={{ paddingLeft: 10 }}
+          />
         </div>
       </div>
 
@@ -136,165 +242,176 @@ export function Processing() {
         </div>
       ) : null}
 
-      <div className="tabs" style={{ marginBottom: 16 }}>
-        {(
-          [
-            ['all', `全部 (${counts.all})`],
-            ['running', `运行中 (${counts.running})`],
-            ['queued', `排队中 (${counts.queued})`],
-            ['done', `已完成 (${counts.done})`],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            className={`tab${tab === id ? ' active' : ''}`}
-            onClick={() => setTab(id)}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="filter-row">
+        <span className="filter-row__label">状态</span>
+        <div className="tabs">
+          {(
+            [
+              ['all', '全部'],
+              ['active', '进行中'],
+              ['done', '已完成'],
+              ['failed', '失败'],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={`tab${tab === id ? ' active' : ''}`}
+              onClick={() => setTab(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <span className="filter-row__label">类型</span>
+        <select
+          className="select"
+          style={{ width: 160 }}
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+        >
+          <option value="all">全部</option>
+          <option value="convert-osgb">OSGB 转换</option>
+          <option value="process-tileset">Tiles 处理</option>
+        </select>
       </div>
 
-      <div className="split-2">
-        <div className="task-list">
+      <div className="split-drawer">
+        <div className="split-drawer__list">
           {loading && tasks.length === 0 ? (
-            <div className="card card-pad muted">加载中…</div>
+            <div className="muted">加载中…</div>
           ) : filtered.length === 0 ? (
-            <div className="card card-pad">
-              <EmptyState title="暂无任务" description="提交 OSGB 转换或 process-tileset 后，任务会出现在这里。" />
-            </div>
+            tasks.length === 0 ? (
+              <div>
+                <EmptyState title="还没有任务" description="选择一个工具开始处理。" />
+                <div style={{ marginTop: 12, textAlign: 'center' }}>
+                  <Link className="btn btn-primary" to="/">
+                    选择工具
+                  </Link>
+                </div>
+              </div>
+            ) : (
+              <p className="muted">没有符合筛选条件的任务。</p>
+            )
           ) : (
-            filtered.map((t) => {
-              const pct = progressOf(t);
-              const barClass =
-                t.status === 'failed' || t.status === 'cancelled'
-                  ? 'failed'
-                  : isDoneStatus(t.status)
-                    ? 'done'
-                    : '';
-              return (
-                <div
-                  key={t.id}
-                  className={`task-card${selected?.id === t.id ? ' active' : ''}`}
-                  onClick={() => setSelectedId(t.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') setSelectedId(t.id);
-                  }}
-                  role="button"
-                  tabIndex={0}
-                >
-                  <div className="task-card-head">
-                    <h3>{t.name || t.operation || t.id}</h3>
-                    <StatusBadge status={t.status as TaskStatus} />
-                  </div>
-                  <div className="task-meta">
-                    <span>阶段 · {t.stage || '—'}</span>
-                    <span>输入 · {t.input || '—'}</span>
-                  </div>
-                  <div className={`progress-bar ${barClass}`}>
-                    <i style={{ width: `${pct}%` }} />
-                  </div>
-                  <div className="progress-label">{pct}%</div>
-                  <div className="task-card-foot" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      className="btn btn-ghost"
-                      type="button"
-                      onClick={() => {
-                        setSelectedId(t.id);
-                        setLogOpen(true);
-                      }}
-                    >
-                      查看日志
-                    </button>
-                    {isActiveStatus(t.status) ? (
-                      <button
-                        className="btn btn-danger"
-                        type="button"
-                        disabled={cancellingId === t.id || t.status === 'cancelling'}
-                        onClick={() => void cancel(t.id)}
+            <div className="task-table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>名称</th>
+                    <th>类型</th>
+                    <th>状态</th>
+                    <th>时间</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((t) => {
+                    const line = statusLine(t);
+                    return (
+                      <tr
+                        key={t.id}
+                        onClick={() => selectTask(t.id)}
+                        style={{
+                          cursor: 'pointer',
+                          background: selected?.id === t.id ? 'var(--surface-selected)' : undefined,
+                        }}
                       >
-                        {t.status === 'cancelling' || cancellingId === t.id ? '取消中…' : '取消'}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              );
-            })
+                        <td>
+                          <div className="task-name">
+                            <span className="task-name__icon" aria-hidden>
+                              <TaskIcon operation={t.operation} />
+                            </span>
+                            {t.name || t.operation || t.id}
+                          </div>
+                        </td>
+                        <td className="muted">{opLabel(t.operation)}</td>
+                        <td>
+                          <div className="task-status-cell">
+                            <span className="row" style={{ gap: 6 }}>
+                              <StatusIcon status={t.status} />
+                              <span>{line.text}</span>
+                            </span>
+                            {(t.status === 'running' || t.status === 'cancelling') && (
+                              <div
+                                className={`progress-bar${line.pct == null ? ' indeterminate' : ''}`}
+                              >
+                                <i style={{ width: `${line.pct ?? 40}%` }} />
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="muted">{fmtTime(t.updatedAt || t.createdAt)}</td>
+                        <td>{rowActions(t)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
 
-        <div className="card card-pad">
-          <div className="section-title">任务详情</div>
-          {!selected ? (
-            <EmptyState title="未选择任务" description="从左侧列表选择一项查看阶段。" />
-          ) : (
-            <>
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ fontWeight: 650, fontSize: 15, marginBottom: 6 }}>
-                  {selected.name || selected.operation || selected.id}
+        {selected ? (
+          <aside className="split-drawer__panel">
+            <div className="drawer-head">
+              <div>
+                <h2>{selected.name || selected.operation || selected.id}</h2>
+                <div style={{ marginTop: 6 }}>
+                  <StatusBadge status={selected.status as TaskStatus} />
                 </div>
-                <StatusBadge status={selected.status} />
-                {selected.status === 'cancelling' ? (
-                  <span className="muted" style={{ marginLeft: 8 }}>
-                    正在取消…
-                  </span>
-                ) : null}
               </div>
+              <button className="btn btn-ghost btn-sm" type="button" onClick={() => selectTask(null)}>
+                关闭
+              </button>
+            </div>
 
-              <div className="section-title">处理阶段</div>
-              <StageStepper stages={selected.stages} orientation="horizontal" />
+            <div className="section-title">处理阶段</div>
+            <StageStepper stages={selected.stages} orientation="horizontal" />
 
-              <div className="summary-box" style={{ marginTop: 16, marginBottom: 16 }}>
-                <dl>
-                  <dt>ID</dt>
-                  <dd>{selected.id}</dd>
-                  <dt>操作</dt>
-                  <dd>{selected.operation}</dd>
-                  <dt>阶段</dt>
-                  <dd>{selected.stage || '—'}</dd>
-                  <dt>输入</dt>
-                  <dd>{selected.input}</dd>
-                  <dt>输出</dt>
-                  <dd>{selected.artifactPath || selected.output}</dd>
-                  {(() => {
-                    const rb = rebuildTopSummary(selected.options);
-                    return rb ? (
-                      <>
-                        <dt>顶层重建</dt>
-                        <dd>{rb}</dd>
-                      </>
-                    ) : null;
-                  })()}
-                  <dt>说明</dt>
-                  <dd>{selected.message || selected.error || '—'}</dd>
-                </dl>
-              </div>
+            <div className="summary-box" style={{ marginTop: 16, marginBottom: 16 }}>
+              <dl>
+                <dt>操作</dt>
+                <dd>{opLabel(selected.operation)}</dd>
+                <dt>阶段</dt>
+                <dd>{selected.stage || '—'}</dd>
+                <dt>输入</dt>
+                <dd>{selected.input || '—'}</dd>
+                <dt>输出</dt>
+                <dd>{selected.artifactPath || selected.output || '—'}</dd>
+                <dt>说明</dt>
+                <dd>{selected.message || selected.error || '—'}</dd>
+              </dl>
+            </div>
 
-              <details
-                open={logOpen}
-                onToggle={(e) => setLogOpen((e.target as HTMLDetailsElement).open)}
-              >
-                <summary className="muted">执行日志{selected.logPath ? ` · ${selected.logPath}` : ''}</summary>
-                <pre className="log-pre">{logText || selected.log || '（暂无日志）'}</pre>
-              </details>
-              {isActiveStatus(selected.status) && (
-                <div style={{ marginTop: 16 }}>
-                  <button
-                    className="btn btn-danger"
-                    type="button"
-                    disabled={cancellingId === selected.id || selected.status === 'cancelling'}
-                    onClick={() => void cancel(selected.id)}
-                  >
-                    {selected.status === 'cancelling' || cancellingId === selected.id
-                      ? '取消中…'
-                      : '取消任务'}
-                  </button>
-                </div>
-              )}
-            </>
-          )}
-        </div>
+            <details open={logOpen} onToggle={(e) => setLogOpen((e.target as HTMLDetailsElement).open)}>
+              <summary className="muted" style={{ cursor: 'pointer' }}>
+                执行日志
+              </summary>
+              <pre className="log-pre">{logText || selected.log || '（暂无日志）'}</pre>
+            </details>
+
+            <div className="actions">
+              {isActiveStatus(selected.status) ? (
+                <button
+                  className="btn btn-danger"
+                  type="button"
+                  disabled={cancellingId === selected.id || selected.status === 'cancelling'}
+                  onClick={() => void cancel(selected.id)}
+                >
+                  {selected.status === 'cancelling' || cancellingId === selected.id
+                    ? '取消中…'
+                    : '取消任务'}
+                </button>
+              ) : null}
+              {isDoneStatus(selected.status) ? (
+                <button className="btn" type="button" onClick={() => navigate(rebuildHref(selected))}>
+                  重新处理
+                </button>
+              ) : null}
+            </div>
+          </aside>
+        ) : null}
       </div>
     </div>
   );

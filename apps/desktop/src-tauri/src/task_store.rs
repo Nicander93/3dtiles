@@ -332,4 +332,18 @@ impl TaskStore {
       }
     })
   }
+
+  /// Oldest queued task that is not cancel_requested.
+  pub fn next_queued(&self) -> Result<Option<TaskRecord>, String> {
+    let conn = self.conn.lock();
+    conn
+      .query_row(
+        "SELECT * FROM tasks WHERE status = 'queued' AND cancel_requested = 0
+         ORDER BY created_at ASC LIMIT 1",
+        [],
+        |r| Self::row_to_task(r),
+      )
+      .optional()
+      .map_err(|e| e.to_string())
+  }
 }

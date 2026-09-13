@@ -11,46 +11,100 @@ use std::thread;
 #[derive(Debug, Clone)]
 pub struct ToolPaths {
     pub repo_root: PathBuf,
+    pub runtime_root: PathBuf,
     pub convert_bin: PathBuf,
     /// Release TopRebuild CLI (`top_rebuild`). Override: `GEOFORGE_TOP_REBUILD`.
     pub top_rebuild: PathBuf,
     /// Python baseline script. Used only when `GEOFORGE_REBUILD_ENGINE=python`.
     pub rebuild_py: PathBuf,
     pub texture_py: PathBuf,
+    /// Packaged texture tool (geoforge-texture.exe). Override: `GEOFORGE_TEXTURE`.
+    pub texture_bin: PathBuf,
+    pub basisu: PathBuf,
     pub python: PathBuf,
+    pub packaged: bool,
 }
 
 pub fn tool_paths() -> &'static ToolPaths {
     static PATHS: OnceLock<ToolPaths> = OnceLock::new();
     PATHS.get_or_init(|| {
+        let packaged = std::env::var("GEOFORGE_PACKAGED").ok().as_deref() == Some("1")
+            || std::env::var("GEOFORGE_RUNTIME_ROOT").is_ok();
         let repo_root = discover_repo_root();
-        let convert_bin = resolve_3dtile(&repo_root);
-        let top_rebuild = resolve_top_rebuild(&repo_root);
+        let runtime_root = resolve_runtime_root(&repo_root);
+        let convert_bin = resolve_3dtile(&repo_root, &runtime_root);
+        let top_rebuild = resolve_top_rebuild(&repo_root, &runtime_root);
         let rebuild_py = std::env::var("GEOFORGE_REBUILD_TOP")
             .map(PathBuf::from)
             .unwrap_or_else(|_| resolve_rebuild_py(&repo_root));
         let texture_py = repo_root.join("tools/texture_ktx2/run.py");
+        let texture_bin = resolve_texture_bin(&runtime_root);
+        let basisu = resolve_basisu(&runtime_root, &repo_root);
         let python = std::env::var("GEOFORGE_PYTHON")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                let v = PathBuf::from("/workspace/venv-3dtiles/bin/python");
-                if v.is_file() {
-                    v
-                } else if repo_root.join(".venv/bin/python").is_file() {
-                    repo_root.join(".venv/bin/python")
-                } else {
-                    PathBuf::from("python3")
-                }
-            });
+            .unwrap_or_else(|_| PathBuf::from("python3"));
         ToolPaths {
             repo_root,
+            runtime_root,
             convert_bin,
             top_rebuild,
             rebuild_py,
             texture_py,
+            texture_bin,
+            basisu,
             python,
+            packaged,
         }
     })
+}
+
+fn resolve_runtime_root(repo_root: &Path) -> PathBuf {
+    if let Ok(p) = std::env::var("GEOFORGE_RUNTIME_ROOT") {
+        return PathBuf::from(p);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let bundled = dir.join("resources").join("runtime");
+            if bundled.is_dir() {
+                return bundled;
+            }
+            // processor next to app; runtime under resources/
+            let alt = dir.join("runtime");
+            if alt.is_dir() {
+                return alt;
+            }
+        }
+    }
+    repo_root.join("dist").join("runtime")
+}
+
+fn resolve_texture_bin(runtime_root: &Path) -> PathBuf {
+    if let Ok(p) = std::env::var("GEOFORGE_TEXTURE") {
+        return PathBuf::from(p);
+    }
+    for name in ["geoforge-texture.exe", "geoforge-texture"] {
+        let c = runtime_root.join("texture").join(name);
+        if c.is_file() {
+            return c;
+        }
+    }
+    PathBuf::from("geoforge-texture")
+}
+
+fn resolve_basisu(runtime_root: &Path, repo_root: &Path) -> PathBuf {
+    if let Ok(p) = std::env::var("GEOFORGE_BASISU") {
+        return PathBuf::from(p);
+    }
+    for c in [
+        runtime_root.join("texture").join("basisu.exe"),
+        runtime_root.join("texture").join("basisu"),
+        repo_root.join("vcpkg_installed/x64-windows/tools/basisu/basisu.exe"),
+    ] {
+        if c.is_file() {
+            return c;
+        }
+    }
+    PathBuf::from("basisu")
 }
 
 fn rebuild_markers(root: &Path) -> bool {
@@ -93,10 +147,16 @@ fn profile_bins(root: &Path, stem: &str) -> Vec<PathBuf> {
     out
 }
 
-/// Order: `GEOFORGE_3DTILE` → next to processor → repo target/{release,debug} → Linux wrapper → PATH.
-fn resolve_3dtile(repo_root: &Path) -> PathBuf {
+/// Order: `GEOFORGE_3DTILE` → runtime/converter → next to processor → product/engine target → PATH.
+fn resolve_3dtile(repo_root: &Path, runtime_root: &Path) -> PathBuf {
     if let Ok(p) = std::env::var("GEOFORGE_3DTILE") {
         return PathBuf::from(p);
+    }
+    if let Some(p) = first_existing([
+        runtime_root.join("converter").join("_3dtile.exe"),
+        runtime_root.join("converter").join("_3dtile"),
+    ]) {
+        return p;
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
@@ -108,9 +168,9 @@ fn resolve_3dtile(repo_root: &Path) -> PathBuf {
     if let Some(p) = first_existing(profile_bins(repo_root, "_3dtile")) {
         return p;
     }
-    let linux_wrap = PathBuf::from("/workspace/runtime/3dtile-bin/run.sh");
-    if linux_wrap.is_file() {
-        return linux_wrap;
+    let engine_root = repo_root.join("engines/3dtiles-converter");
+    if let Some(p) = first_existing(profile_bins(&engine_root, "_3dtile")) {
+        return p;
     }
     PathBuf::from("_3dtile")
 }
@@ -123,6 +183,10 @@ pub fn docker_available() -> bool {
     if std::env::var("GEOFORGE_DISABLE_DOCKER").ok().as_deref() == Some("1") {
         return false;
     }
+    // Packaged installs must not fall back to Docker for formal convert.
+    if tool_paths_packaged_hint() {
+        return false;
+    }
     Command::new("docker")
         .args(["version", "--format", "{{.Server.Version}}"])
         .stdout(Stdio::null())
@@ -130,6 +194,11 @@ pub fn docker_available() -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+fn tool_paths_packaged_hint() -> bool {
+    std::env::var("GEOFORGE_PACKAGED").ok().as_deref() == Some("1")
+        || std::env::var("GEOFORGE_RUNTIME_ROOT").is_ok()
 }
 
 pub fn docker_volume_path(p: &Path) -> Result<String, String> {
@@ -156,10 +225,16 @@ fn to_docker_path(p: &Path) -> String {
     s
 }
 
-/// Order: `GEOFORGE_TOP_REBUILD` → next to processor → repo target/{release,debug} → PATH.
-fn resolve_top_rebuild(repo_root: &Path) -> PathBuf {
+/// Order: `GEOFORGE_TOP_REBUILD` → runtime/bin → next to processor → repo target → PATH.
+fn resolve_top_rebuild(repo_root: &Path, runtime_root: &Path) -> PathBuf {
     if let Ok(p) = std::env::var("GEOFORGE_TOP_REBUILD") {
         return PathBuf::from(p);
+    }
+    if let Some(p) = first_existing([
+        runtime_root.join("bin").join("top_rebuild.exe"),
+        runtime_root.join("bin").join("top_rebuild"),
+    ]) {
+        return p;
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
