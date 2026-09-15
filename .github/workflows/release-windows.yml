@@ -39,7 +39,12 @@ jobs:
             'apps/desktop/src-tauri/tauri.conf.json',
             'apps/desktop/package.json'
           )) {
-            $text = Get-Content -Raw -Encoding utf8 $path
+            $full = (Resolve-Path $path).Path
+            $text = [IO.File]::ReadAllText($full)
+            if ($text -match ('"version"\s*:\s*"' + [regex]::Escape($ver) + '"')) {
+              Write-Host "Already at $ver : $path"
+              continue
+            }
             $updated = [regex]::Replace(
               $text,
               '"version"\s*:\s*"[^"]*"',
@@ -49,7 +54,8 @@ jobs:
             if ($updated -eq $text) {
               throw "Failed to patch version in $path"
             }
-            [IO.File]::WriteAllText((Resolve-Path $path), $updated)
+            [IO.File]::WriteAllText($full, $updated)
+            Write-Host "Patched $path -> $ver"
           }
 
       - name: Install desktop npm deps
