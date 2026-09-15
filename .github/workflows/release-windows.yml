@@ -65,7 +65,7 @@ jobs:
       - name: Package Windows NSIS
         shell: pwsh
         run: |
-          powershell -NoProfile -File apps/desktop/scripts/package-windows.ps1 -SkipTextureBundle
+          pwsh -NoProfile -File apps/desktop/scripts/package-windows.ps1 -SkipTextureBundle
 
       - name: Collect installer + SHA256
         shell: pwsh

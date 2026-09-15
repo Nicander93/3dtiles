@@ -18,7 +18,7 @@ Write-Host "=== GeoForge Windows package ==="
 # 1) Converter Release + product runtime
 $prepArgs = @("-File", (Join-Path $PSScriptRoot "prepare-runtime.ps1"), "-OutDir", $RuntimeDir)
 if ($SkipBuild) { $prepArgs += "-SkipBuild" }
-& powershell @prepArgs
+& pwsh @prepArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # 2) Stage into Tauri resources

@@ -31,7 +31,7 @@ if (-not $SkipBuild) {
 }
 
 $ConverterOut = Join-Path $OutDir "converter"
-& powershell -File (Join-Path $PSScriptRoot "prepare-converter.ps1") -OutDir $ConverterOut
+& pwsh -NoProfile -File (Join-Path $PSScriptRoot "prepare-converter.ps1") -OutDir $ConverterOut
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $ProductBin = Join-Path $OutDir "bin"
@@ -39,7 +39,7 @@ New-Item -ItemType Directory -Force -Path $ProductBin | Out-Null
 foreach ($name in @("processor.exe", "top_rebuild.exe")) {
   $src = Join-Path $RepoRoot "target\release\$name"
   if (-not (Test-Path $src)) {
-    Write-Error "Missing $src — build product crates first"
+    Write-Error "Missing $src - build product crates first"
   }
   Copy-Item -Force $src (Join-Path $ProductBin $name)
 }
