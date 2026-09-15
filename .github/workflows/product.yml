@@ -22,17 +22,3 @@ jobs:
           cargo test -p processor --lib
       - name: Processor capabilities smoke
         run: cargo run -p processor --quiet -- capabilities --json
-
-  converter:
-    runs-on: windows-latest
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[converter]')
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Placeholder — full converter build uses engines/3dtiles-converter + vcpkg
-        run: |
-          Write-Host "Enable manually or with [converter] commit marker"
-          if (Test-Path engines/3dtiles-converter/Cargo.toml) {
-            Write-Host "Engine crate present"
-          }

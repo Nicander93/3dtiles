@@ -15,6 +15,7 @@ fn normalize_root(path: &Path) -> (PathBuf, Option<String>) {
     let p = path
         .canonicalize()
         .unwrap_or_else(|_| path.to_path_buf());
+    let p = strip_verbatim(p);
     if p.file_name().and_then(|n| n.to_str()) == Some("Data")
         && p.parent().map(|par| par.join("metadata.xml").is_file()).unwrap_or(false)
     {
@@ -24,6 +25,20 @@ fn normalize_root(path: &Path) -> (PathBuf, Option<String>) {
         );
     }
     (p, None)
+}
+
+fn strip_verbatim(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let s = path.to_string_lossy();
+        if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{rest}"));
+        }
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            return PathBuf::from(rest);
+        }
+    }
+    path
 }
 
 fn parse_metadata(meta_path: &Path) -> Value {

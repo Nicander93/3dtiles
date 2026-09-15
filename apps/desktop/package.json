@@ -7,6 +7,8 @@
     "predev": "node scripts/prepare-cesium.mjs",
     "prebuild": "node scripts/prepare-cesium.mjs",
     "prepare:sidecars": "node scripts/prepare-sidecars.mjs",
+    "prepare:cesium": "node scripts/prepare-cesium.mjs",
+    "prepare:converter": "powershell -File scripts/prepare-converter.ps1",
     "prepare:runtime": "powershell -File scripts/prepare-runtime.ps1",
     "package:windows": "powershell -File scripts/package-windows.ps1",
     "dev": "vite",

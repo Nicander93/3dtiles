@@ -3,7 +3,7 @@
 # Usage: powershell -File apps/desktop/scripts/package-windows.ps1
 
 param(
-  [switch]$SkipConverterBuild,
+  [switch]$SkipBuild,
   [switch]$SkipTextureBundle
 )
 
@@ -15,9 +15,9 @@ $BundleDir = Join-Path $AppDir "src-tauri\resources\runtime"
 
 Write-Host "=== GeoForge Windows package ==="
 
-# 1) Converter + product runtime
+# 1) Converter Release + product runtime
 $prepArgs = @("-File", (Join-Path $PSScriptRoot "prepare-runtime.ps1"), "-OutDir", $RuntimeDir)
-if ($SkipConverterBuild) { $prepArgs += "-SkipBuild" }
+if ($SkipBuild) { $prepArgs += "-SkipBuild" }
 & powershell @prepArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -45,6 +45,9 @@ Pop-Location
 # 5) Manifest checklist
 $required = @(
   (Join-Path $BundleDir "converter\_3dtile.exe"),
+  (Join-Path $BundleDir "converter\osgPlugins-3.6.5"),
+  (Join-Path $BundleDir "converter\gdal"),
+  (Join-Path $BundleDir "converter\proj"),
   (Join-Path $BundleDir "bin\processor.exe"),
   (Join-Path $BundleDir "bin\top_rebuild.exe")
 )
@@ -62,7 +65,7 @@ if ($missing.Count -gt 0) {
 
 # 6) Tauri NSIS
 Push-Location $AppDir
-npm run tauri build
+npm run tauri -- build --bundles nsis
 $code = $LASTEXITCODE
 Pop-Location
 if ($code -ne 0) { exit $code }

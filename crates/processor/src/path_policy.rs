@@ -107,7 +107,23 @@ fn normalize_dots(path: &Path) -> PathBuf {
 }
 
 fn canonicalize_existing(path: &Path) -> Result<PathBuf, String> {
-    fs::canonicalize(path).map_err(|e| format!("{}: {e}", path.display()))
+    let canon = fs::canonicalize(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(strip_verbatim_prefix(canon))
+}
+
+/// Windows `canonicalize` yields `\\?\C:\...`; `_3dtile`/OSG reject that (os error 123).
+fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let s = path.to_string_lossy();
+        if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{rest}"));
+        }
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            return PathBuf::from(rest);
+        }
+    }
+    path
 }
 
 #[cfg(windows)]

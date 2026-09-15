@@ -13,6 +13,5 @@ default-members = [
 ]
 exclude = [
   "apps/desktop/src-tauri",
-  "engines/3dtiles-converter",
 ]
 resolver = "2"

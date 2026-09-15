@@ -69,6 +69,18 @@ impl ProcessManager {
     resolve_processor_bin()
   }
 
+  /// Bundled `resources/runtime` that should use packaged semantics (no Docker fallback).
+  pub fn packaged_runtime_root() -> Option<PathBuf> {
+    packaged_runtime_root_from_exe()
+  }
+
+  pub fn apply_runtime_env(command: &mut Command) {
+    if let Some(runtime) = Self::packaged_runtime_root() {
+      command.env("GEOFORGE_RUNTIME_ROOT", &runtime);
+      command.env("GEOFORGE_PACKAGED", "1");
+    }
+  }
+
   /// Enqueue / kick serial runner for a queued task id.
   pub fn enqueue(
     &self,
@@ -287,6 +299,24 @@ fn libc_kill(pid: i32, sig: i32) {
   }
 }
 
+fn packaged_runtime_root_from_exe() -> Option<PathBuf> {
+  let exe = std::env::current_exe().ok()?;
+  let dir = exe.parent()?;
+  let runtime = dir.join("resources").join("runtime");
+  if !runtime.is_dir() {
+    return None;
+  }
+  let has_converter = runtime.join("converter").join("_3dtile.exe").is_file()
+    || runtime.join("converter").join("_3dtile").is_file();
+  let path = runtime.to_string_lossy();
+  let in_tauri_target = path.contains("src-tauri\\target") || path.contains("src-tauri/target");
+  if has_converter || !in_tauri_target {
+    Some(runtime)
+  } else {
+    None
+  }
+}
+
 fn resolve_processor_bin() -> Option<PathBuf> {
   if let Ok(p) = std::env::var("GEOFORGE_PROCESSOR") {
     let pb = PathBuf::from(&p);
@@ -388,16 +418,7 @@ fn run_processor_task(
     .stdout(Stdio::piped())
     .stderr(Stdio::piped());
 
-  // Pass runtime root when bundled next to the app
-  if let Ok(exe) = std::env::current_exe() {
-    if let Some(dir) = exe.parent() {
-      let runtime = dir.join("resources").join("runtime");
-      if runtime.is_dir() {
-        command.env("GEOFORGE_RUNTIME_ROOT", &runtime);
-        command.env("GEOFORGE_PACKAGED", "1");
-      }
-    }
-  }
+  ProcessManager::apply_runtime_env(&mut command);
 
   #[cfg(unix)]
   {

@@ -147,8 +147,8 @@ fn profile_bins(root: &Path, stem: &str) -> Vec<PathBuf> {
     out
 }
 
-/// Order: `GEOFORGE_3DTILE` → runtime/converter → next to processor → product/engine target → PATH.
-fn resolve_3dtile(repo_root: &Path, runtime_root: &Path) -> PathBuf {
+/// Order: `GEOFORGE_3DTILE` → runtime/converter → next to processor → PATH.
+fn resolve_3dtile(_repo_root: &Path, runtime_root: &Path) -> PathBuf {
     if let Ok(p) = std::env::var("GEOFORGE_3DTILE") {
         return PathBuf::from(p);
     }
@@ -165,64 +165,7 @@ fn resolve_3dtile(repo_root: &Path, runtime_root: &Path) -> PathBuf {
             }
         }
     }
-    if let Some(p) = first_existing(profile_bins(repo_root, "_3dtile")) {
-        return p;
-    }
-    let engine_root = repo_root.join("engines/3dtiles-converter");
-    if let Some(p) = first_existing(profile_bins(&engine_root, "_3dtile")) {
-        return p;
-    }
     PathBuf::from("_3dtile")
-}
-
-pub fn docker_image() -> String {
-    std::env::var("GEOFORGE_3DTILE_IMAGE").unwrap_or_else(|_| "winner1/3dtiles:1.0".into())
-}
-
-pub fn docker_available() -> bool {
-    if std::env::var("GEOFORGE_DISABLE_DOCKER").ok().as_deref() == Some("1") {
-        return false;
-    }
-    // Packaged installs must not fall back to Docker for formal convert.
-    if tool_paths_packaged_hint() {
-        return false;
-    }
-    Command::new("docker")
-        .args(["version", "--format", "{{.Server.Version}}"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-fn tool_paths_packaged_hint() -> bool {
-    std::env::var("GEOFORGE_PACKAGED").ok().as_deref() == Some("1")
-        || std::env::var("GEOFORGE_RUNTIME_ROOT").is_ok()
-}
-
-pub fn docker_volume_path(p: &Path) -> Result<String, String> {
-    let abs = if p.exists() {
-        std::fs::canonicalize(p).map_err(|e| format!("{}: {e}", p.display()))?
-    } else if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .map_err(|e| e.to_string())?
-            .join(p)
-    };
-    Ok(to_docker_path(&abs))
-}
-
-fn to_docker_path(p: &Path) -> String {
-    let s = p.to_string_lossy().replace('\\', "/");
-    if let Some(rest) = s.strip_prefix("//?/UNC/") {
-        return format!("//{rest}");
-    }
-    if let Some(rest) = s.strip_prefix("//?/") {
-        return rest.to_string();
-    }
-    s
 }
 
 /// Order: `GEOFORGE_TOP_REBUILD` → runtime/bin → next to processor → repo target → PATH.
@@ -275,6 +218,16 @@ pub fn run_logged(
     cmd: &[String],
     cwd: Option<&Path>,
 ) -> Result<i32, String> {
+    run_logged_env(emitter, cancel, cmd, cwd, &[])
+}
+
+pub fn run_logged_env(
+    emitter: &Arc<Emitter>,
+    cancel: &CancelFlag,
+    cmd: &[String],
+    cwd: Option<&Path>,
+    extra_env: &[(&str, PathBuf)],
+) -> Result<i32, String> {
     emitter.log(&format!("$ {}", cmd.join(" ")));
     let mut command = Command::new(&cmd[0]);
     if cmd.len() > 1 {
@@ -283,8 +236,13 @@ pub fn run_logged(
     if let Some(c) = cwd {
         command.current_dir(c);
     }
+    for (k, v) in extra_env {
+        command.env(k, v);
+    }
+    // `_3dtile`/OSG prints plugin dumps from many threads to stdout; piping that
+    // race-crashes on Windows (0xC0000005). Keep stderr only (rustc env_logger).
     command
-        .stdout(Stdio::piped())
+        .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
 
@@ -387,13 +345,12 @@ fn libc_kill(_pid: i32, _sig: i32) {}
 
 #[cfg(test)]
 mod tests {
-    use super::to_docker_path;
-    use std::path::PathBuf;
+    use super::bin_names;
 
-    #[cfg(windows)]
     #[test]
-    fn docker_path_strips_windows_verbatim() {
-        let p = PathBuf::from(r"\\?\D:\code\3dtiles\data");
-        assert_eq!(to_docker_path(&p), "D:/code/3dtiles/data");
+    fn bin_names_include_exe_suffix() {
+        let names = bin_names("_3dtile");
+        assert_eq!(names[0], "_3dtile");
+        assert_eq!(names[1], "_3dtile.exe");
     }
 }

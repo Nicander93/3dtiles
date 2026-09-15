@@ -39,6 +39,12 @@ pub fn run() {
         std::env::set_var("GEOFORGE_DATA_DIR", &data_dir);
       }
 
+      if let Some(runtime) = ProcessManager::packaged_runtime_root() {
+        std::env::set_var("GEOFORGE_RUNTIME_ROOT", &runtime);
+        std::env::set_var("GEOFORGE_PACKAGED", "1");
+        log::info!("packaged runtime {}", runtime.display());
+      }
+
       let state = tauri::async_runtime::block_on(async { AppState::init().await })
         .map_err(|e| {
           log::error!("AppState init failed: {e}");

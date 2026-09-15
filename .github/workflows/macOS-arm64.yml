@@ -7,12 +7,18 @@ on:
 
 permissions:
   contents: read
-  actions: write
 
 jobs:
   build-and-test:
-    uses: ./.github/workflows/build.yml
-    with:
-      os: macos-15
-      platform: macos-arm64
-      package: false
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build product crates (no OSG/GDAL)
+        run: cargo build
+      - name: Test protocol + processor
+        run: |
+          cargo test -p geoforge-protocol
+          cargo test -p processor --lib
+      - name: Processor capabilities smoke
+        run: cargo run -p processor --quiet -- capabilities --json

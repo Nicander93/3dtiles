@@ -7,6 +7,11 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use std::collections::BTreeMap;
 
 const KHR_TECHNIQUES_WEBGL: &str = "KHR_techniques_webgl";
+const KHR_MATERIALS_UNLIT: &str = "KHR_materials_unlit";
+
+fn is_stripped_required_extension(name: &str) -> bool {
+    name == KHR_TECHNIQUES_WEBGL || name == KHR_MATERIALS_UNLIT
+}
 
 /// One triangulated primitive in a local (already scene-expanded) frame.
 #[derive(Clone, Debug, Default)]
@@ -85,7 +90,12 @@ fn reader_compatible_glb(glb: &[u8]) -> Result<Vec<u8>> {
         return Ok(glb.to_vec());
     };
     let before = required.len();
-    required.retain(|value| value.as_str() != Some(KHR_TECHNIQUES_WEBGL));
+    required.retain(|value| {
+        value
+            .as_str()
+            .map(|name| !is_stripped_required_extension(name))
+            .unwrap_or(true)
+    });
     if required.len() == before {
         return Ok(glb.to_vec());
     }

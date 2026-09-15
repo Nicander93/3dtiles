@@ -7,7 +7,6 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
 use tauri::AppHandle;
 use tauri::State;
 use tauri_plugin_dialog::{DialogExt, FilePath};
@@ -312,6 +311,14 @@ fn resolve_convert_bin() -> PathBuf {
   if let Ok(p) = std::env::var("GEOFORGE_3DTILE") {
     return PathBuf::from(p);
   }
+  if let Ok(root) = std::env::var("GEOFORGE_RUNTIME_ROOT") {
+    for name in ["_3dtile.exe", "_3dtile"] {
+      let cand = PathBuf::from(&root).join("converter").join(name);
+      if cand.is_file() {
+        return cand;
+      }
+    }
+  }
   if let Ok(exe) = std::env::current_exe() {
     if let Some(dir) = exe.parent() {
       for name in ["_3dtile", "_3dtile.exe"] {
@@ -320,36 +327,9 @@ fn resolve_convert_bin() -> PathBuf {
           return cand;
         }
       }
-      for rel in [
-        "../../../target/release/_3dtile",
-        "../../../target/release/_3dtile.exe",
-        "../../../target/debug/_3dtile",
-        "../../../target/debug/_3dtile.exe",
-        "../../../engines/3dtiles-converter/target/release/_3dtile",
-        "../../../engines/3dtiles-converter/target/release/_3dtile.exe",
-        "../../../engines/3dtiles-converter/target/debug/_3dtile",
-        "../../../engines/3dtiles-converter/target/debug/_3dtile.exe",
-      ] {
-        let cand = dir.join(rel);
-        if cand.is_file() {
-          return cand;
-        }
-      }
-    }
-  }
-  if let Ok(cwd) = std::env::current_dir() {
-    for anc in cwd.ancestors().take(8) {
-      for sub in [
-        "target/release/_3dtile",
-        "target/release/_3dtile.exe",
-        "target/debug/_3dtile",
-        "target/debug/_3dtile.exe",
-        "engines/3dtiles-converter/target/release/_3dtile",
-        "engines/3dtiles-converter/target/release/_3dtile.exe",
-        "engines/3dtiles-converter/target/debug/_3dtile",
-        "engines/3dtiles-converter/target/debug/_3dtile.exe",
-      ] {
-        let cand = anc.join(sub);
+      let bundled = dir.join("resources").join("runtime").join("converter");
+      for name in ["_3dtile.exe", "_3dtile"] {
+        let cand = bundled.join(name);
         if cand.is_file() {
           return cand;
         }
@@ -359,36 +339,14 @@ fn resolve_convert_bin() -> PathBuf {
   PathBuf::from("_3dtile")
 }
 
-fn docker_engine_available() -> bool {
-  static CACHE: OnceLock<bool> = OnceLock::new();
-  *CACHE.get_or_init(|| {
-    if std::env::var("GEOFORGE_DISABLE_DOCKER").ok().as_deref() == Some("1") {
-      return false;
-    }
-    Command::new("docker")
-      .args(["version", "--format", "{{.Server.Version}}"])
-      .stdout(Stdio::null())
-      .stderr(Stdio::null())
-      .status()
-      .map(|s| s.success())
-      .unwrap_or(false)
-  })
-}
-
-fn convert_image() -> String {
-  std::env::var("GEOFORGE_3DTILE_IMAGE").unwrap_or_else(|_| "winner1/3dtiles:1.0".into())
-}
-
 fn convert_status() -> Value {
   let bin = resolve_convert_bin();
   let exists = bin.is_file();
-  let docker = !exists && docker_engine_available();
   json!({
     "bin": bin.to_string_lossy(),
     "exists": exists,
-    "docker": docker,
+    "docker": false,
     "processor": ProcessManager::processor_available(),
-    "image": convert_image(),
   })
 }
 
@@ -396,8 +354,7 @@ fn convert_status() -> Value {
 pub fn health(state: State<'_, AppState>) -> Result<Value, String> {
   let convert = convert_status();
   let processor = ProcessManager::processor_available();
-  let convert_ok = convert.get("exists").and_then(|v| v.as_bool()).unwrap_or(false)
-    || convert.get("docker").and_then(|v| v.as_bool()).unwrap_or(false);
+  let convert_ok = convert.get("exists").and_then(|v| v.as_bool()).unwrap_or(false);
   Ok(json!({
     "ok": true,
     "status": "ok",
@@ -408,7 +365,7 @@ pub fn health(state: State<'_, AppState>) -> Result<Value, String> {
     } else if convert_ok {
       "Tauri + processor"
     } else {
-      "Processor 已找到，但没有 _3dtile / Docker，OSGB 转换会失败"
+      "Processor 已找到，但没有 _3dtile，OSGB 转换会失败（运行 prepare-converter.ps1）"
     },
     "convertBin": convert.get("bin").and_then(|v| v.as_str()).unwrap_or(""),
     "convert": convert,
@@ -422,12 +379,10 @@ pub fn health(state: State<'_, AppState>) -> Result<Value, String> {
       "ktx2Etc1s": true,
       "ktx2Uastc": true,
       "processTilesetTexture": true,
-      "postprocessBasisu": PathBuf::from(
-        "/workspace/repos/3dtiles/vcpkg_installed/x64-linux/tools/basisu/basisu"
-      ).is_file(),
-      "basisuPath": "/workspace/repos/3dtiles/vcpkg_installed/x64-linux/tools/basisu/basisu",
+      "postprocessBasisu": false,
+      "basisuPath": "",
       "notes": [
-        "Phase 3: KTX2 still via Python texture_ktx2 / basisu when requested; keep mode needs no Python."
+        "KTX2 via geoforge-texture / basisu when bundled; keep mode needs no texture tool."
       ],
     },
   }))
@@ -437,7 +392,9 @@ pub fn health(state: State<'_, AppState>) -> Result<Value, String> {
 pub fn capabilities() -> Result<Value, String> {
   // Prefer spawning processor capabilities so probe matches task execution env
   if let Some(bin) = ProcessManager::processor_bin() {
-    let out = Command::new(&bin)
+    let mut cmd = Command::new(&bin);
+    ProcessManager::apply_runtime_env(&mut cmd);
+    let out = cmd
       .args(["capabilities", "--json"])
       .stdout(Stdio::piped())
       .stderr(Stdio::piped())

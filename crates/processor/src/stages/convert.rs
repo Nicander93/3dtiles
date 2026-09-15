@@ -1,12 +1,10 @@
-//! Invoke existing _3dtile / GEOFORGE_3DTILE wrapper, or Docker if missing.
+//! Invoke prebuilt `_3dtile` / `GEOFORGE_3DTILE` (no Docker fallback).
 
 use crate::cancel::CancelFlag;
 use crate::protocol::{Emitter, Stage};
-use crate::util::{
-    docker_available, docker_image, docker_volume_path, run_logged, tool_paths,
-};
+use crate::util::{run_logged_env, tool_paths};
 use serde_json::Value;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub fn run_convert(
@@ -24,13 +22,6 @@ pub fn run_convert(
     emitter.stage(Stage::Convert, "OSGB → 3D Tiles");
     let rc = if tools.convert_bin.is_file() {
         run_native(emitter, cancel, &tools.convert_bin, osgb_root, out_dir, &extra)?
-    } else if !tools.packaged && docker_available() {
-        let image = docker_image();
-        emitter.log(&format!(
-            "[convert] 本机无 _3dtile（{}），改用 Docker {image}",
-            tools.convert_bin.display()
-        ));
-        run_docker(emitter, cancel, osgb_root, out_dir, &extra, &image)?
     } else if tools.packaged {
         return Err(format!(
             "组件缺失，请修复安装（转换器 _3dtile 未找到：{}）",
@@ -38,9 +29,8 @@ pub fn run_convert(
         ));
     } else {
         return Err(format!(
-            "找不到转换器 _3dtile（查过 {}）。开发环境可设置 GEOFORGE_3DTILE，或安装 Docker（镜像 {}）。",
-            tools.convert_bin.display(),
-            docker_image()
+            "找不到转换器 _3dtile（查过 {}）。请运行 apps/desktop/scripts/prepare-converter.ps1，或设置 GEOFORGE_3DTILE。",
+            tools.convert_bin.display()
         ));
     };
 
@@ -103,87 +93,41 @@ fn run_native(
         "-f".into(),
         "osgb".into(),
         "-i".into(),
-        osgb_root.into(),
+        strip_verbatim_str(osgb_root),
         "-o".into(),
-        out_dir.to_string_lossy().into_owned(),
+        strip_verbatim_str(&out_dir.to_string_lossy()),
     ];
     cmd.extend(extra.iter().cloned());
-    run_logged(emitter, cancel, &cmd, None)
+    let cwd = bin.parent();
+    let mut env = Vec::new();
+    if let Some(dir) = cwd {
+        let plugins = dir.join("osgPlugins-3.6.5");
+        if plugins.is_dir() {
+            env.push(("OSG_LIBRARY_PATH", plugins));
+        }
+        let gdal = dir.join("gdal");
+        if gdal.is_dir() {
+            env.push(("GDAL_DATA", gdal));
+        }
+        let proj = dir.join("proj");
+        if proj.is_dir() {
+            env.push(("PROJ_DATA", proj.clone()));
+            env.push(("PROJ_LIB", proj));
+        }
+    }
+    let env_refs: Vec<(&str, PathBuf)> = env;
+    run_logged_env(emitter, cancel, &cmd, cwd, &env_refs)
 }
 
-fn run_docker(
-    emitter: &Arc<Emitter>,
-    cancel: &CancelFlag,
-    osgb_root: &str,
-    out_dir: &Path,
-    extra: &[String],
-    image: &str,
-) -> Result<i32, String> {
-    let input = docker_volume_path(Path::new(osgb_root))?;
-    let output = docker_volume_path(out_dir)?;
-    let name = format!(
-        "geoforge-convert-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0)
-    );
-    let mut cmd = vec![
-        "docker".into(),
-        "run".into(),
-        "--rm".into(),
-        "--name".into(),
-        name.clone(),
-        "-e".into(),
-        "LD_LIBRARY_PATH=/3dtiles/lib".into(),
-        "-w".into(),
-        "/3dtiles".into(),
-        "-v".into(),
-        format!("{input}:/input"),
-        "-v".into(),
-        format!("{output}:/output"),
-    ];
-
-    let mut tile_args = vec![
-        "./target/release/_3dtile".into(),
-        "-f".into(),
-        "osgb".into(),
-        "-i".into(),
-        "/input".into(),
-        "-o".into(),
-        "/output".into(),
-    ];
-    let mut i = 0;
-    while i < extra.len() {
-        if extra[i] == "-c" {
-            if let Some(cfg) = extra.get(i + 1) {
-                let cfg_path = Path::new(cfg);
-                if cfg_path.is_file() {
-                    let host = docker_volume_path(cfg_path)?;
-                    cmd.push("-v".into());
-                    cmd.push(format!("{host}:/cfg.json"));
-                    tile_args.push("-c".into());
-                    tile_args.push("/cfg.json".into());
-                } else {
-                    tile_args.push("-c".into());
-                    tile_args.push(cfg.clone());
-                }
-                i += 2;
-                continue;
-            }
+fn strip_verbatim_str(s: &str) -> String {
+    #[cfg(windows)]
+    {
+        if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{rest}");
         }
-        tile_args.push(extra[i].clone());
-        i += 1;
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            return rest.to_string();
+        }
     }
-
-    cmd.push(image.into());
-    cmd.extend(tile_args);
-    // Wrap run_logged: on cancel, also docker stop the named container
-    let result = run_logged(emitter, cancel, &cmd, None);
-    if cancel.is_cancelled() {
-        let _ = std::process::Command::new("docker")
-            .args(["stop", "-t", "2", &name])
-            .status();
-    }
-    result
+    s.to_string()
 }

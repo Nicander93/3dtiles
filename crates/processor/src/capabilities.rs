@@ -1,6 +1,6 @@
 //! `processor capabilities --json` — single source for tool probe (T06).
 
-use crate::util::{docker_available, tool_paths};
+use crate::util::tool_paths;
 use serde_json::{json, Value};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -34,8 +34,10 @@ pub fn capabilities_json() -> Value {
         "exists": tools.basisu.is_file(),
     });
 
-    let convert_ready = convert.get("launchOk").and_then(|v| v.as_bool()).unwrap_or(false)
-        || (!tools.packaged && docker_available());
+    let convert_ready = convert
+        .get("launchOk")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     json!({
         "ok": true,
@@ -49,14 +51,14 @@ pub fn capabilities_json() -> Value {
         },
         "convert": {
             "ready": convert_ready,
-            "native": convert.get("launchOk").and_then(|v| v.as_bool()).unwrap_or(false),
-            "dockerFallback": !tools.packaged && docker_available(),
+            "native": convert_ready,
+            "dockerFallback": false,
             "message": if convert_ready {
                 "ready"
             } else if tools.packaged {
                 "组件缺失，请修复安装（转换器 _3dtile）"
             } else {
-                "找不到转换器；开发环境可设置 GEOFORGE_3DTILE 或使用 Docker"
+                "找不到转换器；运行 prepare-converter.ps1 或设置 GEOFORGE_3DTILE"
             },
         },
         "textureModes": texture_modes(basisu.get("exists").and_then(|v| v.as_bool()).unwrap_or(false)
@@ -98,7 +100,6 @@ fn probe_bin(path: &Path, _hint: &[&str]) -> Value {
             "error": format!("missing: {}", path.display()),
         });
     }
-    // Soft launch probe with short timeout via spawn + kill
     let mut child = match Command::new(path)
         .arg("--help")
         .stdout(Stdio::null())
@@ -137,8 +138,6 @@ fn probe_bin(path: &Path, _hint: &[&str]) -> Value {
     if !ok {
         let _ = child.kill();
         let _ = child.wait();
-        // help may hang on some tools; existence still counts for converter dll issues —
-        // treat timed-out help as launchOk=true if file exists (soft).
         ok = true;
     }
     json!({

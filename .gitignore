@@ -4,6 +4,7 @@
 /compile_commands.json
 /.cache/
 /build/
+/dist/
 /.idea/
 .DS_Store
 
@@ -32,3 +33,7 @@ tsconfig.tsbuildinfo
 # Tauri / desktop build artifacts
 apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/binaries/
+
+# Staged converter runtime (copied by package-windows.ps1)
+apps/desktop/src-tauri/resources/runtime/**
+!apps/desktop/src-tauri/resources/runtime/.gitkeep

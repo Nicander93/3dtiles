@@ -2,9 +2,9 @@
 
 本地三维地理数据工具箱：OSGB → 3D Tiles 转换、顶层重建、KTX2 纹理处理、Cesium 预览。
 
-正式任务路径：**Desktop → Processor → 引擎**。缺 Processor 时明确失败，不再回退 Python HTTP 任务服务。
+正式任务路径：**Desktop → Processor → Converter / TopRebuild**。缺 Processor 时明确失败，不再回退 Python HTTP 任务服务。
 
-上游转换器源码隔离在 [`engines/3dtiles-converter`](./engines/3dtiles-converter)（独立构建，**不**参与产品默认 `cargo build`）。
+GeoForge 使用**预构建**的 Converter Runtime（[`Nicander93/geoforge-converter`](https://github.com/Nicander93/geoforge-converter)），不在本仓库编译 OSG/GDAL。
 
 ## 仓库结构
 
@@ -14,7 +14,7 @@
 | `crates/protocol` | 任务配置与事件契约（`geoforge-protocol`） |
 | `crates/processor` | 任务进程：扫描、转换、重建、纹理、校验、提交 |
 | `crates/top_rebuild` | 自研顶层重建（Proxy HLOD） |
-| `engines/3dtiles-converter` | 上游 `_3dtile`（CMake / vcpkg / OSG） |
+| `third_party/3dtiles-converter.json` | 固定 Converter Release URL + SHA256 |
 | `tools/texture_ktx2` | KTX2 后处理（可封装为 `geoforge-texture`） |
 | `docs/product/` | 产品、重构与 V1 补齐说明 |
 
@@ -50,29 +50,23 @@ npm run tauri:dev
 cargo run -p processor -- capabilities --json
 ```
 
-## 转换器（独立）
+## 转换器 Runtime
 
-```bash
-cd engines/3dtiles-converter
-# 需本机 MSVC + vcpkg / OSG；详见引擎 README
-cargo build --release
-```
-
-开发机可将产物暂存为可搬迁 runtime：
+正式打包由 `prepare-converter.ps1` 按 `third_party/3dtiles-converter.json` 下载固定版本。
 
 ```powershell
+powershell -File apps/desktop/scripts/prepare-converter.ps1
 powershell -File apps/desktop/scripts/prepare-runtime.ps1
 ```
 
-完整 Windows 安装包入口（缺必需组件则失败）：
+完整 Windows 安装包：
 
 ```powershell
 cd apps/desktop
 npm run package:windows
-# 或: powershell -File scripts/package-windows.ps1
 ```
 
-说明见 [engines/3dtiles-converter/README.md](./engines/3dtiles-converter/README.md)。
+说明见 [docs/dependencies/3dtiles-converter.md](./docs/dependencies/3dtiles-converter.md)。
 
 ## 文档
 
