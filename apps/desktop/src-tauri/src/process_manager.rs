@@ -204,7 +204,7 @@ impl ProcessManager {
     let force = proc.force_kill.clone();
     let committed = proc.committed.clone();
     #[cfg(windows)]
-    let job_ptr = proc.job.as_ref().map(|j| j.0);
+    let job_raw = proc.job.as_ref().map(|j| j.0 as isize);
     #[cfg(windows)]
     let pid = proc.child.id();
     #[cfg(unix)]
@@ -238,9 +238,9 @@ impl ProcessManager {
       force.store(true, Ordering::SeqCst);
       #[cfg(windows)]
       {
-        if let Some(h) = job_ptr {
+        if let Some(raw) = job_raw {
           unsafe {
-            TerminateJobObject(h, 1);
+            TerminateJobObject(raw as *mut std::ffi::c_void, 1);
           }
         } else {
           let mut map = mgr.inner.lock();
