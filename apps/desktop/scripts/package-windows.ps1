@@ -32,7 +32,7 @@ if (Test-Path $TextureSrc) {
   New-Item -ItemType Directory -Force -Path $TextureDst | Out-Null
   Copy-Item -Recurse -Force (Join-Path $TextureSrc "*") $TextureDst
 } elseif (-not $SkipTextureBundle) {
-  Write-Warning "geoforge-texture bundle missing at $TextureSrc — packaging will fail checklist"
+  Write-Warning "geoforge-texture bundle missing at $TextureSrc - packaging will fail checklist"
 }
 
 # 4) Sidecars
