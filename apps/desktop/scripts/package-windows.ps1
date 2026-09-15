@@ -70,4 +70,18 @@ $code = $LASTEXITCODE
 Pop-Location
 if ($code -ne 0) { exit $code }
 
-Write-Host "Package build finished. Check apps/desktop/src-tauri/target/release/bundle/nsis/"
+$NsisDir = Join-Path $AppDir "src-tauri\target\release\bundle\nsis"
+Write-Host "Package build finished."
+if (Test-Path $NsisDir) {
+  $exes = Get-ChildItem $NsisDir -Filter *.exe -File -ErrorAction SilentlyContinue
+  if ($exes) {
+    foreach ($exe in $exes) {
+      Write-Host ("NSIS_INSTALLER=" + $exe.FullName)
+      Write-Host ("NSIS_SIZE_BYTES=" + $exe.Length)
+    }
+  } else {
+    Write-Warning "NSIS dir exists but no .exe found: $NsisDir"
+  }
+} else {
+  Write-Warning "NSIS output dir missing: $NsisDir"
+}

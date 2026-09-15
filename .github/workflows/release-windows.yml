@@ -1,0 +1,98 @@
+name: Release Windows
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-nsis:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Sync version from tag
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $ver = $env:GITHUB_REF_NAME.TrimStart('v')
+          } else {
+            $ver = '0.0.0-ci'
+          }
+          Write-Host "Package version: $ver"
+          echo "PACKAGE_VERSION=$ver" >> $env:GITHUB_ENV
+
+          foreach ($path in @(
+            'apps/desktop/src-tauri/tauri.conf.json',
+            'apps/desktop/package.json'
+          )) {
+            $text = Get-Content -Raw -Encoding utf8 $path
+            $updated = [regex]::Replace(
+              $text,
+              '"version"\s*:\s*"[^"]*"',
+              ('"version": "' + $ver + '"'),
+              1
+            )
+            if ($updated -eq $text) {
+              throw "Failed to patch version in $path"
+            }
+            [IO.File]::WriteAllText((Resolve-Path $path), $updated)
+          }
+
+      - name: Install desktop npm deps
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Package Windows NSIS
+        shell: pwsh
+        run: |
+          powershell -NoProfile -File apps/desktop/scripts/package-windows.ps1 -SkipTextureBundle
+
+      - name: Collect installer + SHA256
+        shell: pwsh
+        run: |
+          $nsis = 'apps/desktop/src-tauri/target/release/bundle/nsis'
+          if (-not (Test-Path $nsis)) {
+            throw "NSIS output dir missing: $nsis"
+          }
+          $exes = Get-ChildItem $nsis -Filter *.exe -File
+          if ($exes.Count -lt 1) {
+            throw "No NSIS .exe under $nsis"
+          }
+          New-Item -ItemType Directory -Force -Path dist/installer | Out-Null
+          foreach ($exe in $exes) {
+            Copy-Item -Force $exe.FullName (Join-Path 'dist/installer' $exe.Name)
+            $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            Set-Content -Encoding ascii (Join-Path 'dist/installer' "$($exe.Name).sha256") $hash
+            Write-Host "Asset $($exe.Name) sha256=$hash"
+          }
+          Get-ChildItem dist/installer | Format-Table Name, Length
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-nsis
+          path: dist/installer/*
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/installer/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
