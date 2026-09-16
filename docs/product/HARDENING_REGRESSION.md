@@ -51,6 +51,7 @@
 | 27 | processor 本机 CLI | 损坏 `metadata.xml` | `scan-osgb --path .cache\\scan-negative\\broken-metadata` | — | 通过（拒绝） | 1 | stdout JSON | `valid=false`，错误明确包含 `XML parse error: unclosed tag <SRS>`，未进入转换 |
 | 28 | Desktop Rust Windows unit test | Job Object kill-on-close | `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib --locked` | — | 通过 | 0（8/8） | cargo stdout | 直接调用桌面实际 Job Object 绑定，关闭 Job 后 30 秒 `cmd/ping` 子进程在 3 秒内结束；不是完整 GUI 关闭验收 |
 | 29 | NSIS 临时安装启动 | 默认用户 AppData 写入与窗口可见性 | 静默安装后启动 `geoforge-desktop.exe`；另以 `GEOFORGE_DATA_DIR=.cache\\installed-ui-data` 隔离启动 | `.cache\\installed-ui-test`（已清理） | 阻塞 | — | Tauri stderr / Process 状态 | 当前受限执行环境对用户 AppData 仅有读取权限，默认启动报 SQLite `attempt to write a readonly database`；隔离目录启动进程可驻留，但窗口未被自动化接口枚举，因此不宣称安装 GUI 验收 |
+| 30 | processor 本机 Release runtime | 资源曲线（同一真实 `OSGBny`） | `GEOFORGE_CONVERT_THREADS=1,2,4 convert-osgb` | `.cache\\resource-curve\\threads-*` | 通过 | 0（3/3） | `threads-*.log` | 1 worker：3035 ms / 29,237,248 B；2：1629 ms / 35,753,984 B；4：1025 ms / 47,386,624 B；每次 86 个文件且 `tileset.json` 存在 |
 
 ## 单次记录模板
 
