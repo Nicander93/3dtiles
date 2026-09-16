@@ -6,7 +6,7 @@
 
 | 项目 | 值 |
 | --- | --- |
-| GeoForge commit | `e23d60476abbd651b12cb4fa82098013d5f6b6d4` |
+| GeoForge commit | `cf1b41203c8161bcf9433e13138fc77f755d23f6` |
 | GeoForge 版本 | `0.1.0`（仓库/桌面配置） |
 | Processor 路径 | `D:\\code\\3dtiles\\target\\debug\\processor.exe` |
 | Converter 版本 / source commit | `0.1.0` / `76ef4d6ce419c675c9742ed13cf600d74ca5c78e`（本机候选构建） |
