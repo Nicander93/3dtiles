@@ -14,6 +14,7 @@
 - [x] Release Windows workflow 在 `npm ci` 后执行 `npm test`；安装器本身仍需 Windows 安装验收。
 - [x] 本机候选 converter 已完成 MSVC/vcpkg Release 构建，NSIS 临时安装后 `--help` 正常，负向输入返回非零且无伪造成果。
 - [x] 本机候选 converter 对真实 `OSGBny`（中文输入/输出目录）完成 convert-only 与 processor scan→convert→validate→commit，退出码均为 0。
+- [x] 本机候选 converter 对包含中文 Tile 目录/文件名的真实样本完成 convert-only；输出 85 个文件，6/6 个根 URI 可解析（回归 38）。
 - [x] 本机候选 converter 对香港 8×8 真实 OSGB（11,124 个 OSGB、约 2.47 GB）以 2 worker 完成全量 convert→validate→commit；输出 11,186 个文件，64/64 个根 URI 可解析（回归 35）。
 - [x] 同一香港 8×8 成果完成 `rebuild-top --levels 0 --texture keep`→validate→commit；退出码 0，输出 11,208 个文件，85/85 个 content URI 可解析（回归 36）。
 

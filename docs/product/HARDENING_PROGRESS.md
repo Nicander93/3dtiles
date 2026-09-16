@@ -13,7 +13,7 @@
 | H05 | 已完成 | 两个转换页面和错误解析已构建验证 |
 | H06 | 已完成 | stderr/stdout sidecar、受控非零 converter fixture、退出码和任务详情链路已验证 |
 | H07 | 已完成（本机候选构建） | converter Rust/C++ 修改已用 MSVC 18.6.2 + vcpkg x64-windows 构建；真实 OSGB 与中文输入路径已通过本机候选回归 |
-| H08 | 已完成（本机候选构建） | OSG `OSG_USE_UTF8_FILENAME` 路径修复、URI/JSON 修改已进入候选 runtime；真实中文输入/输出目录转换通过 |
+| H08 | 已完成（本机候选构建） | OSG `OSG_USE_UTF8_FILENAME` 路径修复、URI/JSON 修改已进入候选 runtime；真实中文输入/输出目录和中文 Tile 目录/文件名转换均通过 |
 | H09 | 未触发 | 尚未取得同一新 binary 的原生崩溃证据 |
 | H10 | 本机候选已验证，正式发布待更新 | 本机候选 runtime 已通过 `--help`、负向输入、真实 OSGB 和 NSIS 临时安装；固定清单仍保留已发布 SHA256，待发布新 converter 后再更新 |
 | H11 | Job Object 单元测试完成，桌面关闭场景待验收 | Windows unit test 直接验证 `KILL_ON_JOB_CLOSE` 会在 3 秒内结束附着子进程；大样本 CLI 取消无最终/临时目录和残留进程；完整 GUI 关闭/多级子进程仍待安装版验收 |
@@ -106,7 +106,7 @@ git diff --check                     通过
 
 - converter 源码的 `cargo metadata --no-deps` 和 `git diff --check` 通过；相邻仓库 `cargo fmt --all -- --check` 仍包含已有的 `common.rs`/`shape.rs`/`build.rs` 格式差异，未自动重排。
 - 固定 converter runtime 的 URL/SHA256 尚未更新：本机候选二进制只用于验收，必须先在 converter 仓库发布带版本号的 zip，再更新主仓库清单。
-- 真实中文输入根目录已通过；本地 Cesium 页面已加载真实 `OSGBny` 成果并显示 `tilesLoaded`（回归 24）；带空格的安装目录 convert-only、方括号/加号/括号特殊路径已通过（回归 31–32），长路径已得到可诊断拒绝（回归 33），4,585 文件香港成果的重建链和 11,124 OSGB 的 8×8 完整转换/重建也已通过（回归 34–36）。中文 Tile 文件名、权限/磁盘故障和安装桌面 WebView 仍待端到端回归。
+- 真实中文输入根目录和中文 Tile 目录/文件名已通过；本地 Cesium 页面已加载真实 `OSGBny` 成果并显示 `tilesLoaded`（回归 24）；带空格的安装目录 convert-only、方括号/加号/括号特殊路径已通过（回归 31–32），长路径已得到可诊断拒绝（回归 33），4,585 文件香港成果的重建链和 11,124 OSGB 的 8×8 完整转换/重建也已通过（回归 34–36）。权限/磁盘故障和安装桌面 WebView 仍待端到端回归。
 - 当前真实失败样本尚未由用户提供；8×8 大样本转换已成功，但 50 GB 以上数据、真实权限/磁盘故障和多来源样本仍未覆盖。
 - 单 Tile 容错保持严格失败，未启用部分成果和失败率阈值。
 - 原始诊断文件目前按任务保留，尚未增加自动轮换/配额策略；任务事件日志仍按 tail 规则限长。
