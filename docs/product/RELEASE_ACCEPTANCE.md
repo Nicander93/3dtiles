@@ -33,6 +33,8 @@
 
 本地 Cesium 页面已加载回归 23 的真实成果，页面显示 `tilesLoaded · view r≈959m` 且控制台无错误（回归 24）；安装桌面 WebView 仍保持未执行。
 
+安装版启动曾做过一次隔离检查：当前受限执行环境无法写入默认用户 AppData，因而出现 SQLite `attempt to write a readonly database`；改用仓库隔离数据目录后进程可驻留，但窗口未被自动化接口枚举。该环境限制记录为回归 29，不能替代真实用户 Windows 安装验收。
+
 ## 当前状态
 
 本仓库已完成 CI 可验证的加固和诊断链，并在本机完成候选 converter、真实 OSGB（含中文输入/输出路径）、10 次重复与 NSIS 临时安装验收。processor CLI 的大样本取消和 Windows Job Object kill-on-close 单元测试也已通过；桌面关闭/多级进程树、安装桌面 WebView、当前用户失败样本、权限/磁盘故障仍是安装版待执行项。正式发布还需把候选 converter 以带版本号的 zip 发布到固定 URL、更新 `third_party/3dtiles-converter.json` 的 SHA256；在此之前固定 runtime 清单不得改成候选 hash。

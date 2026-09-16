@@ -77,6 +77,7 @@
 - 将输出父路径设为已有普通文件时，processor 返回 `PATH_OUTPUT_NOT_WRITABLE`（退出码 1），未创建子目录且原文件内容保持不变；真实 ACL 拒绝写入仍需安装版测试（回归 25）。
 - 扫描负向 fixture：缺失 `metadata.xml` 与未闭合 XML 均在转换前返回 `valid=false`、退出码 1，并保留具体路径/解析错误（回归 26–27）。
 - Desktop Rust Windows unit test 直接覆盖 Job Object kill-on-close：附着 30 秒测试子进程后关闭 Job，子进程在 3 秒内退出，8 项桌面库测试全部通过（回归 28）。
+- 临时 NSIS 安装的默认启动在当前受限环境因 AppData 只读而阻塞；隔离数据目录下进程可驻留但窗口未被自动化接口枚举，未把它记为安装 GUI 通过（回归 29）。
 
 验证命令：
 
