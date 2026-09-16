@@ -20,7 +20,7 @@
 | 14 | converter 异常退出 | failed，保留 stderr 诊断 | 待执行 | — |
 | 15 | 强制关闭 GeoForge | 下次启动为 interrupted | 待执行 | — |
 | 16 | 50 GB 以上数据 | 在记录的资源范围内完成 | 待执行 | — |
-| 17 | 大量 Tile | 内存和日志可控 | 部分通过：4567 Tile 样本完成取消/收尾；小型真实样本已有 1/2/4 worker 资源曲线，目标大数据完整转换仍待执行 | HARDENING_REGRESSION 21、30 |
+| 17 | 大量 Tile | 内存和日志可控 | 通过（当前 processor 重建）：4,585 个内容文件、约 1.23 GB 的连续香港 5×4 成果完成 rebuild→validate→commit，输出 4,596 个文件；4567 Tile 样本取消/收尾与 1/2/4 worker 资源曲线也通过。更大输入的完整转换仍待执行 | HARDENING_REGRESSION 21、30、34 |
 | 18 | 超长路径 | 成功或明确拒绝 | 通过（明确拒绝）：约 288 字符输入路径在 scan 后由 converter 返回 `CONVERTER_EXIT_NONZERO`，stderr 指出具体 Tile 文件读取失败；processor 不提交最终目录并保留归属明确的临时目录 | HARDENING_REGRESSION 33 |
 
 首轮发布门槛：01、02、05、06、07、10、11、13、14、15 必须有结果；03、04 只能在实际布局满足 converter 与重建约束时宣称支持。
