@@ -14,6 +14,7 @@
 - [x] Release Windows workflow 在 `npm ci` 后执行 `npm test`；安装器本身仍需 Windows 安装验收。
 - [x] 本机候选 converter 已完成 MSVC/vcpkg Release 构建，NSIS 临时安装后 `--help` 正常，负向输入返回非零且无伪造成果。
 - [x] 本机候选 converter 对真实 `OSGBny`（中文输入/输出目录）完成 convert-only 与 processor scan→convert→validate→commit，退出码均为 0。
+- [x] 本机候选 converter 对香港 8×8 真实 OSGB（11,124 个 OSGB、约 2.47 GB）以 2 worker 完成全量 convert→validate→commit；输出 11,186 个文件，64/64 个根 URI 可解析（回归 35）。
 
 ## Windows 安装验收
 
@@ -37,4 +38,4 @@
 
 ## 当前状态
 
-本仓库已完成 CI 可验证的加固和诊断链，并在本机完成候选 converter、真实 OSGB（含中文输入/输出路径）、10 次重复与 NSIS 临时安装验收。processor CLI 的大样本取消和 Windows Job Object kill-on-close 单元测试也已通过；桌面关闭/多级进程树、安装桌面 WebView、当前用户失败样本、权限/磁盘故障仍是安装版待执行项。正式发布还需把候选 converter 以带版本号的 zip 发布到固定 URL、更新 `third_party/3dtiles-converter.json` 的 SHA256；在此之前固定 runtime 清单不得改成候选 hash。
+本仓库已完成 CI 可验证的加固和诊断链，并在本机完成候选 converter、真实 OSGB（含中文输入/输出路径）、10 次重复、香港 8×8 大数据和 NSIS 临时安装验收。processor CLI 的大样本取消和 Windows Job Object kill-on-close 单元测试也已通过；桌面关闭/多级进程树、安装桌面 WebView、当前用户失败样本、权限/磁盘故障仍是安装版待执行项。正式发布还需把候选 converter 以带版本号的 zip 发布到固定 URL、更新 `third_party/3dtiles-converter.json` 的 SHA256；在此之前固定 runtime 清单不得改成候选 hash。

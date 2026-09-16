@@ -6,11 +6,11 @@
 
 | 项目 | 值 |
 | --- | --- |
-| GeoForge commit | `cf1b41203c8161bcf9433e13138fc77f755d23f6` |
+| GeoForge commit | `8627809789751d7573d38d3957d066665d7fbb12` |
 | GeoForge 版本 | `0.1.0`（仓库/桌面配置） |
 | Processor 路径 | `D:\\code\\3dtiles\\target\\debug\\processor.exe` |
-| Converter 版本 / source commit | `0.1.0` / `76ef4d6ce419c675c9742ed13cf600d74ca5c78e`（本机候选构建） |
-| Converter SHA256 | 本机候选 runtime `_3dtile.exe`: `7da792b3ecc51176bc829cb317da97c77f86fbfd34806c41ceb471b0e47fe2e7`; 固定发布清单值为 `77cadd01941add0297a52a22ce26918d8d22c3729a0ae564556fce14327b5c5b`，两者不一致，不能宣称已更新正式发布包 |
+| Converter 版本 / source commit | `0.1.0` / `608d4347b7f1728c6d1c7ffcc4b1c5413e967ce6`（本机候选构建） |
+| Converter SHA256 | 本机候选 runtime `_3dtile.exe`: `af7384f15059d6c3f6927f1aa754bffcf2036504fce3cb3628eb536c77e8e81e`; 固定发布清单值为 `77cadd01941add0297a52a22ce26918d8d22c3729a0ae564556fce14327b5c5b`，两者不一致，不能宣称已更新正式发布包 |
 | Runtime 根目录 | `D:\\code\\3dtiles\\dist\\runtime`（本机候选，converter `--help` 返回 0；已完成临时 NSIS 安装验收） |
 | Installer SHA256 | 本机候选 `GeoForge 3D_0.1.0_x64-setup.exe`: `04c2cb84c94a18692945fd33d9628d99074bdd00f2cd53b1cbdebb2c19359da0` |
 | Windows 版本 | 未能读取 WMI；本记录不伪造版本 |
@@ -56,6 +56,7 @@
 | 32 | converter 本机 Release CLI | 输入和输出路径包含方括号、加号、括号；ASCII `OSGBny` | `_3dtile.exe -f osgb -i ".cache\\special [path]+(v1) input" -o ".cache\\special output [path]+(v1)"` | `.cache\\special output [path]+(v1)` | 通过 | 0 | `.cache\\special-path-converter.log` | 候选 converter 退出 0，生成 85 个文件和 `tileset.json`，根 URI 6/6 可解析；输入样本保持不变；无残留 processor/converter 进程 |
 | 33 | processor 本机 Release runtime | 输入路径约 288 字符的真实 `OSGBny` | `processor.exe convert-osgb --input <long path> --output <new path> --task-id long-path-fixed` | `.cache\\long-path-20260916\\processor-fixed\\final output` | 通过（明确拒绝） | 1 | `.cache\\long-path-processor-fixed.jsonl`、`.cache\\long-path-converter.log` | scan 阶段通过；converter 阶段返回 `CONVERTER_EXIT_NONZERO`，stderr 指出具体 Tile 的 `open file/read node files` 失败；最终目录和 `tileset.json` 均不存在，仅保留 1 个归属明确的临时工作目录；无残留进程。当前候选明确不支持此长度，未宣称长路径兼容 |
 | 34 | processor 本机 Release runtime | 已有连续香港 5×4 真实成果（4,585 个内容文件，约 1.23 GB） | `processor.exe process-tileset --input data\\real\\v1_e2e_convert_keep --output <new path> --rebuild-top --levels 0 --texture keep --task-id large-rebuild-current` | `.cache\\large-rebuild-current-20260916` | 通过 | 0 | `.cache\\large-rebuild-current-20260916.jsonl` | 当前 processor 完成 rebuild→validate→commit；耗时 29,034 ms，输出 4,596 个文件、1,237,277,271 bytes，root children=2、proxy=9、level 0/1/2/3=20/6/2/1；保留 `GAP_WARN`/`BUDGET_NOT_REACHED` 既有警告；无残留进程 |
+| 35 | processor 本机 Release runtime | 香港 8×8 真实 OSGB 全量转换（含 62 字节空 OSGB 叶节点） | `GEOFORGE_CONVERT_THREADS=2 processor.exe convert-osgb --input data\\real\\hk_8x8\\osgb --output <new path> --task-id hk8x8-convert-fixed-t2` | `.cache\\hk8x8-convert-fixed-t2-20260916` | 通过 | 0 | `.cache\\hk8x8-convert-fixed-t2-20260916.stdout` | 输入 11,124 个 OSGB、约 2.47 GB；耗时 267,409 ms，converter 峰值 88,641,536 bytes；输出 11,186 个文件、3,107,088,112 bytes，root children=64，64/64 个根 URI 可解析；空叶节点记录 `skipping empty OSGB node` 后继续，最终 validate→commit 成功；无残留进程 |
 
 ## 单次记录模板
 
