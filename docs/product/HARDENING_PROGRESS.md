@@ -86,6 +86,7 @@
 
 - 使用包含空 OSGB 叶节点的香港 8×8 真实数据完成 2 worker 全量 convert→validate→commit；输入 11,124 个 OSGB、约 2.47 GB，耗时 267,409 ms，输出 11,186 个文件、约 3.11 GB，64 个根 URI 全部可解析（回归 35）。converter 对空叶节点记录明确 warning 并跳过，不再让该类节点阻断整批转换。
 - 使用上述 8×8 转换成果执行 `rebuild-top --levels 0 --texture keep`，完成 rebuild→validate→commit；耗时 72,205 ms，输出 11,208 个文件、约 3.15 GB，root children=4、proxy=21、85/85 个 content URI 可解析（回归 36）。
+- 中文 Tile 名称隔离副本继续通过 processor scan→convert→validate→commit；输出 86 个文件，6/6 URI 可解析且含 1 个中文 URI（回归 39）。
 
 验证命令：
 
