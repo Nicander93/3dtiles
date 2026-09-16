@@ -54,6 +54,7 @@
 | 30 | processor 本机 Release runtime | 资源曲线（同一真实 `OSGBny`） | `GEOFORGE_CONVERT_THREADS=1,2,4 convert-osgb` | `.cache\\resource-curve\\threads-*` | 通过 | 0（3/3） | `threads-*.log` | 1 worker：3035 ms / 29,237,248 B；2：1629 ms / 35,753,984 B；4：1025 ms / 47,386,624 B；每次 86 个文件且 `tileset.json` 存在 |
 | 31 | NSIS 临时安装 | 安装目录包含空格；ASCII 输入 `data\\real\\OSGBny\\OSGBny` | 安装到 `.cache\\installed path with spaces-20260916`，从安装目录 `resources\\runtime\\converter\\_3dtile.exe` 执行 convert-only；随后静默卸载 | `.cache\\installed path with spaces-output-20260916` | 通过 | 0 | `.cache\\installed-path-spaces-converter.log` | 安装器退出 0；安装版 converter 退出 0，生成 85 个文件和 `tileset.json`，根 URI 6/6 可解析；卸载退出 0，安装目录已移除；无残留 processor/converter 进程 |
 | 32 | converter 本机 Release CLI | 输入和输出路径包含方括号、加号、括号；ASCII `OSGBny` | `_3dtile.exe -f osgb -i ".cache\\special [path]+(v1) input" -o ".cache\\special output [path]+(v1)"` | `.cache\\special output [path]+(v1)` | 通过 | 0 | `.cache\\special-path-converter.log` | 候选 converter 退出 0，生成 85 个文件和 `tileset.json`，根 URI 6/6 可解析；输入样本保持不变；无残留 processor/converter 进程 |
+| 33 | processor 本机 Release runtime | 输入路径约 288 字符的真实 `OSGBny` | `processor.exe convert-osgb --input <long path> --output <new path> --task-id long-path-fixed` | `.cache\\long-path-20260916\\processor-fixed\\final output` | 通过（明确拒绝） | 1 | `.cache\\long-path-processor-fixed.jsonl`、`.cache\\long-path-converter.log` | scan 阶段通过；converter 阶段返回 `CONVERTER_EXIT_NONZERO`，stderr 指出具体 Tile 的 `open file/read node files` 失败；最终目录和 `tileset.json` 均不存在，仅保留 1 个归属明确的临时工作目录；无残留进程。当前候选明确不支持此长度，未宣称长路径兼容 |
 
 ## 单次记录模板
 

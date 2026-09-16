@@ -81,6 +81,7 @@
 - 同一真实 `OSGBny` 以 1、2、4 个 converter worker 各运行一次，三次均成功；耗时随并发下降（3035→1629→1025 ms），峰值工作集随并发上升（29,237,248→35,753,984→47,386,624 字节），成果均完整（回归 30）。
 - 将 NSIS 安装器安装到带空格的目录后，从安装版 runtime 执行 ASCII `OSGBny` convert-only；退出码为 0，生成 85 个文件且根 URI 6/6 可解析，随后静默卸载并确认安装目录移除（回归 31）。
 - 候选 converter 对包含方括号、加号和括号的输入/输出路径执行 ASCII `OSGBny` convert-only；退出码为 0，生成 85 个文件且根 URI 6/6 可解析（回归 32）。
+- processor 对约 288 字符的输入路径完成长路径回归：scan 通过，转换器以 `CONVERTER_EXIT_NONZERO` 返回具体 Tile 读取错误，未提交最终目录且仅保留归属明确的临时目录（回归 33）；当前候选把该长度作为明确拒绝，不宣称兼容。
 
 验证命令：
 
@@ -101,7 +102,7 @@ git diff --check                     通过
 
 - converter 源码的 `cargo metadata --no-deps` 和 `git diff --check` 通过；相邻仓库 `cargo fmt --all -- --check` 仍包含已有的 `common.rs`/`shape.rs`/`build.rs` 格式差异，未自动重排。
 - 固定 converter runtime 的 URL/SHA256 尚未更新：本机候选二进制只用于验收，必须先在 converter 仓库发布带版本号的 zip，再更新主仓库清单。
-- 真实中文输入根目录已通过；本地 Cesium 页面已加载真实 `OSGBny` 成果并显示 `tilesLoaded`（回归 24）；带空格的安装目录 convert-only 和方括号/加号/括号特殊路径已通过（回归 31–32）。中文 Tile 文件名、长路径、权限/磁盘故障和安装桌面 WebView 仍待端到端回归。
+- 真实中文输入根目录已通过；本地 Cesium 页面已加载真实 `OSGBny` 成果并显示 `tilesLoaded`（回归 24）；带空格的安装目录 convert-only、方括号/加号/括号特殊路径已通过（回归 31–32），长路径已得到可诊断拒绝（回归 33）。中文 Tile 文件名、权限/磁盘故障和安装桌面 WebView 仍待端到端回归。
 - 当前真实失败样本尚未由用户提供；现有大样本仅完成取消/收尾验证，未宣称完整转换成功。
 - 单 Tile 容错保持严格失败，未启用部分成果和失败率阈值。
 - 原始诊断文件目前按任务保留，尚未增加自动轮换/配额策略；任务事件日志仍按 tail 规则限长。

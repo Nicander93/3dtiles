@@ -78,10 +78,13 @@ fn error_code_for_message(message: &str) -> &'static str {
         "PATH_OUTPUT_NOT_WRITABLE"
     } else if lower.contains("must not") && lower.contains("input") {
         "PATH_OVERLAP"
+    // A converter failure often echoes the input metadata path in stderr.  Use
+    // the explicit process-exit marker first so that this cannot be mistaken
+    // for a scan-time metadata error.
+    } else if lower.contains("convert exited") || lower.contains("converter") {
+        "CONVERTER_EXIT_NONZERO"
     } else if lower.contains("metadata.xml") || lower.contains("srs") {
         "OSGB_METADATA_INVALID"
-    } else if lower.contains("converter") || lower.contains("convert exited") {
-        "CONVERTER_EXIT_NONZERO"
     } else if lower.contains("rebuild") {
         "REBUILD_FAILED"
     } else if lower.contains("texture") {
@@ -418,6 +421,10 @@ mod tests {
         );
         assert_eq!(
             error_code_for_message("convert exited 1: converter stderr"),
+            "CONVERTER_EXIT_NONZERO"
+        );
+        assert_eq!(
+            error_code_for_message("convert exited 1: metadata.xml could not be read by converter"),
             "CONVERTER_EXIT_NONZERO"
         );
     }
