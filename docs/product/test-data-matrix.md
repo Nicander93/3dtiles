@@ -8,7 +8,7 @@
 | 02 | 已验证 CRS（如 EPSG:4544） | 成功 | 待执行 | — |
 | 03 | 中文数据根目录 | 在支持范围内成功 | 通过：候选 converter 修复 OSG UTF-8 路径后，直接转换和 processor 转换均成功 | HARDENING_REGRESSION 17–18 |
 | 04 | 中文 Tile/文件名 | 在 converter 支持范围内成功或提前报错 | 待执行 | — |
-| 05 | 路径包含空格、括号、方括号、加号或短横线 | 成功 | 部分通过：本次真实样本覆盖中文与空格；其他特殊字符待执行 | HARDENING_REGRESSION 17–18 |
+| 05 | 路径包含空格、括号、方括号、加号或短横线 | 成功 | 通过：真实样本覆盖中文/空格；候选 converter 对方括号、加号和括号路径也成功，根 URI 6/6 可解析 | HARDENING_REGRESSION 17–18、32 |
 | 06 | metadata.xml 缺失 | 转换前明确错误 | 通过：`scan-osgb` 返回 `valid=false` 和 `Missing metadata.xml` | HARDENING_REGRESSION 26 |
 | 07 | metadata.xml 损坏 | 转换前明确错误 | 通过：`scan-osgb` 返回 `valid=false` 和具体 XML parse error | HARDENING_REGRESSION 27 |
 | 08 | 单个 OSGB 损坏 | 首版严格失败且指出 Tile | 待执行 | — |

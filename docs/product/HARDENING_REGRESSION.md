@@ -52,6 +52,8 @@
 | 28 | Desktop Rust Windows unit test | Job Object kill-on-close | `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib --locked` | — | 通过 | 0（8/8） | cargo stdout | 直接调用桌面实际 Job Object 绑定，关闭 Job 后 30 秒 `cmd/ping` 子进程在 3 秒内结束；不是完整 GUI 关闭验收 |
 | 29 | NSIS 临时安装启动 | 默认用户 AppData 写入与窗口可见性 | 静默安装后启动 `geoforge-desktop.exe`；另以 `GEOFORGE_DATA_DIR=.cache\\installed-ui-data` 隔离启动 | `.cache\\installed-ui-test`（已清理） | 阻塞 | — | Tauri stderr / Process 状态 | 当前受限执行环境对用户 AppData 仅有读取权限，默认启动报 SQLite `attempt to write a readonly database`；隔离目录启动进程可驻留，但窗口未被自动化接口枚举，因此不宣称安装 GUI 验收 |
 | 30 | processor 本机 Release runtime | 资源曲线（同一真实 `OSGBny`） | `GEOFORGE_CONVERT_THREADS=1,2,4 convert-osgb` | `.cache\\resource-curve\\threads-*` | 通过 | 0（3/3） | `threads-*.log` | 1 worker：3035 ms / 29,237,248 B；2：1629 ms / 35,753,984 B；4：1025 ms / 47,386,624 B；每次 86 个文件且 `tileset.json` 存在 |
+| 31 | NSIS 临时安装 | 安装目录包含空格；ASCII 输入 `data\\real\\OSGBny\\OSGBny` | 安装到 `.cache\\installed path with spaces-20260916`，从安装目录 `resources\\runtime\\converter\\_3dtile.exe` 执行 convert-only；随后静默卸载 | `.cache\\installed path with spaces-output-20260916` | 通过 | 0 | `.cache\\installed-path-spaces-converter.log` | 安装器退出 0；安装版 converter 退出 0，生成 85 个文件和 `tileset.json`，根 URI 6/6 可解析；卸载退出 0，安装目录已移除；无残留 processor/converter 进程 |
+| 32 | converter 本机 Release CLI | 输入和输出路径包含方括号、加号、括号；ASCII `OSGBny` | `_3dtile.exe -f osgb -i ".cache\\special [path]+(v1) input" -o ".cache\\special output [path]+(v1)"` | `.cache\\special output [path]+(v1)` | 通过 | 0 | `.cache\\special-path-converter.log` | 候选 converter 退出 0，生成 85 个文件和 `tileset.json`，根 URI 6/6 可解析；输入样本保持不变；无残留 processor/converter 进程 |
 
 ## 单次记录模板
 

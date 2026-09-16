@@ -20,7 +20,7 @@
 | H12 | 已完成 | 文件 tail 有界并处理 UTF-8 边界 |
 | H13 | 已完成 | scanner/layout/capabilities 单测和 smoke 通过 |
 | H14 | 代码完成，资源曲线已取得 | 磁盘、线程、峰值内存指标已接入；1/2/4 worker 真实样本曲线均成功；约 932 MB/4567 Tile 样本取消后无残留；完整大数据成功曲线、真实 ACL/磁盘满故障注入仍待执行 |
-| H15 | CI 门槛完成，安装验收部分完成 | `npm ci`、前端测试/构建、Rust/Tauri、NSIS 临时安装、真实 OSGB 与中文路径、10 次重复已通过；Cesium、当前用户失败样本、桌面关闭/Job Object 仍待执行 |
+| H15 | CI 门槛完成，安装验收部分完成 | `npm ci`、前端测试/构建、Rust/Tauri、NSIS 临时安装、带空格安装路径、真实 OSGB 与中文路径、10 次重复已通过；Cesium、当前用户失败样本、桌面关闭/Job Object 仍待执行 |
 | H16 | 按计划延期 | 保持严格失败，不启用部分成果 |
 
 ## 已完成并验证
@@ -79,6 +79,8 @@
 - Desktop Rust Windows unit test 直接覆盖 Job Object kill-on-close：附着 30 秒测试子进程后关闭 Job，子进程在 3 秒内退出，8 项桌面库测试全部通过（回归 28）。
 - 临时 NSIS 安装的默认启动在当前受限环境因 AppData 只读而阻塞；隔离数据目录下进程可驻留但窗口未被自动化接口枚举，未把它记为安装 GUI 通过（回归 29）。
 - 同一真实 `OSGBny` 以 1、2、4 个 converter worker 各运行一次，三次均成功；耗时随并发下降（3035→1629→1025 ms），峰值工作集随并发上升（29,237,248→35,753,984→47,386,624 字节），成果均完整（回归 30）。
+- 将 NSIS 安装器安装到带空格的目录后，从安装版 runtime 执行 ASCII `OSGBny` convert-only；退出码为 0，生成 85 个文件且根 URI 6/6 可解析，随后静默卸载并确认安装目录移除（回归 31）。
+- 候选 converter 对包含方括号、加号和括号的输入/输出路径执行 ASCII `OSGBny` convert-only；退出码为 0，生成 85 个文件且根 URI 6/6 可解析（回归 32）。
 
 验证命令：
 
@@ -99,7 +101,7 @@ git diff --check                     通过
 
 - converter 源码的 `cargo metadata --no-deps` 和 `git diff --check` 通过；相邻仓库 `cargo fmt --all -- --check` 仍包含已有的 `common.rs`/`shape.rs`/`build.rs` 格式差异，未自动重排。
 - 固定 converter runtime 的 URL/SHA256 尚未更新：本机候选二进制只用于验收，必须先在 converter 仓库发布带版本号的 zip，再更新主仓库清单。
-- 真实中文输入根目录已通过；本地 Cesium 页面已加载真实 `OSGBny` 成果并显示 `tilesLoaded`（回归 24）。中文 Tile 文件名、长路径、权限/磁盘故障和安装桌面 WebView 仍待端到端回归。
+- 真实中文输入根目录已通过；本地 Cesium 页面已加载真实 `OSGBny` 成果并显示 `tilesLoaded`（回归 24）；带空格的安装目录 convert-only 和方括号/加号/括号特殊路径已通过（回归 31–32）。中文 Tile 文件名、长路径、权限/磁盘故障和安装桌面 WebView 仍待端到端回归。
 - 当前真实失败样本尚未由用户提供；现有大样本仅完成取消/收尾验证，未宣称完整转换成功。
 - 单 Tile 容错保持严格失败，未启用部分成果和失败率阈值。
 - 原始诊断文件目前按任务保留，尚未增加自动轮换/配额策略；任务事件日志仍按 tail 规则限长。

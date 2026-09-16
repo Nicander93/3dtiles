@@ -19,7 +19,7 @@
 
 执行环境必须没有源码目录和开发覆盖变量。每次使用新的输出目录，并把记录写入 `HARDENING_REGRESSION.md`。
 
-- [ ] 安装路径包含空格时，ASCII 小样本 convert-only 成功。
+- [x] 安装路径包含空格时，ASCII 小样本 convert-only 成功（回归 31；安装到带空格目录，安装版 converter 退出 0，85 个文件，根 URI 6/6 可解析，随后已卸载）。
 - [ ] 中文用户目录和中文数据根在支持范围内成功；输出 URI 能被 Cesium 加载。
 - [ ] convert + rebuild 与 convert-only 分开验证；规则网格、稀疏布局和非标准 Tile 得到符合预期的提示。
 - [ ] 当前用户失败样本有明确结果：已修复，或在长任务开始前明确拒绝。
