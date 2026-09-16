@@ -16,7 +16,8 @@ fn fixture_dir() -> PathBuf {
 }
 
 fn out_dir() -> PathBuf {
-    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/top_rebuild_hlod_4x4_test");
+    let d =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/top_rebuild_hlod_4x4_test");
     let _ = fs::remove_dir_all(&d);
     d
 }
@@ -106,7 +107,9 @@ fn hlod_4x4_pipeline_16_4_1() {
         for x in 0..4 {
             let leaf = out.join(format!("Data/Tile_+{x:03}_+{y:03}/tileset.json"));
             assert!(leaf.exists(), "missing leaf {}", leaf.display());
-            let b3 = out.join(format!("Data/Tile_+{x:03}_+{y:03}/Tile_+{x:03}_+{y:03}.b3dm"));
+            let b3 = out.join(format!(
+                "Data/Tile_+{x:03}_+{y:03}/Tile_+{x:03}_+{y:03}.b3dm"
+            ));
             assert!(b3.exists() && b3.metadata().unwrap().len() > 32);
         }
     }
@@ -133,7 +136,10 @@ fn hlod_4x4_pipeline_16_4_1() {
     let root_box = root["boundingVolume"]["box"].as_array().unwrap();
     let rcx = root_box[0].as_f64().unwrap();
     let rcy = root_box[1].as_f64().unwrap();
-    assert!(rcx.abs() < 1.0 && rcy.abs() < 1.0, "root local BV center ({rcx},{rcy})");
+    assert!(
+        rcx.abs() < 1.0 && rcy.abs() < 1.0,
+        "root local BV center ({rcx},{rcy})"
+    );
 
     // Spot-check transform invariant using written matrices
     let l2_t: Vec<f64> = root["transform"]

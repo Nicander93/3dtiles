@@ -187,10 +187,7 @@ impl BoundingVolume {
                 let max_x = amax.0.max(bmax.0);
                 let max_y = amax.1.max(bmax.1);
                 let max_z = amax.2.max(bmax.2);
-                BoundingVolume::from_aabb(
-                    (min_x, min_y, min_z),
-                    (max_x, max_y, max_z),
-                )
+                BoundingVolume::from_aabb((min_x, min_y, min_z), (max_x, max_y, max_z))
             }
             (Some(_), None) => a.clone(),
             (None, Some(_)) => b.clone(),
@@ -354,11 +351,12 @@ mod mat4_tests {
 
     #[test]
     fn obb_corners_and_translated_world_aabb() {
-        let local = BoundingVolume::from_box([
-            0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 2.0,
-        ]);
+        let local =
+            BoundingVolume::from_box([0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 2.0]);
         let corners = local.corners().unwrap();
-        assert!(corners.iter().any(|c| (c.0 - 10.0).abs() < 1e-12 && (c.1 - 5.0).abs() < 1e-12));
+        assert!(corners
+            .iter()
+            .any(|c| (c.0 - 10.0).abs() < 1e-12 && (c.1 - 5.0).abs() < 1e-12));
         let world = local.world_bounds(&Mat4d::translation(100.0, 0.0, 0.0));
         let c = world.center().unwrap();
         assert!((c.0 - 100.0).abs() < 1e-9 && c.1.abs() < 1e-9);

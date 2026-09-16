@@ -83,6 +83,29 @@ function rebuildHref(t: Task): string {
   return `/osgb/convert?${q}`;
 }
 
+function diagnosticPaths(t: Task): string[] {
+  if (!t.progress || typeof t.progress !== 'object') return [];
+  const progress = t.progress as Record<string, unknown>;
+  return ['stderrLogPath', 'stdoutLogPath']
+    .map((key) => progress[key])
+    .filter((value): value is string => typeof value === 'string' && value.length > 0);
+}
+
+function progressText(t: Task, key: string): string | null {
+  if (!t.progress || typeof t.progress !== 'object') return null;
+  const value = (t.progress as Record<string, unknown>)[key];
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function failureSuggestion(code: string | null): string | null {
+  if (!code) return null;
+  if (code === 'PATH_OUTPUT_EXISTS') return '请更换一个尚不存在的成果目录。';
+  if (code === 'PATH_OUTPUT_NOT_WRITABLE') return '请检查输出目录权限，或选择可写磁盘。';
+  if (code === 'CONVERTER_EXIT_NONZERO') return '查看 stderr 诊断文件，确认输入数据和 converter 依赖。';
+  if (code === 'TASK_CANCELLED') return '任务已取消；原始输入和既有成果应保持不变。';
+  return '请查看完整日志和诊断文件，再决定是否重试。';
+}
+
 export function Processing() {
   const { tasks, loading, error, refresh } = useTasks(2000);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -121,6 +144,9 @@ export function Processing() {
   const selected = selectedId
     ? tasks.find((t) => t.id === selectedId) || null
     : null;
+  const selectedErrorCode = selected ? progressText(selected, 'errorCode') : null;
+  const selectedFailedStage = selected ? progressText(selected, 'failedStage') : null;
+  const selectedSuggestion = failureSuggestion(selectedErrorCode);
 
   useEffect(() => {
     if (!selected) {
@@ -381,6 +407,34 @@ export function Processing() {
                 <dd>{selected.artifactPath || selected.output || '—'}</dd>
                 <dt>说明</dt>
                 <dd>{selected.message || selected.error || '—'}</dd>
+                {selectedErrorCode ? (
+                  <>
+                    <dt>错误代码</dt>
+                    <dd>{selectedErrorCode}</dd>
+                  </>
+                ) : null}
+                {selectedFailedStage ? (
+                  <>
+                    <dt>失败阶段</dt>
+                    <dd>{selectedFailedStage}</dd>
+                  </>
+                ) : null}
+                {selectedSuggestion && selected.status !== 'succeeded' ? (
+                  <>
+                    <dt>建议</dt>
+                    <dd>{selectedSuggestion}</dd>
+                  </>
+                ) : null}
+                {diagnosticPaths(selected).length ? (
+                  <>
+                    <dt>诊断日志</dt>
+                    <dd>
+                      {diagnosticPaths(selected).map((path) => (
+                        <div key={path} style={{ wordBreak: 'break-all' }}>{path}</div>
+                      ))}
+                    </dd>
+                  </>
+                ) : null}
               </dl>
             </div>
 

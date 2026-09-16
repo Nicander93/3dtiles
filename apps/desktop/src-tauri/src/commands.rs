@@ -89,14 +89,10 @@ impl PathOrObject {
 pub fn submit_task(state: State<'_, AppState>, config: SubmitTaskConfig) -> Result<Value, String> {
   if !ProcessManager::processor_available() {
     return Err(
-      "找不到 processor 组件，无法创建任务。请修复安装或设置环境变量 GEOFORGE_PROCESSOR。"
-        .into(),
+      "找不到 processor 组件，无法创建任务。请修复安装或设置环境变量 GEOFORGE_PROCESSOR。".into(),
     );
   }
-  let name = config
-    .task_name
-    .or(config.name)
-    .unwrap_or_default();
+  let name = config.task_name.or(config.name).unwrap_or_default();
   let options = config.options.unwrap_or(json!({}));
   // Preflight path policy (same rules as processor); provisional id for validation only
   let provisional_id = "task-preflight0";
@@ -115,10 +111,9 @@ pub fn submit_task(state: State<'_, AppState>, config: SubmitTaskConfig) -> Resu
     &name,
   )?;
 
-  let _ = state.tasks.append_log(
-    &task.id,
-    "[desktop] queued for local processor (serial)",
-  );
+  let _ = state
+    .tasks
+    .append_log(&task.id, "[desktop] queued for local processor (serial)");
   state.processes.spawn_task(
     state.tasks.clone(),
     state.artifacts.clone(),
@@ -171,6 +166,18 @@ pub fn list_tasks(
 ) -> Result<Value, String> {
   let status = filter.as_ref().and_then(|f| f.status.as_deref());
   let tasks = state.tasks.list(status)?;
+  // The task list is polled frequently. Keep its payload small and fetch the
+  // bounded log tail only when a task is opened in the details drawer.
+  let tasks = tasks
+    .into_iter()
+    .map(|task| {
+      let mut value = serde_json::to_value(task).map_err(|error| error.to_string())?;
+      if let Some(object) = value.as_object_mut() {
+        object.insert("log".into(), Value::String(String::new()));
+      }
+      Ok::<Value, String>(value)
+    })
+    .collect::<Result<Vec<_>, _>>()?;
   Ok(json!({ "ok": true, "tasks": tasks }))
 }
 
@@ -281,7 +288,6 @@ pub fn get_resource_server_info(state: State<'_, AppState>) -> Result<Value, Str
   }))
 }
 
-
 /// OSGB scan via processor CLI (single scan implementation).
 #[tauri::command]
 pub fn scan_osgb(path: String) -> Result<Value, String> {
@@ -303,7 +309,10 @@ pub fn scan_osgb(path: String) -> Result<Value, String> {
     ));
   }
   serde_json::from_str(stdout.trim()).map_err(|e| {
-    format!("解析扫描结果失败: {e}; stderr={stderr}; stdout={}", stdout.chars().take(400).collect::<String>())
+    format!(
+      "解析扫描结果失败: {e}; stderr={stderr}; stdout={}",
+      stdout.chars().take(400).collect::<String>()
+    )
   })
 }
 
@@ -354,7 +363,10 @@ fn convert_status() -> Value {
 pub fn health(state: State<'_, AppState>) -> Result<Value, String> {
   let convert = convert_status();
   let processor = ProcessManager::processor_available();
-  let convert_ok = convert.get("exists").and_then(|v| v.as_bool()).unwrap_or(false);
+  let convert_ok = convert
+    .get("exists")
+    .and_then(|v| v.as_bool())
+    .unwrap_or(false);
   Ok(json!({
     "ok": true,
     "status": "ok",

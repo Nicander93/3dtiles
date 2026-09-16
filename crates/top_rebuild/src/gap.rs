@@ -35,11 +35,7 @@ pub fn topological_border_vertices(positions: &[[f32; 3]], indices: &[u32]) -> V
     use std::collections::HashMap;
     let mut edge_count: HashMap<(u32, u32), u32> = HashMap::new();
     for tri in indices.chunks_exact(3) {
-        let edges = [
-            (tri[0], tri[1]),
-            (tri[1], tri[2]),
-            (tri[2], tri[0]),
-        ];
+        let edges = [(tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])];
         for (a, b) in edges {
             let key = if a < b { (a, b) } else { (b, a) };
             *edge_count.entry(key).or_insert(0) += 1;

@@ -60,7 +60,9 @@ jobs:
 
       - name: Install desktop npm deps
         working-directory: apps/desktop
-        run: npm ci
+        run: |
+          npm ci
+          npm test
 
       - name: Package Windows NSIS
         shell: pwsh

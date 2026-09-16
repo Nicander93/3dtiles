@@ -2,9 +2,7 @@
 //! L0 256 / L1 64 / L2 16 / L3 4 / L4 1 (Phase 10 scale ladder).
 
 use std::path::PathBuf;
-use top_rebuild::{
-    build_from_tileset, format_level_counts, load_source_blocks, TreeBuildOptions,
-};
+use top_rebuild::{build_from_tileset, format_level_counts, load_source_blocks, TreeBuildOptions};
 
 fn fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

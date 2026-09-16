@@ -13,13 +13,7 @@ pub fn capabilities_json() -> Value {
     let texture = if tools.texture_bin.is_file() {
         probe_bin(&tools.texture_bin, &["geoforge-texture", "--help"])
     } else if tools.texture_py.is_file() {
-        json!({
-            "path": tools.texture_py,
-            "exists": true,
-            "launchOk": true,
-            "kind": "python-script",
-            "error": Value::Null,
-        })
+        probe_script(&tools.texture_py, &tools.python)
     } else {
         json!({
             "path": tools.texture_bin,
@@ -38,6 +32,15 @@ pub fn capabilities_json() -> Value {
         .get("launchOk")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    let texture_ready = texture
+        .get("launchOk")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+        && (tools.texture_bin.is_file()
+            || basisu
+                .get("exists")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false));
 
     json!({
         "ok": true,
@@ -61,8 +64,7 @@ pub fn capabilities_json() -> Value {
                 "找不到转换器；运行 prepare-converter.ps1 或设置 GEOFORGE_3DTILE"
             },
         },
-        "textureModes": texture_modes(basisu.get("exists").and_then(|v| v.as_bool()).unwrap_or(false)
-            || texture.get("launchOk").and_then(|v| v.as_bool()).unwrap_or(false)),
+        "textureModes": texture_modes(texture_ready),
     })
 }
 
@@ -100,7 +102,7 @@ fn probe_bin(path: &Path, _hint: &[&str]) -> Value {
             "error": format!("missing: {}", path.display()),
         });
     }
-    let mut child = match Command::new(path)
+    let child = match Command::new(path)
         .arg("--help")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -116,16 +118,51 @@ fn probe_bin(path: &Path, _hint: &[&str]) -> Value {
             });
         }
     };
+    probe_child(path, child)
+}
+
+fn probe_script(script: &Path, interpreter: &Path) -> Value {
+    let child = match Command::new(interpreter)
+        .arg(script)
+        .arg("--help")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            return json!({
+                "path": script,
+                "exists": true,
+                "launchOk": false,
+                "kind": "python-script",
+                "interpreter": interpreter,
+                "error": e.to_string(),
+            });
+        }
+    };
+    let mut result = probe_child(script, child);
+    if let Some(object) = result.as_object_mut() {
+        object.insert("kind".into(), json!("python-script"));
+        object.insert("interpreter".into(), json!(interpreter));
+    }
+    result
+}
+
+fn probe_child(path: &Path, mut child: std::process::Child) -> Value {
+    let mut status_code = None;
+    let mut timed_out = false;
     let deadline = std::time::Instant::now() + Duration::from_secs(3);
-    let mut ok = false;
     while std::time::Instant::now() < deadline {
         match child.try_wait() {
             Ok(Some(status)) => {
-                ok = status.success() || status.code().is_some();
+                status_code = status.code();
                 break;
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(50)),
             Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
                 return json!({
                     "path": path,
                     "exists": true,
@@ -135,15 +172,24 @@ fn probe_bin(path: &Path, _hint: &[&str]) -> Value {
             }
         }
     }
-    if !ok {
+    if status_code.is_none() {
         let _ = child.kill();
         let _ = child.wait();
-        ok = true;
+        timed_out = true;
     }
+    let launch_ok = !timed_out && status_code == Some(0);
     json!({
         "path": path,
         "exists": true,
-        "launchOk": ok,
-        "error": Value::Null,
+        "launchOk": launch_ok,
+        "exitCode": status_code,
+        "timedOut": timed_out,
+        "error": if timed_out {
+            json!("--help timed out after 3 seconds")
+        } else if !launch_ok {
+            json!(format!("--help exited with {}", status_code.unwrap_or(-1)))
+        } else {
+            Value::Null
+        },
     })
 }

@@ -249,7 +249,14 @@ class TaskStore:
     def list_tasks(self) -> List[Dict[str, Any]]:
         with self._lock:
             items = sorted(self._mem.values(), key=lambda x: x.get("createdAt") or 0, reverse=True)
-            return [self._enrich(t) for t in items]
+            # Polling the task list should not resend the full bounded log for
+            # every task. The details endpoint loads the requested tail.
+            result = []
+            for task in items:
+                enriched = self._enrich(task)
+                enriched["log"] = ""
+                result.append(enriched)
+            return result
 
     def update(self, task_id: str, **fields: Any) -> Optional[Dict[str, Any]]:
         with self._lock:

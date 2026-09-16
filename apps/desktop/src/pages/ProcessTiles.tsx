@@ -169,6 +169,47 @@ export function ProcessTiles() {
     }
   }
 
+  async function pickInputDirectory() {
+    try {
+      const path = await selectInputDirectory();
+      if (path) update('input', path);
+    } catch (error) {
+      setError(friendlyError(error));
+    }
+  }
+
+  async function pickTilesetFile() {
+    try {
+      const path = await selectTilesetFile();
+      if (!path) return;
+      const normalized = path.replace(/\\/g, '/');
+      const dir = normalized.endsWith('/tileset.json')
+        ? normalized.slice(0, -'/tileset.json'.length)
+        : normalized.includes('/')
+          ? normalized.slice(0, normalized.lastIndexOf('/'))
+          : path;
+      update('input', dir || path);
+    } catch (error) {
+      setError(friendlyError(error));
+    }
+  }
+
+  async function pickOutputParent() {
+    try {
+      const parent = await selectOutputDirectory();
+      if (!parent) return;
+      const output = suggestOutputPath(form.input, parent, '_process');
+      if (!output) {
+        setError('请先选择输入 tileset，再选择输出位置。');
+        return;
+      }
+      setOutputTouched(true);
+      update('output', output);
+    } catch (error) {
+      setError(friendlyError(error));
+    }
+  }
+
   async function handleSubmit() {
     setError(null);
     setMessage(null);
@@ -222,7 +263,9 @@ export function ProcessTiles() {
           '任务已创建'
         ),
       );
-      setOutputTouched(false);
+      // Keep the fresh unique path fixed; otherwise the auto-suggest effect
+      // can immediately reuse the just-submitted `_process` directory.
+      setOutputTouched(true);
       const nextOut = suggestOutputPath(form.input, defaultOutputRoot, `_process_${Date.now().toString(36)}`);
       if (nextOut) setForm((f) => ({ ...f, output: nextOut }));
     } catch (e) {
@@ -274,12 +317,7 @@ export function ProcessTiles() {
             placeholder="含 tileset.json"
             onChange={(v) => update('input', v)}
             onPick={
-              isTauri()
-                ? () =>
-                    void selectInputDirectory().then((p) => {
-                      if (p) update('input', p);
-                    })
-                : undefined
+              isTauri() ? () => void pickInputDirectory() : undefined
             }
           />
           {isTauri() ? (
@@ -287,18 +325,7 @@ export function ProcessTiles() {
               <button
                 className="btn"
                 type="button"
-                onClick={() =>
-                  void selectTilesetFile().then((p) => {
-                    if (!p) return;
-                    const norm = p.replace(/\\/g, '/');
-                    const dir = norm.endsWith('/tileset.json')
-                      ? norm.slice(0, -'/tileset.json'.length)
-                      : norm.includes('/')
-                        ? norm.slice(0, norm.lastIndexOf('/'))
-                        : p;
-                    update('input', dir || p);
-                  })
-                }
+                onClick={() => void pickTilesetFile()}
               >
                 选择 tileset.json
               </button>
@@ -389,22 +416,14 @@ export function ProcessTiles() {
 
         <FormSection title="输出">
           <PathField
-            label="输出目录"
+            label="成果目录（选择父目录后自动生成）"
             value={form.output}
             onChange={(v) => {
               setOutputTouched(true);
               update('output', v);
             }}
             onPick={
-              isTauri()
-                ? () =>
-                    void selectOutputDirectory().then((p) => {
-                      if (p) {
-                        setOutputTouched(true);
-                        update('output', p);
-                      }
-                    })
-                : undefined
+              isTauri() ? () => void pickOutputParent() : undefined
             }
           />
         </FormSection>

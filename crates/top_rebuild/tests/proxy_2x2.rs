@@ -5,9 +5,7 @@ use std::fs;
 use std::path::PathBuf;
 use top_rebuild::b3dm::{extract_glb_from_b3dm_bytes, pack_glb_as_b3dm};
 use top_rebuild::glb::{load_primitives_from_glb, make_box_primitive, write_glb};
-use top_rebuild::{
-    build_proxy_to_file, to_parent_local, ChildContent, Mat4d, ProxyBudget,
-};
+use top_rebuild::{build_proxy_to_file, to_parent_local, ChildContent, Mat4d, ProxyBudget};
 
 fn work_dir(name: &str) -> PathBuf {
     let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

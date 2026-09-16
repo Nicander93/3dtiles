@@ -6,16 +6,12 @@ use std::path::{Path, PathBuf};
 use top_rebuild::b3dm::pack_glb_as_b3dm;
 use top_rebuild::glb::{load_mesh_from_glb, make_box_primitive, write_glb};
 use top_rebuild::{
-    assert_world_transform_invariant, load_source_blocks, rebuild_tileset,
-    to_parent_local, BoundingVolume, Mat4d, TreeBuildOptions, WriteOptions,
+    assert_world_transform_invariant, load_source_blocks, rebuild_tileset, to_parent_local,
+    BoundingVolume, Mat4d, TreeBuildOptions, WriteOptions,
 };
 
 fn tmp(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!(
-        "top_rebuild_xform_{}_{}",
-        name,
-        std::process::id()
-    ));
+    let d = std::env::temp_dir().join(format!("top_rebuild_xform_{}_{}", name, std::process::id()));
     let _ = fs::remove_dir_all(&d);
     fs::create_dir_all(&d).unwrap();
     d
@@ -49,12 +45,7 @@ fn write_box_b3dm(path: &Path) {
     fs::write(path, b3dm).unwrap();
 }
 
-fn write_block(
-    root: &Path,
-    name: &str,
-    ext_root_transform: &Mat4d,
-    b3dm_name: &str,
-) {
+fn write_block(root: &Path, name: &str, ext_root_transform: &Mat4d, b3dm_name: &str) {
     let dir = root.join("Data").join(name);
     fs::create_dir_all(&dir).unwrap();
     write_box_b3dm(&dir.join(b3dm_name));
@@ -69,7 +60,11 @@ fn write_block(
             "content": { "uri": format!("./{b3dm_name}") }
         }
     });
-    fs::write(dir.join("tileset.json"), serde_json::to_string_pretty(&ts).unwrap()).unwrap();
+    fs::write(
+        dir.join("tileset.json"),
+        serde_json::to_string_pretty(&ts).unwrap(),
+    )
+    .unwrap();
 }
 
 fn write_root_two_tiles(
@@ -106,7 +101,11 @@ fn write_root_two_tiles(
             ]
         }
     });
-    fs::write(root.join("tileset.json"), serde_json::to_string_pretty(&ts).unwrap()).unwrap();
+    fs::write(
+        root.join("tileset.json"),
+        serde_json::to_string_pretty(&ts).unwrap(),
+    )
+    .unwrap();
 }
 
 fn accum_leaf_world(node: &Value, parent: &Mat4d, out: &mut Vec<(String, Mat4d)>) {
@@ -167,9 +166,8 @@ fn local_bounds_plus_tile_transform_is_regular_grid() {
 
 #[test]
 fn world_bounds_union_after_child_transforms() {
-    let a = BoundingVolume::from_box([
-        0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 5.0,
-    ]);
+    let a =
+        BoundingVolume::from_box([0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 5.0]);
     let b = a.clone();
     let wa = a.world_bounds(&Mat4d::translation(0.0, 0.0, 0.0));
     let wb = b.world_bounds(&Mat4d::translation(100.0, 0.0, 0.0));
@@ -187,21 +185,22 @@ fn external_tileset_cumulative_transform() {
     let root_t = Mat4d::translation(1000.0, 0.0, 0.0);
     let child1 = Mat4d::translation(100.0, 0.0, 0.0);
     let ext = Mat4d::translation(0.0, 0.0, 5.0);
-    write_root_two_tiles(
-        &root,
-        &root_t,
-        &Mat4d::identity(),
-        &child1,
-        &ext,
-        &ext,
-    );
+    write_root_two_tiles(&root, &root_t, &Mat4d::identity(), &child1, &ext, &ext);
     let blocks = load_source_blocks(&root).expect("load");
-    let w0 = &blocks.iter().find(|b| b.id.contains("000")).unwrap().representations[0]
+    let w0 = &blocks
+        .iter()
+        .find(|b| b.id.contains("000"))
+        .unwrap()
+        .representations[0]
         .world_transform;
     let p = w0.transform_point(0.0, 0.0, 0.0);
     assert!((p.0 - 1000.0).abs() < 1e-6);
     assert!((p.2 - 5.0).abs() < 1e-6);
-    let w1 = &blocks.iter().find(|b| b.id.contains("001")).unwrap().representations[0]
+    let w1 = &blocks
+        .iter()
+        .find(|b| b.id.contains("001"))
+        .unwrap()
+        .representations[0]
         .world_transform;
     let p1 = w1.transform_point(0.0, 0.0, 0.0);
     assert!((p1.0 - 1100.0).abs() < 1e-6);
@@ -326,9 +325,8 @@ fn glb_with_node_translation(src: &[u8], tx: f64, ty: f64, tz: f64) -> Vec<u8> {
     let json_start = 20;
     let json_end = json_start + json_len;
     let mut json: Value = serde_json::from_slice(&src[json_start..json_end]).unwrap();
-    json["nodes"][0]["matrix"] = json!([
-        1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, tx, ty, tz, 1.0
-    ]);
+    json["nodes"][0]["matrix"] =
+        json!([1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, tx, ty, tz, 1.0]);
     let mut json_bytes = serde_json::to_vec(&json).unwrap();
     while json_bytes.len() % 4 != 0 {
         json_bytes.push(b' ');

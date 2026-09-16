@@ -53,9 +53,8 @@ fn extract_b3dm_bytes(data: &[u8]) -> Result<LoadedContent> {
                 break;
             }
         }
-        offset = found.ok_or_else(|| {
-            TopRebuildError::Other("glb magic not found in b3dm payload".into())
-        })?;
+        offset = found
+            .ok_or_else(|| TopRebuildError::Other("glb magic not found in b3dm payload".into()))?;
     }
     let glb = if byte_length > 0 && byte_length <= data.len() && byte_length > offset {
         data[offset..byte_length].to_vec()
@@ -81,11 +80,7 @@ fn parse_rtc_center(ft_json: &[u8]) -> Option<[f64; 3]> {
     if arr.len() < 3 {
         return None;
     }
-    Some([
-        arr[0].as_f64()?,
-        arr[1].as_f64()?,
-        arr[2].as_f64()?,
-    ])
+    Some([arr[0].as_f64()?, arr[1].as_f64()?, arr[2].as_f64()?])
 }
 
 fn pad_json(mut bytes: Vec<u8>, offset: usize) -> Vec<u8> {
@@ -173,8 +168,7 @@ mod tests {
         let bt_json = u32::from_le_bytes(data[20..24].try_into().unwrap());
         let bt_binary = u32::from_le_bytes(data[24..28].try_into().unwrap());
         let glb_offset = 28 + ft_json;
-        let feature: serde_json::Value =
-            serde_json::from_slice(&data[28..glb_offset]).unwrap();
+        let feature: serde_json::Value = serde_json::from_slice(&data[28..glb_offset]).unwrap();
 
         assert_eq!(feature["BATCH_LENGTH"], 0);
         assert_eq!(ft_binary, 0);

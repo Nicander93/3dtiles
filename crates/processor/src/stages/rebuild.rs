@@ -68,7 +68,10 @@ fn precheck_rebuild_input(emitter: &Arc<Emitter>, input_dir: &Path) -> Result<()
         input_dir.join("tileset.json")
     };
     if !tileset.is_file() {
-        return Err(format!("rebuild precheck: tileset.json missing at {}", tileset.display()));
+        return Err(format!(
+            "rebuild precheck: tileset.json missing at {}",
+            tileset.display()
+        ));
     }
     emitter.log(&format!("[rebuild] precheck {}", tileset.display()));
 
@@ -76,15 +79,46 @@ fn precheck_rebuild_input(emitter: &Arc<Emitter>, input_dir: &Path) -> Result<()
     let root = tileset.parent().unwrap_or(input_dir);
     let re = regex::Regex::new(r"(?i)^Tile_([+\-]?\d+)_([+\-]?\d+)$").unwrap();
     let mut coords: Vec<(i32, i32)> = Vec::new();
-    if let Ok(rd) = std::fs::read_dir(root) {
-        for e in rd.flatten() {
-            let name = e.file_name().to_string_lossy().into_owned();
-            if let Some(c) = re.captures(&name) {
-                let x: i32 = c[1].parse().unwrap_or(0);
-                let y: i32 = c[2].parse().unwrap_or(0);
-                coords.push((x, y));
-            }
+    let mut nonstandard_tiles = Vec::new();
+    let entries = std::fs::read_dir(root)
+        .map_err(|error| format!("rebuild precheck: cannot read {}: {error}", root.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            format!(
+                "rebuild precheck: cannot read an entry under {}: {error}",
+                root.display()
+            )
+        })?;
+        if !entry
+            .file_type()
+            .map_err(|error| {
+                format!(
+                    "rebuild precheck: cannot inspect {}: {error}",
+                    entry.path().display()
+                )
+            })?
+            .is_dir()
+        {
+            continue;
         }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if let Some(c) = re.captures(&name) {
+            let x: i32 = c[1].parse().map_err(|_| {
+                format!("rebuild precheck: Tile coordinate out of i32 range: {name}")
+            })?;
+            let y: i32 = c[2].parse().map_err(|_| {
+                format!("rebuild precheck: Tile coordinate out of i32 range: {name}")
+            })?;
+            coords.push((x, y));
+        } else if entry.path().join("tileset.json").is_file() {
+            nonstandard_tiles.push(name);
+        }
+    }
+    if !nonstandard_tiles.is_empty() {
+        return Err(format!(
+            "rebuild precheck: unsupported non-standard Tile layout: {}",
+            nonstandard_tiles.join(", ")
+        ));
     }
     if coords.is_empty() {
         // External tileset refs may use nested structure — let engine fail with its own message
@@ -254,16 +288,10 @@ fn run_rebuild_rust(
         cmd.push("--synthesize-if-empty".into());
     }
 
-    emitter.stage(
-        Stage::Rebuild,
-        "Top-level rebuild (Rust top_rebuild core)",
-    );
+    emitter.stage(Stage::Rebuild, "Top-level rebuild (Rust top_rebuild core)");
     emitter.stage(Stage::RebuildIndex, "rebuild-index (top_rebuild)");
     emitter.stage(Stage::RebuildProxy, "rebuild-proxy (top_rebuild)");
-    emitter.log(&format!(
-        "[rebuild] engine=rust binary={}",
-        bin.display()
-    ));
+    emitter.log(&format!("[rebuild] engine=rust binary={}", bin.display()));
 
     let rc = run_logged(emitter, cancel, &cmd, None)?;
     if cancel.is_cancelled() {
@@ -293,10 +321,7 @@ fn run_rebuild_python(
         ));
     }
 
-    let levels = rebuild
-        .get("levels")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(1);
+    let levels = rebuild.get("levels").and_then(|v| v.as_i64()).unwrap_or(1);
     let levels = if levels <= 1 { 1 } else { 2 };
     let simplify = rebuild
         .get("simplify")
@@ -366,4 +391,51 @@ pub fn rebuild_opts(options: &Value) -> Value {
         .get("rebuildTop")
         .cloned()
         .unwrap_or(serde_json::json!({}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::precheck_rebuild_input;
+    use crate::protocol::Emitter;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_root(name: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("geoforge-rebuild-{name}-{stamp}"));
+        fs::create_dir_all(&root).expect("create rebuild fixture");
+        fs::write(root.join("tileset.json"), b"{}").expect("write tileset");
+        root
+    }
+
+    #[test]
+    fn rejects_nonstandard_tile_layout_instead_of_deferring() {
+        let root = temp_root("unicode");
+        let tile = root.join("Tile_甲_乙");
+        fs::create_dir_all(&tile).expect("create nonstandard tile");
+        fs::write(tile.join("tileset.json"), b"{}").expect("write child tileset");
+
+        let emitter = Arc::new(Emitter::new("test-rebuild-layout"));
+        let error = precheck_rebuild_input(&emitter, &root).expect_err("layout must fail");
+        assert!(error.contains("non-standard"), "{error}");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_tile_coordinate_outside_i32() {
+        let root = temp_root("range");
+        let tile = root.join("Tile_2147483648_0");
+        fs::create_dir_all(&tile).expect("create out-of-range tile");
+        fs::write(tile.join("tileset.json"), b"{}").expect("write child tileset");
+
+        let emitter = Arc::new(Emitter::new("test-rebuild-range"));
+        let error = precheck_rebuild_input(&emitter, &root).expect_err("range must fail");
+        assert!(error.contains("i32 range"), "{error}");
+        let _ = fs::remove_dir_all(root);
+    }
 }

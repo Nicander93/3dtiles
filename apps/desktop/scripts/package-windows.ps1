@@ -21,7 +21,11 @@ if ($SkipBuild) { $prepArgs += "-SkipBuild" }
 & pwsh @prepArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-# 2) Stage into Tauri resources
+# 2) Stage into Tauri resources. Clear the generated staging directory first
+# so files from an older converter/runtime cannot survive into this package.
+if (Test-Path -LiteralPath $BundleDir) {
+  Remove-Item -LiteralPath $BundleDir -Recurse -Force
+}
 New-Item -ItemType Directory -Force -Path $BundleDir | Out-Null
 Copy-Item -Recurse -Force (Join-Path $RuntimeDir "*") $BundleDir
 

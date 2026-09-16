@@ -5,12 +5,16 @@ use std::path::PathBuf;
 use top_rebuild::b3dm::pack_glb_as_b3dm;
 use top_rebuild::glb::{make_box_primitive, write_glb};
 use top_rebuild::{
-    build_from_tileset, build_proxy_to_file, find_basisu, print_acceptance, probe_tileset_structure,
-    rebuild_tileset, ChildContent, Mat4d, ProxyBudget, TreeBuildOptions, WriteOptions,
+    build_from_tileset, build_proxy_to_file, find_basisu, print_acceptance,
+    probe_tileset_structure, rebuild_tileset, ChildContent, Mat4d, ProxyBudget, TreeBuildOptions,
+    WriteOptions,
 };
 
 #[derive(Parser, Debug)]
-#[command(name = "top_rebuild_debug", about = "TopRebuild debug CLI (tree + proxy + rebuild)")]
+#[command(
+    name = "top_rebuild_debug",
+    about = "TopRebuild debug CLI (tree + proxy + rebuild)"
+)]
 struct Args {
     #[command(subcommand)]
     cmd: Option<Commands>,

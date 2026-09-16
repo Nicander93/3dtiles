@@ -1,6 +1,7 @@
 //! Task I/O path safety: normalize, reject overlap, no overwrite, safe task ids.
 
 use std::fs;
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug, Clone)]
@@ -8,6 +9,7 @@ pub struct ValidatedPaths {
     pub input_root: PathBuf,
     pub output: PathBuf,
     pub task_id: String,
+    pub output_parent_free_bytes: Option<u64>,
 }
 
 pub fn validate_task_id(task_id: &str) -> Result<(), String> {
@@ -56,7 +58,7 @@ pub fn normalize_path(path: &Path) -> Result<PathBuf, String> {
     if path.as_os_str().is_empty() {
         return Err("empty path".into());
     }
-    if path.exists() {
+    if path.exists() || fs::symlink_metadata(path).is_ok() {
         return canonicalize_existing(path);
     }
     let abs = if path.is_absolute() {
@@ -128,7 +130,8 @@ fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
 
 #[cfg(windows)]
 fn paths_equal(a: &Path, b: &Path) -> bool {
-    a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy())
+    a.to_string_lossy()
+        .eq_ignore_ascii_case(&b.to_string_lossy())
 }
 
 #[cfg(not(windows))]
@@ -171,23 +174,95 @@ pub fn validate_io_paths(
     }
 
     // Work dir sibling under output parent must also not overlap oddly — covered by input rules.
-    if output_n.exists() {
+    if fs::symlink_metadata(&output_n).is_ok() {
         return Err(format!(
             "output already exists (V1 does not overwrite): {}",
             output_n.display()
         ));
     }
 
+    check_output_parent_writable(&output_n, task_id)?;
+    let output_parent_free_bytes = output_n.parent().and_then(available_space_bytes);
+
     Ok(ValidatedPaths {
         input_root,
         output: output_n,
         task_id: task_id.to_string(),
+        output_parent_free_bytes,
     })
+}
+
+fn check_output_parent_writable(output: &Path, task_id: &str) -> Result<(), String> {
+    let parent = output
+        .parent()
+        .ok_or_else(|| format!("output has no parent directory: {}", output.display()))?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("cannot create output parent {}: {error}", parent.display()))?;
+
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_nanos())
+        .unwrap_or_default();
+    let probe = parent.join(format!(".geoforge-write-test-{task_id}-{stamp}"));
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+        .map_err(|error| {
+            format!(
+                "output directory is not writable {}: {error}",
+                parent.display()
+            )
+        })?;
+    if let Err(error) = file.write_all(b"geoforge").and_then(|_| file.sync_all()) {
+        let _ = fs::remove_file(&probe);
+        return Err(format!(
+            "cannot write output directory {}: {error}",
+            parent.display()
+        ));
+    }
+    fs::remove_file(&probe).map_err(|error| {
+        format!(
+            "cannot clean output write probe {}: {error}",
+            probe.display()
+        )
+    })?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn available_space_bytes(path: &Path) -> Option<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    extern "system" {
+        fn GetDiskFreeSpaceExW(
+            directory_name: *const u16,
+            free_bytes_available: *mut u64,
+            total_bytes: *mut u64,
+            total_free_bytes: *mut u64,
+        ) -> i32;
+    }
+
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut free = 0;
+    let mut _total = 0;
+    let mut _total_free = 0;
+    let ok =
+        unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), &mut free, &mut _total, &mut _total_free) };
+    (ok != 0).then_some(free)
+}
+
+#[cfg(not(windows))]
+fn available_space_bytes(_path: &Path) -> Option<u64> {
+    None
 }
 
 /// Rename `src` → `dst` without replacing an existing destination. No copy fallback.
 pub fn rename_no_replace(src: &Path, dst: &Path) -> Result<(), String> {
-    if dst.exists() {
+    if fs::symlink_metadata(dst).is_ok() {
         return Err(format!(
             "commit refused: output appeared during processing: {}",
             dst.display()
@@ -230,12 +305,20 @@ fn rename_noreplace_unix(src: &Path, dst: &Path) -> Result<(), String> {
         .map_err(|_| "src path contains NUL".to_string())?;
     let new = CString::new(dst.as_os_str().as_bytes())
         .map_err(|_| "dst path contains NUL".to_string())?;
-    let rc = unsafe { renameat2(AT_FDCWD, old.as_ptr(), AT_FDCWD, new.as_ptr(), RENAME_NOREPLACE) };
+    let rc = unsafe {
+        renameat2(
+            AT_FDCWD,
+            old.as_ptr(),
+            AT_FDCWD,
+            new.as_ptr(),
+            RENAME_NOREPLACE,
+        )
+    };
     if rc == 0 {
         return Ok(());
     }
     let err = std::io::Error::last_os_error();
-    if dst.exists() {
+    if fs::symlink_metadata(dst).is_ok() {
         return Err(format!(
             "commit refused: output already exists: {}",
             dst.display()

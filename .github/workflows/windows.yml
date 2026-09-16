@@ -20,5 +20,22 @@ jobs:
         run: |
           cargo test -p geoforge-protocol
           cargo test -p processor --lib
+      - name: Test complete Rust workspace
+        run: cargo test
       - name: Processor capabilities smoke
         run: cargo run -p processor --quiet -- capabilities --json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Build desktop frontend
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npm test
+          npm run build
+      - name: Test desktop Tauri library
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib --locked
+      - name: Check desktop Tauri Windows target
+        run: cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --locked

@@ -110,10 +110,22 @@ fn find_python(repo: &Path) -> PathBuf {
 
 /// Run rebuild-top by invoking the Python implementation.
 pub fn run(matches: &ArgMatches) -> ExitCode {
-    let input = matches.get_one::<String>("input").map(String::as_str).unwrap_or("");
-    let output = matches.get_one::<String>("output").map(String::as_str).unwrap_or("");
-    let levels = matches.get_one::<String>("levels").map(String::as_str).unwrap_or("1");
-    let simplify = matches.get_one::<String>("simplify").map(String::as_str).unwrap_or("0.5");
+    let input = matches
+        .get_one::<String>("input")
+        .map(String::as_str)
+        .unwrap_or("");
+    let output = matches
+        .get_one::<String>("output")
+        .map(String::as_str)
+        .unwrap_or("");
+    let levels = matches
+        .get_one::<String>("levels")
+        .map(String::as_str)
+        .unwrap_or("1");
+    let simplify = matches
+        .get_one::<String>("simplify")
+        .map(String::as_str)
+        .unwrap_or("0.5");
     let texture_scale = matches
         .get_one::<String>("texture-scale")
         .map(String::as_str)

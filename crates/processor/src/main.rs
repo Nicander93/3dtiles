@@ -1,9 +1,7 @@
 //! processor CLI — `run --task`, `convert-osgb`, `process-tileset`, `scan-osgb`.
 
 use clap::{Parser, Subcommand};
-use processor::{
-    capabilities_json, run_task, scan_osgb, CancelFlag, TaskConfig, EXIT_FAILED,
-};
+use processor::{capabilities_json, run_task, scan_osgb, CancelFlag, TaskConfig, EXIT_FAILED};
 use serde_json::json;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -139,8 +137,15 @@ fn main() -> ExitCode {
         }
         Commands::ScanOsgb { path } => {
             let result = scan_osgb(&path.to_string_lossy());
-            println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
-            if result.get("valid").and_then(|v| v.as_bool()).unwrap_or(false) {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&result).unwrap_or_default()
+            );
+            if result
+                .get("valid")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::from(EXIT_FAILED as u8)
@@ -148,7 +153,10 @@ fn main() -> ExitCode {
         }
         Commands::Capabilities { json: _ } => {
             let caps = capabilities_json();
-            println!("{}", serde_json::to_string_pretty(&caps).unwrap_or_default());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&caps).unwrap_or_default()
+            );
             if caps.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
                 ExitCode::SUCCESS
             } else {

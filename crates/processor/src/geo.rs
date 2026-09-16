@@ -35,7 +35,11 @@ pub fn parse_origin_xyz(value: &Value) -> Option<(f64, f64, f64)> {
             .filter(|s| !s.is_empty())
             .collect();
         if parts.len() >= 3 {
-            return Some((parts[0].parse().ok()?, parts[1].parse().ok()?, parts[2].parse().ok()?));
+            return Some((
+                parts[0].parse().ok()?,
+                parts[1].parse().ok()?,
+                parts[2].parse().ok()?,
+            ));
         }
     }
     None
@@ -60,7 +64,10 @@ pub fn unit_hint(srs: Option<&str>) -> String {
             "ENU 局部坐标：米（东/北/天）；地理原点为经纬度（度）".into()
         }
         Some(s) if epsg_re().is_match(s) => {
-            let code: i64 = epsg_re().captures(s).and_then(|c| c[1].parse().ok()).unwrap_or(0);
+            let code: i64 = epsg_re()
+                .captures(s)
+                .and_then(|c| c[1].parse().ok())
+                .unwrap_or(0);
             if matches!(code, 4326 | 4490 | 4610 | 4214) {
                 format!("EPSG:{code} 地理坐标：度（注意轴序）；高程另计")
             } else {
@@ -154,9 +161,12 @@ pub fn resolve_effective_geo(scan: &Value, options: &Value) -> Value {
         }
     }
 
-    let effective_crs = crs_override
-        .clone()
-        .or_else(|| scan_srs.clone().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()));
+    let effective_crs = crs_override.clone().or_else(|| {
+        scan_srs
+            .clone()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    });
 
     let effective_origin = if let Some((x, y, z)) = origin_override {
         Some(json!({
@@ -231,14 +241,20 @@ pub fn build_tile_config_json(effective: &Value) -> (Option<String>, Vec<String>
 
     let enu = effective.get("enuLatLon");
     if let Some(enu) = enu {
-        if effective.get("crsOverride").and_then(|v| v.as_str()).is_some() {
+        if effective
+            .get("crsOverride")
+            .and_then(|v| v.as_str())
+            .is_some()
+        {
             if let (Some(lon), Some(lat)) = (
                 enu.get("lon").and_then(|v| v.as_f64()),
                 enu.get("lat").and_then(|v| v.as_f64()),
             ) {
                 cfg.insert("x".into(), json!(lon));
                 cfg.insert("y".into(), json!(lat));
-                notes.push(format!("CLI -c x/y from CRS override ENU lon={lon}, lat={lat}"));
+                notes.push(format!(
+                    "CLI -c x/y from CRS override ENU lon={lon}, lat={lat}"
+                ));
             }
         }
     }
@@ -256,7 +272,12 @@ pub fn build_tile_config_json(effective: &Value) -> (Option<String>, Vec<String>
         }
     }
 
-    if effective.get("crsOverride").and_then(|v| v.as_str()).is_some() && enu.is_none() {
+    if effective
+        .get("crsOverride")
+        .and_then(|v| v.as_str())
+        .is_some()
+        && enu.is_none()
+    {
         notes.push(
             "CRS override stored in task options; current 3dtile CLI has no EPSG/WKT flag; \
 runtime still uses input metadata.xml SRS."

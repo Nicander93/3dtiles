@@ -12,8 +12,8 @@ use crate::error::{Result, TopRebuildError};
 use crate::gap::GapMetrics;
 use crate::glb::{make_box_primitive, make_textured_box_glb, transform_primitive, write_glb};
 use crate::proxy_builder::{build_proxy_to_file, ChildContent, ProxyBudget, ProxyBuildResult};
-use crate::texture::TextureMetrics;
 use crate::selector::{self, Selection, DEFAULT_SOURCE_ERROR_RATIO};
+use crate::texture::TextureMetrics;
 use crate::tree_builder::{build_tree, TreeBuildOptions};
 use crate::types::{BoundingVolume, Mat4d, SourceBlock, TreeNode};
 use serde_json::{json, Value};
@@ -278,9 +278,8 @@ fn probe_mesh_content(path: &Path) -> Result<()> {
     if len == 0 {
         return Err(TopRebuildError::ContentMissing(path.display().to_string()));
     }
-    let loaded = crate::b3dm::load_content(path).map_err(|e| {
-        TopRebuildError::ContentUnreadable(format!("{}: {e}", path.display()))
-    })?;
+    let loaded = crate::b3dm::load_content(path)
+        .map_err(|e| TopRebuildError::ContentUnreadable(format!("{}: {e}", path.display())))?;
     crate::glb::load_mesh_from_glb(&loaded.glb).map_err(|e| {
         let msg = e.to_string();
         if msg.contains("unsupported") {
@@ -372,7 +371,10 @@ fn ensure_leaf_content(
 ) -> Result<(PathBuf, f64)> {
     if let Some(ts) = &block.source_tileset {
         let src_dir = ts.parent().ok_or_else(|| {
-            TopRebuildError::InvalidTileset(format!("block tileset has no parent: {}", ts.display()))
+            TopRebuildError::InvalidTileset(format!(
+                "block tileset has no parent: {}",
+                ts.display()
+            ))
         })?;
         copy_dir_all(src_dir, out_block_dir)?;
         if !out_block_dir.join("tileset.json").is_file() {
@@ -508,8 +510,7 @@ pub fn rebuild_tileset(
     let target = tree_opts
         .target_proxy_error
         .unwrap_or_else(|| selector::default_target_proxy_error(&blocks));
-    let selections =
-        selector::select_for_blocks(&blocks, target, tree_opts.source_error_ratio)?;
+    let selections = selector::select_for_blocks(&blocks, target, tree_opts.source_error_ratio)?;
     let sel_by_block: HashMap<String, Selection> = selections
         .iter()
         .map(|(_, s)| (s.source_block_id.clone(), s.clone()))
@@ -529,9 +530,9 @@ pub fn rebuild_tileset(
             .iter()
             .find(|b| b.id == block_id)
             .ok_or_else(|| TopRebuildError::Other(format!("missing block {block_id}")))?;
-        let sel = sel_by_block.get(&block.id).ok_or_else(|| {
-            TopRebuildError::Other(format!("missing selection for {}", block.id))
-        })?;
+        let sel = sel_by_block
+            .get(&block.id)
+            .ok_or_else(|| TopRebuildError::Other(format!("missing selection for {}", block.id)))?;
         let out_block = output.join("Data").join(&block.id);
         let (content_path, ge) = ensure_leaf_content(block, sel, &out_block, write_opts)?;
         let external_uri = format!("./Data/{}/tileset.json", block.id);
@@ -602,11 +603,8 @@ pub fn rebuild_tileset(
             for w in &built.warnings {
                 warnings.push(format!("{}: {w}", node.id));
             }
-            let ge = geometric_error_proxy(
-                &child_ges,
-                built.simplification_error_meters,
-                &node.bounds,
-            );
+            let ge =
+                geometric_error_proxy(&child_ges, built.simplification_error_meters, &node.bounds);
             let (content_path, uri) =
                 write_proxy_bytes(output, node, &built.glb_bytes, write_opts.pack_as_b3dm)?;
             let _ = fs::remove_file(&tmp_glb);
@@ -850,7 +848,9 @@ mod tests {
 
     #[test]
     fn geometric_error_monotonic() {
-        let bv = BoundingVolume::from_box([0.0, 0.0, 0.0, 100.0, 0.0, 0.0, 0.0, 100.0, 0.0, 0.0, 0.0, 10.0]);
+        let bv = BoundingVolume::from_box([
+            0.0, 0.0, 0.0, 100.0, 0.0, 0.0, 0.0, 100.0, 0.0, 0.0, 0.0, 10.0,
+        ]);
         let ge = geometric_error_proxy(&[50.0, 40.0], 0.5, &bv);
         assert!(ge > 50.0);
         let ge2 = geometric_error_proxy(&[ge], 1.0, &bv);
@@ -886,8 +886,9 @@ mod tests {
 
     #[test]
     fn bv_to_local_centered() {
-        let world_bv =
-            BoundingVolume::from_box([100.0, 100.0, 10.0, 50.0, 0.0, 0.0, 0.0, 50.0, 0.0, 0.0, 0.0, 10.0]);
+        let world_bv = BoundingVolume::from_box([
+            100.0, 100.0, 10.0, 50.0, 0.0, 0.0, 0.0, 50.0, 0.0, 0.0, 0.0, 10.0,
+        ]);
         let t = Mat4d::translation(100.0, 100.0, 10.0);
         let local = bv_world_to_local(&world_bv, &t);
         let c = local.center().unwrap();

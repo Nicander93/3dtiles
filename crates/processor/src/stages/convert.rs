@@ -2,8 +2,8 @@
 
 use crate::cancel::CancelFlag;
 use crate::protocol::{Emitter, Stage};
-use crate::util::{run_logged_env, tool_paths};
-use serde_json::Value;
+use crate::util::{run_logged_env_result, tool_paths, CommandResult};
+use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -20,8 +20,21 @@ pub fn run_convert(
     let tools = tool_paths();
 
     emitter.stage(Stage::Convert, "OSGB → 3D Tiles");
-    let rc = if tools.convert_bin.is_file() {
-        run_native(emitter, cancel, &tools.convert_bin, osgb_root, out_dir, &extra)?
+    let started = std::time::Instant::now();
+    let configured_threads = std::env::var("GEOFORGE_CONVERT_THREADS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0);
+    emitter.metric("converter.threads.configured", json!(configured_threads));
+    let result = if tools.convert_bin.is_file() {
+        run_native(
+            emitter,
+            cancel,
+            &tools.convert_bin,
+            osgb_root,
+            out_dir,
+            &extra,
+        )
     } else if tools.packaged {
         return Err(format!(
             "组件缺失，请修复安装（转换器 _3dtile 未找到：{}）",
@@ -34,11 +47,29 @@ pub fn run_convert(
         ));
     };
 
+    let result = match result {
+        Ok(result) => result,
+        Err(error) => {
+            emitter.metric("converter.elapsedMs", json!(started.elapsed().as_millis()));
+            return Err(error);
+        }
+    };
+
+    emitter.metric("converter.elapsedMs", json!(started.elapsed().as_millis()));
+    if let Some(bytes) = result.peak_memory_bytes {
+        emitter.metric("converter.peakMemoryBytes", json!(bytes));
+    }
+
     if cancel.is_cancelled() {
         return Err("cancelled".into());
     }
-    if rc != 0 {
-        return Err(format!("convert exited {rc}"));
+    if result.exit_code != 0 {
+        let detail = if result.stderr_tail.is_empty() {
+            "converter did not provide stderr output".to_string()
+        } else {
+            format!("last converter output:\n{}", result.stderr_tail)
+        };
+        return Err(format!("convert exited {}: {detail}", result.exit_code));
     }
     let tileset = out_dir.join("tileset.json");
     if !tileset.is_file() {
@@ -50,7 +81,11 @@ pub fn run_convert(
 fn convert_flags(emitter: &Arc<Emitter>, options: &Value, cfg_json: Option<&str>) -> Vec<String> {
     let mut extra = Vec::new();
     let conv = options.get("convert").cloned().unwrap_or(Value::Null);
-    if conv.get("verbose").and_then(|v| v.as_bool()).unwrap_or(false) {
+    if conv
+        .get("verbose")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
         extra.push("-v".into());
     }
     if let Some(cfg) = conv.get("config").and_then(|v| v.as_str()) {
@@ -87,7 +122,7 @@ fn run_native(
     osgb_root: &str,
     out_dir: &Path,
     extra: &[String],
-) -> Result<i32, String> {
+) -> Result<CommandResult, String> {
     let mut cmd = vec![
         bin.to_string_lossy().into_owned(),
         "-f".into(),
@@ -116,7 +151,7 @@ fn run_native(
         }
     }
     let env_refs: Vec<(&str, PathBuf)> = env;
-    run_logged_env(emitter, cancel, &cmd, cwd, &env_refs)
+    run_logged_env_result(emitter, cancel, &cmd, cwd, &env_refs)
 }
 
 fn strip_verbatim_str(s: &str) -> String {

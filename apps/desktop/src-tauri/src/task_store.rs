@@ -5,6 +5,7 @@ use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -43,11 +44,16 @@ pub struct PathRef {
 pub struct TaskStore {
   conn: Arc<Mutex<Connection>>,
   data_dir: PathBuf,
+  write_lock: Arc<Mutex<()>>,
 }
 
 impl TaskStore {
   pub fn new(conn: Arc<Mutex<Connection>>, data_dir: PathBuf) -> Self {
-    Self { conn, data_dir }
+    Self {
+      conn,
+      data_dir,
+      write_lock: Arc::new(Mutex::new(())),
+    }
   }
 
   pub fn mark_stale_interrupted(&self) -> Result<(), String> {
@@ -242,6 +248,7 @@ impl TaskStore {
   where
     F: FnOnce(&mut TaskRecord),
   {
+    let _write_guard = self.write_lock.lock();
     let mut task = match self.get(id)? {
       Some(t) => t,
       None => return Ok(None),
@@ -256,6 +263,7 @@ impl TaskStore {
   }
 
   pub fn append_log(&self, id: &str, line: &str) -> Result<(), String> {
+    let _write_guard = self.write_lock.lock();
     let mut task = match self.get(id)? {
       Some(t) => t,
       None => return Ok(()),
@@ -270,23 +278,31 @@ impl TaskStore {
     }
     task.log.push_str(entry.trim_end_matches('\n'));
     if task.log.len() > 200_000 {
-      task.log = task.log[task.log.len() - 200_000..].to_string();
+      task.log = truncate_utf8_tail(&task.log, 200_000);
     }
     let lp = self.log_path_for(id);
-    if let Some(parent) = lp.parent() {
-      let _ = std::fs::create_dir_all(parent);
-    }
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-      .create(true)
-      .append(true)
-      .open(&lp)
-    {
+    let file_result = (|| -> Result<(), String> {
+      if let Some(parent) = lp.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| {
+          format!("create task log directory {} failed: {error}", parent.display())
+        })?;
+      }
+      let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&lp)
+        .map_err(|error| format!("open task log {} failed: {error}", lp.display()))?;
       use std::io::Write;
-      let _ = f.write_all(entry.as_bytes());
-    }
+      file
+        .write_all(entry.as_bytes())
+        .map_err(|error| format!("write task log {} failed: {error}", lp.display()))
+    })();
     task.log_path = lp.to_string_lossy().into_owned();
     task.updated_at = now_secs();
     self.upsert(&task)?;
+    if let Err(error) = file_result {
+      return Err(error);
+    }
     Ok(())
   }
 
@@ -298,13 +314,14 @@ impl TaskStore {
     let mut text = task.log.clone();
     let lp = PathBuf::from(&task.log_path);
     if lp.is_file() {
-      if let Ok(file_text) = std::fs::read_to_string(&lp) {
+      if let Ok(file_text) = read_log_tail(&lp, 256 * 1024) {
         text = file_text;
       }
     }
     let mut lines: Vec<&str> = text.lines().collect();
-    if tail > 0 && lines.len() > tail {
-      lines = lines[lines.len() - tail..].to_vec();
+    let max_lines = if tail == 0 { 500 } else { tail.min(5_000) };
+    if lines.len() > max_lines {
+      lines = lines[lines.len() - max_lines..].to_vec();
     }
     let joined = lines.join("\n");
     Ok(Some(json!({
@@ -345,5 +362,170 @@ impl TaskStore {
       )
       .optional()
       .map_err(|e| e.to_string())
+  }
+}
+
+fn read_log_tail(path: &PathBuf, max_bytes: u64) -> Result<String, String> {
+  let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+  let length = file.metadata().map_err(|e| e.to_string())?.len();
+  let start = length.saturating_sub(max_bytes);
+  file.seek(SeekFrom::Start(start)).map_err(|e| e.to_string())?;
+  let mut bytes = Vec::new();
+  file.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+  // The byte window may begin in the middle of a multi-byte log character.
+  // Drop only continuation bytes so the returned tail starts at a UTF-8
+  // boundary while keeping the bounded read.
+  let prefix = bytes
+    .iter()
+    .position(|byte| (byte & 0b1100_0000) != 0b1000_0000)
+    .unwrap_or(bytes.len());
+  if prefix > 0 {
+    bytes.drain(..prefix);
+  }
+  Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn truncate_utf8_tail(value: &str, max_bytes: usize) -> String {
+  if value.len() <= max_bytes {
+    return value.to_string();
+  }
+
+  let mut start = value.len() - max_bytes;
+  while start < value.len() && !value.is_char_boundary(start) {
+    start += 1;
+  }
+  value[start..].to_string()
+}
+
+#[cfg(test)]
+mod tests {
+  use super::{read_log_tail, truncate_utf8_tail};
+  use crate::db::init_schema;
+  use parking_lot::Mutex;
+  use rusqlite::Connection;
+  use std::fs;
+  use std::sync::{Arc, Barrier};
+  use std::thread;
+  use std::time::{SystemTime, UNIX_EPOCH};
+
+  #[test]
+  fn tail_truncation_keeps_valid_utf8() {
+    let value = "日志🙂".repeat(100);
+    let tail = truncate_utf8_tail(&value, 17);
+
+    assert!(tail.len() <= 17);
+    assert!(std::str::from_utf8(tail.as_bytes()).is_ok());
+    assert!(value.ends_with(&tail));
+  }
+
+  #[test]
+  fn short_values_are_unchanged() {
+    assert_eq!(truncate_utf8_tail("abc", 10), "abc");
+  }
+
+  #[test]
+  fn append_log_reports_file_write_failure_without_recursive_logging() {
+    let conn = Connection::open_in_memory().expect("open sqlite");
+    init_schema(&conn).expect("create schema");
+    let stamp = SystemTime::now()
+      .duration_since(UNIX_EPOCH)
+      .expect("system clock before unix epoch")
+      .as_nanos();
+    let data_file = std::env::temp_dir().join(format!("geoforge-task-log-file-{stamp}"));
+    fs::write(&data_file, b"data").expect("create blocking data file");
+    let store = super::TaskStore::new(Arc::new(Mutex::new(conn)), data_file.clone());
+    let task = store
+      .create("convert-osgb", "input", "output", serde_json::json!({}), "test")
+      .expect("create task");
+
+    let error = store
+      .append_log(&task.id, "cannot persist")
+      .expect_err("file failure must be reported");
+    assert!(error.contains("task log"), "{error}");
+    let saved = store.get(&task.id).expect("read task").expect("task exists");
+    assert!(saved.log.contains("cannot persist"));
+    let _ = fs::remove_file(data_file);
+  }
+
+  #[test]
+  fn log_file_tail_starts_at_utf8_boundary() {
+    let stamp = SystemTime::now()
+      .duration_since(UNIX_EPOCH)
+      .expect("system clock before unix epoch")
+      .as_nanos();
+    let path = std::env::temp_dir().join(format!("geoforge-log-tail-{stamp}.log"));
+    fs::write(&path, "prefix-中文-🚀-tail").expect("write log fixture");
+
+    let tail = read_log_tail(&path, 7).expect("read log tail");
+    assert!(std::str::from_utf8(tail.as_bytes()).is_ok());
+    assert!(!tail.starts_with('\u{fffd}'));
+
+    let _ = fs::remove_file(path);
+  }
+
+  #[test]
+  fn concurrent_log_cancel_and_error_updates_keep_all_fields() {
+    let conn = Connection::open_in_memory().expect("open sqlite");
+    init_schema(&conn).expect("create schema");
+    let data_dir = std::env::temp_dir().join(format!(
+      "geoforge-task-store-{}",
+      SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock before unix epoch")
+        .as_nanos()
+    ));
+    fs::create_dir_all(&data_dir).expect("create task data dir");
+    let store = super::TaskStore::new(Arc::new(Mutex::new(conn)), data_dir.clone());
+    let task = store
+      .create("convert-osgb", "input", "output", serde_json::json!({}), "test")
+      .expect("create task");
+
+    let barrier = Arc::new(Barrier::new(3));
+    let cancel_done = Arc::new(Barrier::new(2));
+    let log_store = store.clone();
+    let log_task_id = task.id.clone();
+    let log_barrier = barrier.clone();
+    let logs = thread::spawn(move || {
+      log_barrier.wait();
+      for index in 0..100 {
+        log_store
+          .append_log(&log_task_id, &format!("log-{index}"))
+          .expect("append log");
+      }
+    });
+
+    let cancel_store = store.clone();
+    let cancel_task_id = task.id.clone();
+    let cancel_barrier = barrier.clone();
+    let cancel_done_for_thread = cancel_done.clone();
+    let cancel = thread::spawn(move || {
+      cancel_barrier.wait();
+      cancel_store
+        .request_cancel(&cancel_task_id)
+        .expect("request cancel");
+      cancel_done_for_thread.wait();
+    });
+
+    barrier.wait();
+    cancel_done.wait();
+    store
+      .update_fields(&task.id, |record| {
+        record.error = Some("controlled failure".into());
+        record.stage = "convert".into();
+      })
+      .expect("update error");
+
+    logs.join().expect("log thread");
+    cancel.join().expect("cancel thread");
+    let final_task = store
+      .get(&task.id)
+      .expect("read task")
+      .expect("task exists");
+    assert!(final_task.cancel_requested);
+    assert_eq!(final_task.error.as_deref(), Some("controlled failure"));
+    assert_eq!(final_task.stage, "convert");
+    assert!(final_task.log.contains("log-99"));
+
+    let _ = fs::remove_dir_all(data_dir);
   }
 }

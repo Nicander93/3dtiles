@@ -143,8 +143,7 @@ pub fn find_basisu() -> Option<PathBuf> {
     // Walk up from CARGO_MANIFEST_DIR-style relative
     let mut cur = std::env::current_dir().ok()?;
     for _ in 0..6 {
-        let p = cur
-            .join("vcpkg_installed/x64-linux/tools/basisu/basisu");
+        let p = cur.join("vcpkg_installed/x64-linux/tools/basisu/basisu");
         if p.is_file() {
             return Some(p);
         }
@@ -173,8 +172,8 @@ fn resize_to_max(tex: &TextureData, max_size: u32) -> TextureData {
     let scale = (max_size as f32 / tex.width.max(tex.height) as f32).min(1.0);
     let nw = ((tex.width as f32 * scale).round() as u32).max(1);
     let nh = ((tex.height as f32 * scale).round() as u32).max(1);
-    let img: RgbaImage = ImageBuffer::from_raw(tex.width, tex.height, tex.rgba.clone())
-        .expect("rgba");
+    let img: RgbaImage =
+        ImageBuffer::from_raw(tex.width, tex.height, tex.rgba.clone()).expect("rgba");
     let resized = image::imageops::resize(&img, nw, nh, FilterType::Triangle);
     TextureData::from_rgba(nw, nh, resized.into_raw())
 }
@@ -292,9 +291,9 @@ pub fn process_textures(
         ));
     }
 
-    let tmp = work_dir
-        .map(|p| p.join("_ktx2_work"))
-        .unwrap_or_else(|| std::env::temp_dir().join(format!("top_rebuild_ktx2_{}", std::process::id())));
+    let tmp = work_dir.map(|p| p.join("_ktx2_work")).unwrap_or_else(|| {
+        std::env::temp_dir().join(format!("top_rebuild_ktx2_{}", std::process::id()))
+    });
 
     let mut out = Vec::new();
     for (source_hash, t) in &sized {
@@ -361,7 +360,9 @@ pub fn process_textures(
 
 /// Extract embedded images from a GLB (PNG/JPEG). Returns textures + map of
 /// glTF image index → hash.
-pub fn extract_textures_from_glb(glb: &[u8]) -> Result<(Vec<TextureData>, BTreeMap<usize, String>)> {
+pub fn extract_textures_from_glb(
+    glb: &[u8],
+) -> Result<(Vec<TextureData>, BTreeMap<usize, String>)> {
     let gltf = gltf::Gltf::from_slice(glb)
         .map_err(|e| TopRebuildError::Other(format!("gltf parse: {e}")))?;
     let blob = gltf.blob.as_ref();

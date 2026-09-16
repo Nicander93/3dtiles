@@ -1,9 +1,7 @@
 //! Integration: load tests/fixtures/top_rebuild/grid_4x4 and expect L0 16 / L1 4 / L2 1.
 
 use std::path::PathBuf;
-use top_rebuild::{
-    build_from_tileset, format_level_counts, load_source_blocks, TreeBuildOptions,
-};
+use top_rebuild::{build_from_tileset, format_level_counts, load_source_blocks, TreeBuildOptions};
 
 fn fixture_dir() -> PathBuf {
     // CARGO_MANIFEST_DIR = crates/top_rebuild

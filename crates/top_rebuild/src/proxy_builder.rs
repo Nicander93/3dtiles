@@ -350,8 +350,7 @@ fn append_primitive(acc: &mut LoadedPrimitive, other: &LoadedPrimitive) {
     if let (Some(au), Some(bu)) = (acc.uvs.as_mut(), other.uvs.as_ref()) {
         au.extend_from_slice(bu);
     }
-    acc.indices
-        .extend(other.indices.iter().map(|i| i + base));
+    acc.indices.extend(other.indices.iter().map(|i| i + base));
 }
 
 /// Simplify with LockBorder | ErrorAbsolute (plan §14–15).
@@ -462,10 +461,7 @@ mod tests {
     use std::fs;
 
     fn tmp_dir() -> PathBuf {
-        let d = std::env::temp_dir().join(format!(
-            "top_rebuild_proxy_{}",
-            std::process::id()
-        ));
+        let d = std::env::temp_dir().join(format!("top_rebuild_proxy_{}", std::process::id()));
         let _ = fs::create_dir_all(&d);
         d
     }
@@ -544,7 +540,8 @@ mod tests {
         let dir = tmp_dir().join("tex");
         fs::create_dir_all(&dir).unwrap();
         // Same solid color → same hash → dedup to 1
-        let glb = make_textured_box_glb(10.0, 10.0, 2.0, 4, "mat0:1,1,1,1", (10, 20, 30), 128).unwrap();
+        let glb =
+            make_textured_box_glb(10.0, 10.0, 2.0, 4, "mat0:1,1,1,1", (10, 20, 30), 128).unwrap();
         let mut children = Vec::new();
         for i in 0..4 {
             let p = dir.join(format!("c{i}.glb"));

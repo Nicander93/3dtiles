@@ -2,11 +2,14 @@
 
 use crate::cancel::CancelFlag;
 use crate::protocol::Emitter;
-use std::io::{BufRead, BufReader};
+use std::collections::VecDeque;
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, OnceLock};
 use std::thread;
+
+const MAX_DISPLAY_LINE_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct ToolPaths {
@@ -42,7 +45,13 @@ pub fn tool_paths() -> &'static ToolPaths {
         let basisu = resolve_basisu(&runtime_root, &repo_root);
         let python = std::env::var("GEOFORGE_PYTHON")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("python3"));
+            .unwrap_or_else(|_| {
+                if cfg!(windows) {
+                    PathBuf::from("python")
+                } else {
+                    PathBuf::from("python3")
+                }
+            });
         ToolPaths {
             repo_root,
             runtime_root,
@@ -134,7 +143,10 @@ fn bin_names(stem: &str) -> [String; 2] {
 }
 
 fn sibling_bins(dir: &Path, stem: &str) -> Vec<PathBuf> {
-    bin_names(stem).into_iter().map(|name| dir.join(name)).collect()
+    bin_names(stem)
+        .into_iter()
+        .map(|name| dir.join(name))
+        .collect()
 }
 
 fn profile_bins(root: &Path, stem: &str) -> Vec<PathBuf> {
@@ -218,7 +230,7 @@ pub fn run_logged(
     cmd: &[String],
     cwd: Option<&Path>,
 ) -> Result<i32, String> {
-    run_logged_env(emitter, cancel, cmd, cwd, &[])
+    Ok(run_logged_env_result(emitter, cancel, cmd, cwd, &[])?.exit_code)
 }
 
 pub fn run_logged_env(
@@ -228,6 +240,61 @@ pub fn run_logged_env(
     cwd: Option<&Path>,
     extra_env: &[(&str, PathBuf)],
 ) -> Result<i32, String> {
+    Ok(run_logged_env_result(emitter, cancel, cmd, cwd, extra_env)?.exit_code)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandResult {
+    pub exit_code: i32,
+    pub stderr_tail: String,
+    pub peak_memory_bytes: Option<u64>,
+}
+
+/// Read a stream without allowing one unterminated line to grow without
+/// bound. Chunks emitted with `truncated = true` are display fragments; the
+/// caller still retains the complete process exit status and stderr tail.
+fn for_each_bounded_line<R: Read, F>(mut reader: R, mut handle: F) -> std::io::Result<()>
+where
+    F: FnMut(Vec<u8>, bool),
+{
+    let mut pending = Vec::new();
+    let mut buffer = [0_u8; 8192];
+    loop {
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        pending.extend_from_slice(&buffer[..count]);
+        loop {
+            let Some(newline) = pending.iter().position(|byte| *byte == b'\n') else {
+                break;
+            };
+            let rest = pending.split_off(newline + 1);
+            let line = std::mem::replace(&mut pending, rest);
+            handle(line, false);
+        }
+        while pending.len() > MAX_DISPLAY_LINE_BYTES {
+            let chunk = pending.drain(..MAX_DISPLAY_LINE_BYTES).collect();
+            handle(chunk, true);
+        }
+    }
+    if !pending.is_empty() {
+        handle(pending, false);
+    }
+    Ok(())
+}
+
+/// Run a command while retaining a bounded diagnostic tail from stderr.
+pub fn run_logged_env_result(
+    emitter: &Arc<Emitter>,
+    cancel: &CancelFlag,
+    cmd: &[String],
+    cwd: Option<&Path>,
+    extra_env: &[(&str, PathBuf)],
+) -> Result<CommandResult, String> {
+    if cmd.is_empty() {
+        return Err("cannot run an empty command".into());
+    }
     emitter.log(&format!("$ {}", cmd.join(" ")));
     let mut command = Command::new(&cmd[0]);
     if cmd.len() > 1 {
@@ -269,17 +336,45 @@ pub fn run_logged_env(
             }
         }
     });
+    let stderr_tail = Arc::new(std::sync::Mutex::new(VecDeque::<String>::new()));
+    let tail_for_thread = Arc::clone(&stderr_tail);
     let e2 = Arc::clone(emitter);
     let t_err = thread::spawn(move || {
         if let Some(err) = stderr {
-            for line in BufReader::new(err).lines().flatten() {
+            let result = for_each_bounded_line(err, |bytes, truncated| {
+                let mut line = String::from_utf8_lossy(&bytes)
+                    .trim_end_matches(['\r', '\n'])
+                    .to_string();
+                if truncated {
+                    line.push_str(" …<line truncated>");
+                }
+                if let Ok(mut tail) = tail_for_thread.lock() {
+                    tail.push_back(line.clone());
+                    while tail.len() > 100
+                        || tail.iter().map(|item| item.len() + 1).sum::<usize>() > 64 * 1024
+                    {
+                        tail.pop_front();
+                    }
+                }
                 eprintln!("{line}");
                 e2.log(&format!("[stderr] {line}"));
+            });
+            if let Err(error) = result {
+                let line = format!("<stderr read failed: {error}>");
+                if let Ok(mut tail) = tail_for_thread.lock() {
+                    tail.push_back(line.clone());
+                }
+                e2.log(&line);
             }
         }
     });
 
+    let mut peak_memory_bytes = 0u64;
+    let mut wait_error = None;
     loop {
+        if let Some(bytes) = process_peak_memory_bytes(child.id()) {
+            peak_memory_bytes = peak_memory_bytes.max(bytes);
+        }
         if cancel.is_cancelled() {
             terminate_child(&mut child);
             break;
@@ -287,16 +382,103 @@ pub fn run_logged_env(
         match child.try_wait() {
             Ok(Some(_)) => break,
             Ok(None) => thread::sleep(std::time::Duration::from_millis(100)),
-            Err(e) => return Err(format!("wait error: {e}")),
+            Err(e) => {
+                terminate_child(&mut child);
+                wait_error = Some(format!("wait error: {e}"));
+                break;
+            }
         }
     }
 
     let _ = t_out.join();
     let _ = t_err.join();
     let status = child.wait().map_err(|e| e.to_string())?;
-    Ok(status
+    if let Some(error) = wait_error {
+        return Err(error);
+    }
+    let exit_code = status
         .code()
-        .unwrap_or(if cancel.is_cancelled() { 130 } else { 1 }))
+        .unwrap_or(if cancel.is_cancelled() { 130 } else { 1 });
+    let stderr_tail = stderr_tail
+        .lock()
+        .map(|tail| tail.iter().cloned().collect::<Vec<_>>().join("\n"))
+        .unwrap_or_default();
+    Ok(CommandResult {
+        exit_code,
+        stderr_tail,
+        peak_memory_bytes: (peak_memory_bytes > 0).then_some(peak_memory_bytes),
+    })
+}
+
+#[cfg(unix)]
+fn process_peak_memory_bytes(pid: u32) -> Option<u64> {
+    let text = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    text.lines()
+        .find_map(|line| line.strip_prefix("VmHWM:"))
+        .or_else(|| text.lines().find_map(|line| line.strip_prefix("VmRSS:")))
+        .and_then(|value| value.split_whitespace().next())
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(|kilobytes| kilobytes.saturating_mul(1024))
+}
+
+#[cfg(windows)]
+fn process_peak_memory_bytes(pid: u32) -> Option<u64> {
+    #[repr(C)]
+    struct ProcessMemoryCounters {
+        cb: u32,
+        page_fault_count: u32,
+        peak_working_set_size: usize,
+        working_set_size: usize,
+        quota_peak_paged_pool_usage: usize,
+        quota_paged_pool_usage: usize,
+        quota_peak_non_paged_pool_usage: usize,
+        quota_non_paged_pool_usage: usize,
+        pagefile_usage: usize,
+        peak_pagefile_usage: usize,
+    }
+    #[link(name = "psapi")]
+    extern "system" {
+        fn OpenProcess(access: u32, inherit_handle: i32, process_id: u32) -> *mut std::ffi::c_void;
+        fn GetProcessMemoryInfo(
+            process: *mut std::ffi::c_void,
+            counters: *mut ProcessMemoryCounters,
+            size: u32,
+        ) -> i32;
+        fn CloseHandle(handle: *mut std::ffi::c_void) -> i32;
+    }
+    const PROCESS_QUERY_INFORMATION: u32 = 0x0400;
+    const PROCESS_VM_READ: u32 = 0x0010;
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid);
+        if handle.is_null() {
+            return None;
+        }
+        let mut counters = ProcessMemoryCounters {
+            cb: std::mem::size_of::<ProcessMemoryCounters>() as u32,
+            page_fault_count: 0,
+            peak_working_set_size: 0,
+            working_set_size: 0,
+            quota_peak_paged_pool_usage: 0,
+            quota_paged_pool_usage: 0,
+            quota_peak_non_paged_pool_usage: 0,
+            quota_non_paged_pool_usage: 0,
+            pagefile_usage: 0,
+            peak_pagefile_usage: 0,
+        };
+        let ok = GetProcessMemoryInfo(
+            handle,
+            &mut counters,
+            std::mem::size_of::<ProcessMemoryCounters>() as u32,
+        );
+        let value = (ok != 0).then_some(counters.peak_working_set_size as u64);
+        let _ = CloseHandle(handle);
+        value
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn process_peak_memory_bytes(_pid: u32) -> Option<u64> {
+    None
 }
 
 fn terminate_child(child: &mut std::process::Child) {
@@ -345,12 +527,57 @@ fn libc_kill(_pid: i32, _sig: i32) {}
 
 #[cfg(test)]
 mod tests {
-    use super::bin_names;
+    use super::{bin_names, for_each_bounded_line, run_logged_env_result, MAX_DISPLAY_LINE_BYTES};
+    use crate::cancel::CancelFlag;
+    use crate::protocol::Emitter;
+    use std::sync::Arc;
 
     #[test]
     fn bin_names_include_exe_suffix() {
         let names = bin_names("_3dtile");
         assert_eq!(names[0], "_3dtile");
         assert_eq!(names[1], "_3dtile.exe");
+    }
+
+    #[test]
+    fn bounded_line_reader_splits_unterminated_output() {
+        let input = vec![b'x'; MAX_DISPLAY_LINE_BYTES * 2 + 17];
+        let mut chunks = Vec::new();
+        for_each_bounded_line(input.as_slice(), |bytes, truncated| {
+            chunks.push((bytes.len(), truncated));
+        })
+        .expect("read bounded fixture");
+        assert_eq!(chunks.len(), 3);
+        assert!(chunks
+            .iter()
+            .all(|(size, _)| *size <= MAX_DISPLAY_LINE_BYTES));
+        assert!(chunks.iter().take(2).all(|(_, truncated)| *truncated));
+    }
+
+    #[test]
+    fn command_result_preserves_nonzero_exit_and_stderr_tail() {
+        let command = if cfg!(windows) {
+            vec![
+                "cmd".to_string(),
+                "/C".to_string(),
+                "echo converter diagnostic 1>&2 & exit /B 7".to_string(),
+            ]
+        } else {
+            vec![
+                "sh".to_string(),
+                "-c".to_string(),
+                "printf 'converter diagnostic' >&2; exit 7".to_string(),
+            ]
+        };
+        let result = run_logged_env_result(
+            &Arc::new(Emitter::new("util-test")),
+            &CancelFlag::new(),
+            &command,
+            None,
+            &[],
+        )
+        .expect("run controlled converter fixture");
+        assert_eq!(result.exit_code, 7);
+        assert!(result.stderr_tail.contains("converter diagnostic"));
     }
 }

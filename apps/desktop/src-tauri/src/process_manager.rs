@@ -6,7 +6,7 @@ use crate::task_store::TaskStore;
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,6 +16,8 @@ use std::time::{Duration, Instant};
 
 /// Default grace period after cooperative cancel before force-killing the process tree.
 pub const CANCEL_GRACE_SECS: u64 = 10;
+const MAX_DIAGNOSTIC_DISPLAY_BYTES: usize = 64 * 1024;
+const MAX_PROTOCOL_LINE_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Default)]
 pub struct ProcessManager {
@@ -54,6 +56,80 @@ impl Drop for JobHandle {
       }
     }
   }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::{copy_raw_stream, read_bounded_protocol_line, MAX_DIAGNOSTIC_DISPLAY_BYTES};
+  use std::io::BufReader;
+
+  #[test]
+  fn raw_stream_preserves_bytes_while_bounding_display_fragments() {
+    let mut input = vec![b'x'; MAX_DIAGNOSTIC_DISPLAY_BYTES * 2 + 9];
+    input.extend_from_slice(b"\nlast\n");
+    let mut raw = Vec::new();
+    let mut fragments = Vec::new();
+    copy_raw_stream(input.as_slice(), &mut raw, |bytes, truncated| {
+      fragments.push((bytes.len(), truncated));
+    })
+    .expect("copy diagnostic stream");
+
+    assert_eq!(raw, input);
+    assert!(fragments
+      .iter()
+      .all(|(length, _)| *length <= MAX_DIAGNOSTIC_DISPLAY_BYTES));
+    assert!(fragments.iter().any(|(_, truncated)| *truncated));
+  }
+
+  #[test]
+  fn protocol_reader_preserves_raw_bytes_while_bounding_one_line() {
+    let mut input = vec![b'{'; super::MAX_PROTOCOL_LINE_BYTES + 17];
+    input.push(b'\n');
+    let mut reader = BufReader::new(input.as_slice());
+    let mut raw = Vec::new();
+    let (display, truncated) = read_bounded_protocol_line(&mut reader, &mut raw)
+      .expect("read protocol line")
+      .expect("line exists");
+    assert_eq!(raw, input);
+    assert_eq!(display.len(), super::MAX_PROTOCOL_LINE_BYTES);
+    assert!(truncated);
+  }
+}
+
+#[cfg(windows)]
+#[repr(C)]
+struct JobObjectBasicLimitInformation {
+  per_process_user_time_limit: i64,
+  per_job_user_time_limit: i64,
+  limit_flags: u32,
+  minimum_working_set_size: usize,
+  maximum_working_set_size: usize,
+  active_process_limit: u32,
+  affinity: usize,
+  priority_class: u32,
+  scheduling_class: u32,
+}
+
+#[cfg(windows)]
+#[repr(C)]
+struct IoCounters {
+  read_operations: u64,
+  write_operations: u64,
+  other_operations: u64,
+  read_bytes: u64,
+  write_bytes: u64,
+  other_bytes: u64,
+}
+
+#[cfg(windows)]
+#[repr(C)]
+struct JobObjectExtendedLimitInformation {
+  basic_limit_information: JobObjectBasicLimitInformation,
+  io_info: IoCounters,
+  process_memory_limit: usize,
+  job_memory_limit: usize,
+  peak_process_memory_used: usize,
+  peak_job_memory_used: usize,
 }
 
 impl ProcessManager {
@@ -145,6 +221,11 @@ impl ProcessManager {
           let tid = next.id.clone();
           let result = run_processor_task(&mgr, &tasks, &artifacts, &tid, &data_dir);
           if let Err(e) = result {
+            let error_code = if e.contains("exited") {
+              "PROCESSOR_EXIT_NONZERO"
+            } else {
+              "PROCESSOR_FAILED"
+            };
             let _ = tasks.append_log(&tid, &format!("[processor] error: {e}"));
             let _ = tasks.update_fields(&tid, |t| {
               if t.status != "cancelled" && t.status != "cancelling" {
@@ -156,6 +237,10 @@ impl ProcessManager {
                   let prev = t.error.clone().unwrap_or_default();
                   t.error = Some(format!("{prev}; {e}"));
                 }
+                let mut prog = t.progress.as_object().cloned().unwrap_or_default();
+                prog.insert("errorCode".into(), json!(error_code));
+                prog.insert("failedStage".into(), json!(t.stage.clone()));
+                t.progress = Value::Object(prog);
                 t.status = "failed".into();
                 t.stage = "failed".into();
               } else {
@@ -283,11 +368,25 @@ impl ProcessManager {
 #[cfg(windows)]
 #[link(name = "kernel32")]
 extern "system" {
-  fn CreateJobObjectW(lpJobAttributes: *mut std::ffi::c_void, lpName: *const u16) -> *mut std::ffi::c_void;
+  fn CreateJobObjectW(
+    lpJobAttributes: *mut std::ffi::c_void,
+    lpName: *const u16,
+  ) -> *mut std::ffi::c_void;
+  fn SetInformationJobObject(
+    hJob: *mut std::ffi::c_void,
+    job_object_information_class: u32,
+    job_object_information: *mut std::ffi::c_void,
+    job_object_information_length: u32,
+  ) -> i32;
   fn AssignProcessToJobObject(hJob: *mut std::ffi::c_void, hProcess: *mut std::ffi::c_void) -> i32;
   fn TerminateJobObject(hJob: *mut std::ffi::c_void, uExitCode: u32) -> i32;
   fn CloseHandle(hObject: *mut std::ffi::c_void) -> i32;
 }
+
+#[cfg(windows)]
+const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: u32 = 9;
+#[cfg(windows)]
+const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
 
 #[cfg(unix)]
 fn libc_kill(pid: i32, sig: i32) {
@@ -296,6 +395,117 @@ fn libc_kill(pid: i32, sig: i32) {
   }
   unsafe {
     let _ = kill(pid, sig);
+  }
+}
+
+/// A broken protocol/diagnostic pipe must not leave the processor running
+/// after the scheduler has observed the task failure.
+fn force_terminate_process(mgr: &ProcessManager, task_id: &str) {
+  let mut map = mgr.inner.lock();
+  let Some(proc) = map.get_mut(task_id) else {
+    return;
+  };
+  #[cfg(windows)]
+  {
+    if let Some(job) = proc.job.as_ref() {
+      unsafe {
+        let _ = TerminateJobObject(job.0, 1);
+      }
+    } else {
+      let _ = proc.child.kill();
+    }
+  }
+  #[cfg(unix)]
+  {
+    let pid = proc.child.id() as i32;
+    libc_kill(-pid, 9);
+    let _ = proc.child.kill();
+  }
+  #[cfg(not(any(windows, unix)))]
+  {
+    let _ = proc.child.kill();
+  }
+}
+
+/// Copy raw bytes to a diagnostic file while delivering bounded display
+/// fragments to the task log. A converter that never emits newlines therefore
+/// cannot grow one in-memory line indefinitely.
+fn copy_raw_stream<R: Read, W: Write, F: FnMut(Vec<u8>, bool)>(
+  mut reader: R,
+  mut raw_file: W,
+  mut on_fragment: F,
+) -> std::io::Result<()> {
+  let mut pending = Vec::new();
+  let mut buffer = [0_u8; 8192];
+  loop {
+    let count = reader.read(&mut buffer)?;
+    if count == 0 {
+      break;
+    }
+    raw_file.write_all(&buffer[..count])?;
+    pending.extend_from_slice(&buffer[..count]);
+    loop {
+      let Some(newline) = pending.iter().position(|byte| *byte == b'\n') else {
+        break;
+      };
+      let rest = pending.split_off(newline + 1);
+      let line = std::mem::replace(&mut pending, rest);
+      emit_bounded_fragment(line, &mut on_fragment);
+    }
+    while pending.len() > MAX_DIAGNOSTIC_DISPLAY_BYTES {
+      let chunk = pending.drain(..MAX_DIAGNOSTIC_DISPLAY_BYTES).collect();
+      on_fragment(chunk, true);
+    }
+  }
+  if !pending.is_empty() {
+    emit_bounded_fragment(pending, &mut on_fragment);
+  }
+  Ok(())
+}
+
+fn emit_bounded_fragment<F: FnMut(Vec<u8>, bool)>(mut bytes: Vec<u8>, on_fragment: &mut F) {
+  while bytes.len() > MAX_DIAGNOSTIC_DISPLAY_BYTES {
+    let chunk = bytes.drain(..MAX_DIAGNOSTIC_DISPLAY_BYTES).collect();
+    on_fragment(chunk, true);
+  }
+  if !bytes.is_empty() {
+    on_fragment(bytes, false);
+  }
+}
+
+/// Read one processor JSONL record without allowing an unterminated record
+/// to grow without bound. The raw bytes are written in full for diagnostics;
+/// only the bounded prefix is returned for protocol parsing/display.
+fn read_bounded_protocol_line<R: BufRead, W: Write>(
+  reader: &mut R,
+  raw_file: &mut W,
+) -> std::io::Result<Option<(Vec<u8>, bool)>> {
+  let mut display = Vec::new();
+  let mut truncated = false;
+  loop {
+    let chunk = reader.fill_buf()?;
+    if chunk.is_empty() {
+      if display.is_empty() && !truncated {
+        return Ok(None);
+      }
+      return Ok(Some((display, truncated)));
+    }
+    let line_end = chunk.iter().position(|byte| *byte == b'\n');
+    let consume = line_end.map(|index| index + 1).unwrap_or(chunk.len());
+    raw_file.write_all(&chunk[..consume])?;
+    if display.len() < MAX_PROTOCOL_LINE_BYTES {
+      let take = (MAX_PROTOCOL_LINE_BYTES - display.len()).min(consume);
+      display.extend_from_slice(&chunk[..take]);
+      if take < consume {
+        truncated = true;
+      }
+    } else if consume > 0 {
+      truncated = true;
+    }
+    reader.consume(consume);
+    if line_end.is_some() {
+      return Ok(Some((display, truncated)));
+    }
   }
 }
 
@@ -383,14 +593,10 @@ fn run_processor_task(
     return Ok(());
   }
 
-  let bin = resolve_processor_bin().ok_or_else(|| {
-    "找不到 processor 组件。请修复安装或设置 GEOFORGE_PROCESSOR。".to_string()
-  })?;
+  let bin = resolve_processor_bin()
+    .ok_or_else(|| "找不到 processor 组件。请修复安装或设置 GEOFORGE_PROCESSOR。".to_string())?;
 
-  let _ = tasks.append_log(
-    task_id,
-    &format!("[processor] spawning {}", bin.display()),
-  );
+  let _ = tasks.append_log(task_id, &format!("[processor] spawning {}", bin.display()));
 
   let tasks_dir = data_dir.join("processor-tasks");
   std::fs::create_dir_all(&tasks_dir).map_err(|e| e.to_string())?;
@@ -408,6 +614,22 @@ fn run_processor_task(
     serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?,
   )
   .map_err(|e| e.to_string())?;
+
+  // Keep protocol stdout separate from raw diagnostics. The JSONL stream is
+  // still consumed below, while these sidecars preserve bytes that cannot be
+  // decoded for display.
+  let mut stdout_log_path = tasks.log_path_for(task_id);
+  stdout_log_path.set_extension("stdout.jsonl");
+  let mut stderr_log_path = tasks.log_path_for(task_id);
+  stderr_log_path.set_extension("stderr.log");
+  if let Some(parent) = stdout_log_path.parent() {
+    std::fs::create_dir_all(parent)
+      .map_err(|e| format!("create diagnostics directory failed: {e}"))?;
+  }
+  std::fs::File::create(&stdout_log_path)
+    .map_err(|e| format!("create processor stdout diagnostics failed: {e}"))?;
+  std::fs::File::create(&stderr_log_path)
+    .map_err(|e| format!("create processor stderr diagnostics failed: {e}"))?;
 
   let mut command = Command::new(&bin);
   command
@@ -439,21 +661,67 @@ fn run_processor_task(
     .map_err(|e| format!("spawn processor failed: {e}"))?;
 
   #[cfg(windows)]
-  let job = unsafe {
+  let (job, job_error) = unsafe {
     let h = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
     if !h.is_null() {
+      let mut limits = JobObjectExtendedLimitInformation {
+        basic_limit_information: JobObjectBasicLimitInformation {
+          per_process_user_time_limit: 0,
+          per_job_user_time_limit: 0,
+          limit_flags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+          minimum_working_set_size: 0,
+          maximum_working_set_size: 0,
+          active_process_limit: 0,
+          affinity: 0,
+          priority_class: 0,
+          scheduling_class: 0,
+        },
+        io_info: IoCounters {
+          read_operations: 0,
+          write_operations: 0,
+          other_operations: 0,
+          read_bytes: 0,
+          write_bytes: 0,
+          other_bytes: 0,
+        },
+        process_memory_limit: 0,
+        job_memory_limit: 0,
+        peak_process_memory_used: 0,
+        peak_job_memory_used: 0,
+      };
+      let configured = SetInformationJobObject(
+        h,
+        JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+        (&mut limits as *mut JobObjectExtendedLimitInformation).cast(),
+        std::mem::size_of::<JobObjectExtendedLimitInformation>() as u32,
+      );
       use std::os::windows::io::AsRawHandle;
-      let ok = AssignProcessToJobObject(h, child.as_raw_handle() as *mut _);
-      if ok == 0 {
+      if configured == 0 {
         let _ = CloseHandle(h);
-        None
+        (
+          None,
+          Some("SetInformationJobObject failed; process tree is not job-controlled"),
+        )
+      } else if AssignProcessToJobObject(h, child.as_raw_handle() as *mut _) == 0 {
+        let _ = CloseHandle(h);
+        (
+          None,
+          Some("AssignProcessToJobObject failed; process tree is not job-controlled"),
+        )
       } else {
-        Some(JobHandle(h))
+        (Some(JobHandle(h)), None)
       }
     } else {
-      None
+      (
+        None,
+        Some("CreateJobObjectW failed; process tree is not job-controlled"),
+      )
     }
   };
+  #[cfg(windows)]
+  if let Some(error) = job_error {
+    let _ = tasks.append_log(task_id, &format!("[desktop:windows] {error}"));
+  }
 
   let pid = child.id() as i64;
   let stdin = child.stdin.take();
@@ -465,9 +733,33 @@ fn run_processor_task(
   if let Some(err) = stderr {
     let tasks_c = tasks.clone();
     let tid = task_id.to_string();
+    let raw_path = stderr_log_path.clone();
     thread::spawn(move || {
-      for line in BufReader::new(err).lines().flatten() {
+      let mut raw_file = match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&raw_path)
+      {
+        Ok(file) => file,
+        Err(error) => {
+          let _ = tasks_c.append_log(
+            &tid,
+            &format!("[processor:stderr] cannot open raw diagnostics: {error}"),
+          );
+          return;
+        }
+      };
+      let result = copy_raw_stream(err, &mut raw_file, |bytes, truncated| {
+        let mut line = String::from_utf8_lossy(&bytes)
+          .trim_end_matches(['\r', '\n'])
+          .to_string();
+        if truncated {
+          line.push_str(" …<line truncated>");
+        }
         let _ = tasks_c.append_log(&tid, &format!("[processor:stderr] {line}"));
+      });
+      if let Err(error) = result {
+        let _ = tasks_c.append_log(&tid, &format!("[processor:stderr] read failed: {error}"));
       }
     });
   }
@@ -494,13 +786,37 @@ fn run_processor_task(
     t.pid = Some(pid);
     let mut prog = t.progress.as_object().cloned().unwrap_or_default();
     prog.insert("executor".into(), json!("processor"));
+    prog.insert(
+      "stdoutLogPath".into(),
+      json!(stdout_log_path.to_string_lossy().into_owned()),
+    );
+    prog.insert(
+      "stderrLogPath".into(),
+      json!(stderr_log_path.to_string_lossy().into_owned()),
+    );
     t.progress = Value::Object(prog);
   });
 
   let mut result_path: Option<String> = None;
-  let reader = BufReader::new(stdout);
-  for line in reader.lines().flatten() {
-    let line = line.trim().to_string();
+  let mut reader = BufReader::new(stdout);
+  let mut raw_stdout = std::fs::OpenOptions::new()
+    .create(true)
+    .append(true)
+    .open(&stdout_log_path)
+    .map_err(|e| {
+      force_terminate_process(mgr, task_id);
+      format!("open processor stdout diagnostics failed: {e}")
+    })?;
+  loop {
+    let Some((bytes, truncated)) = read_bounded_protocol_line(&mut reader, &mut raw_stdout)
+      .map_err(|e| {
+      force_terminate_process(mgr, task_id);
+      format!("read processor stdout failed: {e}")
+    })?
+    else {
+      break;
+    };
+    let line = String::from_utf8_lossy(&bytes).trim().to_string();
     if line.is_empty() {
       continue;
     }
@@ -508,6 +824,16 @@ fn run_processor_task(
       if t.cancel_requested && !committed.load(Ordering::SeqCst) {
         mgr.cancel(task_id);
       }
+    }
+    if truncated {
+      let _ = tasks.append_log(
+        task_id,
+        &format!(
+          "[processor:raw] protocol line exceeded {} bytes; see stdout diagnostics",
+          MAX_PROTOCOL_LINE_BYTES
+        ),
+      );
+      continue;
     }
     match serde_json::from_str::<Value>(&line) {
       Ok(ev) => {
@@ -536,11 +862,15 @@ fn run_processor_task(
 
   thread::sleep(Duration::from_millis(50));
 
-  let task_now = tasks.get(task_id)?.ok_or_else(|| "task missing".to_string())?;
+  let task_now = tasks
+    .get(task_id)?
+    .ok_or_else(|| "task missing".to_string())?;
 
   // Success + result: never rewrite to cancelled
   if exit_code == 0 && (result_path.is_some() || committed.load(Ordering::SeqCst)) {
-    let out_path = result_path.clone().unwrap_or_else(|| task_now.output.path.clone());
+    let out_path = result_path
+      .clone()
+      .unwrap_or_else(|| task_now.output.path.clone());
     let _ = tasks.update_fields(task_id, |t| {
       t.status = "succeeded".into();
       t.stage = "done".into();
@@ -618,12 +948,7 @@ fn register_or_report(
   Ok(())
 }
 
-fn apply_event(
-  tasks: &TaskStore,
-  task_id: &str,
-  ev: &Value,
-  result_path: &mut Option<String>,
-) {
+fn apply_event(tasks: &TaskStore, task_id: &str, ev: &Value, result_path: &mut Option<String>) {
   let ty = ev.get("type").and_then(|v| v.as_str()).unwrap_or("");
   match ty {
     "stage" => {
@@ -691,6 +1016,11 @@ fn apply_event(
       let msg = ev.get("message").and_then(|v| v.as_str()).unwrap_or("");
       let _ = tasks.append_log(task_id, &format!("[error:{code}] {msg}"));
       let _ = tasks.update_fields(task_id, |t| {
+        let mut prog = t.progress.as_object().cloned().unwrap_or_default();
+        prog.insert("errorCode".into(), json!(code));
+        prog.insert("errorMessage".into(), json!(msg));
+        prog.insert("failedStage".into(), json!(t.stage.clone()));
+        t.progress = Value::Object(prog);
         if code != "CANCELLED" {
           if t.error.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
             t.error = Some(msg.to_string());

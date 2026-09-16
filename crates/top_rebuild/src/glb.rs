@@ -53,11 +53,7 @@ fn parse_glb_json(glb: &[u8]) -> Result<(serde_json::Value, usize)> {
     Ok((root, json_end))
 }
 
-fn replace_glb_json(
-    glb: &[u8],
-    old_json_end: usize,
-    root: &serde_json::Value,
-) -> Result<Vec<u8>> {
+fn replace_glb_json(glb: &[u8], old_json_end: usize, root: &serde_json::Value) -> Result<Vec<u8>> {
     let mut json = serde_json::to_vec(root)?;
     while json.len() % 4 != 0 {
         json.push(b' ');
@@ -66,8 +62,8 @@ fn replace_glb_json(
         .checked_add(json.len())
         .and_then(|len| len.checked_add(glb.len().saturating_sub(old_json_end)))
         .ok_or_else(|| TopRebuildError::Other("GLB size overflow".into()))?;
-    let total_len = u32::try_from(total_len)
-        .map_err(|_| TopRebuildError::Other("GLB exceeds 4 GiB".into()))?;
+    let total_len =
+        u32::try_from(total_len).map_err(|_| TopRebuildError::Other("GLB exceeds 4 GiB".into()))?;
     let json_len = u32::try_from(json.len())
         .map_err(|_| TopRebuildError::Other("GLB JSON exceeds 4 GiB".into()))?;
 
@@ -118,8 +114,7 @@ fn legacy_material_images(glb: &[u8]) -> Result<BTreeMap<usize, usize>> {
         .flatten()
         .enumerate()
     {
-        let diffuse = material
-            .pointer("/extensions/KHR_techniques_webgl/values/u_diffuse");
+        let diffuse = material.pointer("/extensions/KHR_techniques_webgl/values/u_diffuse");
         let texture_index = diffuse
             .and_then(|value| value.as_u64())
             .or_else(|| diffuse.and_then(|value| value.get("index"))?.as_u64());
@@ -215,10 +210,7 @@ fn material_key(prim: &gltf::Primitive<'_>, tex_hash: &Option<String>) -> String
         Some(i) => {
             let m = prim.material();
             let c = m.pbr_metallic_roughness().base_color_factor();
-            format!(
-                "mat{i}:{:.3},{:.3},{:.3},{:.3}",
-                c[0], c[1], c[2], c[3]
-            )
+            format!("mat{i}:{:.3},{:.3},{:.3},{:.3}", c[0], c[1], c[2], c[3])
         }
         None => "default".into(),
     };
@@ -234,13 +226,7 @@ fn read_primitive(
     node_world: &Mat4d,
     mat_tex: &BTreeMap<usize, String>,
 ) -> Result<LoadedPrimitive> {
-    let reader = prim.reader(|buf| {
-        if buf.index() == 0 {
-            Some(blob)
-        } else {
-            None
-        }
-    });
+    let reader = prim.reader(|buf| if buf.index() == 0 { Some(blob) } else { None });
 
     let positions_iter = reader
         .read_positions()
@@ -253,8 +239,7 @@ fn read_primitive(
 
     let normals = reader.read_normals().map(|iter| {
         iter.map(|n| {
-            let (x, y, z) =
-                node_world.transform_direction(n[0] as f64, n[1] as f64, n[2] as f64);
+            let (x, y, z) = node_world.transform_direction(n[0] as f64, n[1] as f64, n[2] as f64);
             let len = (x * x + y * y + z * z).sqrt();
             if len > 1e-12 {
                 [(x / len) as f32, (y / len) as f32, (z / len) as f32]
@@ -416,7 +401,9 @@ pub fn write_glb_with_textures(
                         // hash after resize may differ — match by prefix in material_key
                         if let Some((_, rest)) = prim.material_key.split_once("#tex:") {
                             for (full, &ti) in &tex_index_by_hash {
-                                if full.starts_with(rest) || rest.starts_with(&full[..16.min(full.len())]) {
+                                if full.starts_with(rest)
+                                    || rest.starts_with(&full[..16.min(full.len())])
+                                {
                                     mat["pbrMetallicRoughness"]["baseColorTexture"] =
                                         serde_json::json!({ "index": ti });
                                     break;
@@ -429,7 +416,12 @@ pub fn write_glb_with_textures(
                 idx
             });
 
-        let pos_view = push_f32_view(&mut bin, &mut buffer_views, flatten3(&prim.positions), 34962);
+        let pos_view = push_f32_view(
+            &mut bin,
+            &mut buffer_views,
+            flatten3(&prim.positions),
+            34962,
+        );
         let (min, max) = aabb(&prim.positions);
         let pos_acc = accessors.len();
         accessors.push(serde_json::json!({
@@ -542,10 +534,7 @@ pub fn write_glb_with_textures(
 fn parse_mat_color(key: &str) -> [f64; 4] {
     let key = key.split("#tex:").next().unwrap_or(key);
     if let Some(rest) = key.split_once(':').map(|(_, r)| r) {
-        let parts: Vec<f64> = rest
-            .split(',')
-            .filter_map(|s| s.parse().ok())
-            .collect();
+        let parts: Vec<f64> = rest.split(',').filter_map(|s| s.parse().ok()).collect();
         if parts.len() == 4 {
             return [parts[0], parts[1], parts[2], parts[3]];
         }
@@ -600,7 +589,13 @@ fn push_f32_view(
 }
 
 /// Axis-aligned box centered at origin, half-extents `hx,hy,hz`, subdivided `segments` per edge.
-pub fn make_box_primitive(hx: f32, hy: f32, hz: f32, segments: u32, material_key: &str) -> LoadedPrimitive {
+pub fn make_box_primitive(
+    hx: f32,
+    hy: f32,
+    hz: f32,
+    segments: u32,
+    material_key: &str,
+) -> LoadedPrimitive {
     make_box_primitive_uv(hx, hy, hz, segments, material_key, false)
 }
 
@@ -648,8 +643,21 @@ pub fn make_box_primitive_uv(
                 } else {
                     u
                 };
-                p[a] = au * if a == 0 { hx } else if a == 1 { hy } else { hz };
-                p[b] = v * if b == 0 { hx } else if b == 1 { hy } else { hz };
+                p[a] = au
+                    * if a == 0 {
+                        hx
+                    } else if a == 1 {
+                        hy
+                    } else {
+                        hz
+                    };
+                p[b] = v * if b == 0 {
+                    hx
+                } else if b == 1 {
+                    hy
+                } else {
+                    hz
+                };
                 positions.push(p);
                 normals.push(nrm);
                 if let Some(ref mut uv) = uvs {
@@ -701,7 +709,8 @@ pub fn make_textured_box_glb(
         material_key,
         &tex.hash[..16.min(tex.hash.len())]
     );
-    let (processed, _) = crate::texture::process_textures(&[tex], tex_size.max(64), 0, false, None)?;
+    let (processed, _) =
+        crate::texture::process_textures(&[tex], tex_size.max(64), 0, false, None)?;
     write_glb_with_textures(&[prim], &processed)
 }
 
@@ -722,7 +731,8 @@ mod tests {
 
     #[test]
     fn textured_box_roundtrip() {
-        let glb = make_textured_box_glb(2.0, 2.0, 1.0, 2, "mat0:1,0,0,1", (200, 40, 40), 32).unwrap();
+        let glb =
+            make_textured_box_glb(2.0, 2.0, 1.0, 2, "mat0:1,0,0,1", (200, 40, 40), 32).unwrap();
         let mesh = load_mesh_from_glb(&glb).unwrap();
         assert!(!mesh.textures.is_empty());
         assert!(mesh.primitives[0].uvs.is_some());
@@ -732,8 +742,7 @@ mod tests {
     #[test]
     fn legacy_techniques_webgl_diffuse_texture_loads() {
         let glb =
-            make_textured_box_glb(2.0, 2.0, 1.0, 2, "mat0:1,1,1,1", (80, 120, 160), 32)
-                .unwrap();
+            make_textured_box_glb(2.0, 2.0, 1.0, 2, "mat0:1,1,1,1", (80, 120, 160), 32).unwrap();
         let (mut root, json_end) = parse_glb_json(&glb).unwrap();
         root["extensionsUsed"] = serde_json::json!([KHR_TECHNIQUES_WEBGL]);
         root["extensionsRequired"] = serde_json::json!([KHR_TECHNIQUES_WEBGL]);

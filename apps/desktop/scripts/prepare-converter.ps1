@@ -92,9 +92,9 @@ if (-not (Test-Path $exe)) {
 $p = Start-Process -FilePath $exe -ArgumentList "--help" -PassThru -WindowStyle Hidden -WorkingDirectory $src
 if (-not $p.WaitForExit(8000)) {
   try { $p.Kill() } catch {}
-  Write-Warning "_3dtile.exe --help timed out; continuing (DLL layout may still work for convert)"
-} elseif ($p.ExitCode -ne 0 -and $null -eq $p.ExitCode) {
-  Write-Warning "_3dtile.exe --help exit=$($p.ExitCode)"
+  throw "_3dtile.exe --help timed out; refusing to stage an unverified converter"
+} elseif ($p.ExitCode -ne 0) {
+  throw "_3dtile.exe --help failed with exit=$($p.ExitCode); refusing to stage an unverified converter"
 }
 
 if (Test-Path $OutDir) {

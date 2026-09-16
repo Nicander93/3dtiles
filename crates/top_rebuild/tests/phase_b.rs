@@ -61,7 +61,11 @@ fn write_block_lod4(root: &Path, name: &str) {
         "geometricError": 40.0,
         "root": nested_lod_node(&files, &ges, "REPLACE")
     });
-    fs::write(dir.join("tileset.json"), serde_json::to_string_pretty(&ts).unwrap()).unwrap();
+    fs::write(
+        dir.join("tileset.json"),
+        serde_json::to_string_pretty(&ts).unwrap(),
+    )
+    .unwrap();
 }
 
 fn write_two_tile_root(root: &Path) {
@@ -91,7 +95,11 @@ fn write_two_tile_root(root: &Path) {
             ]
         }
     });
-    fs::write(root.join("tileset.json"), serde_json::to_string_pretty(&ts).unwrap()).unwrap();
+    fs::write(
+        root.join("tileset.json"),
+        serde_json::to_string_pretty(&ts).unwrap(),
+    )
+    .unwrap();
 }
 
 fn collect_contents(node: &Value, depth: u32, out: &mut Vec<(u32, String, f64, String)>) {
@@ -153,11 +161,17 @@ fn multi_level_original_subtree_preserved() {
         assert_eq!(contents.len(), 4, "{name} lost LOD layers: {contents:?}");
         let ges: Vec<f64> = contents.iter().map(|c| c.2).collect();
         assert_eq!(ges, vec![40.0, 20.0, 10.0, 2.0], "{name} GE lost");
-        assert!(contents.iter().all(|c| c.3 == "REPLACE"), "{name} refine lost");
+        assert!(
+            contents.iter().all(|c| c.3 == "REPLACE"),
+            "{name} refine lost"
+        );
         assert_eq!(contents[0].1, "./L0.b3dm");
         assert_eq!(contents[3].1, "./L3.b3dm");
         for uri in contents.iter().map(|c| &c.1) {
-            let file = out.join("Data").join(name).join(uri.trim_start_matches("./"));
+            let file = out
+                .join("Data")
+                .join(name)
+                .join(uri.trim_start_matches("./"));
             assert!(file.is_file(), "missing {}", file.display());
             assert!(file.metadata().unwrap().len() > 32);
         }

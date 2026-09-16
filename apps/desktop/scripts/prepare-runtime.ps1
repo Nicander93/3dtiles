@@ -45,7 +45,7 @@ foreach ($name in @("processor.exe", "top_rebuild.exe")) {
 }
 
 $files = Get-ChildItem -Recurse $OutDir -File | ForEach-Object {
-  @{ path = $_.FullName.Substring($OutDir.Length).TrimStart('\', '/'); size = $_.Length }
+  @{ path = $_.FullName.Substring($OutDir.Length).TrimStart('\', '/'); size = $_.Length; sha256 = (Get-FileHash -Algorithm SHA256 -Path $_.FullName).Hash.ToLowerInvariant() }
 }
 $manifest = @{
   createdAt = (Get-Date).ToString("o")

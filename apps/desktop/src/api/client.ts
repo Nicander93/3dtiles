@@ -12,6 +12,7 @@ import type {
   Task,
   TaskStageInfo,
 } from './types';
+export { friendlyError } from './errorUtils';
 
 function resolveApiBase(): string {
   const fromEnv = (import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '');
@@ -251,7 +252,7 @@ export function normalizeTask(api: ApiTask): Task {
     input: pathOf(api.input),
     output: pathOf(api.output),
     options: api.options,
-    progress: progressNum,
+    progress: progressNum ?? progressObj,
     stage: api.stage,
     stages: deriveStages(api),
     log: api.log,
@@ -356,12 +357,6 @@ export function normalizeTaskList(data: Task[] | { tasks: Task[] } | null | unde
   if (Array.isArray(data)) return data;
   if (Array.isArray(data.tasks)) return data.tasks;
   return [];
-}
-
-export function friendlyError(err: unknown): string {
-  if (err instanceof ApiError) return err.message;
-  if (err instanceof Error) return err.message;
-  return '发生未知错误，请稍后重试。';
 }
 
 export function isActiveStatus(status: string): boolean {

@@ -235,6 +235,31 @@ export function OsgbConvert() {
     }
   }
 
+  async function pickInputDirectory() {
+    try {
+      const path = await selectInputDirectory();
+      if (path) update('input', path);
+    } catch (error) {
+      setError(friendlyError(error));
+    }
+  }
+
+  async function pickOutputParent() {
+    try {
+      const parent = await selectOutputDirectory();
+      if (!parent) return;
+      const output = suggestOutputPath(form.input, parent, '_tiles');
+      if (!output) {
+        setError('请先选择输入目录，再选择输出位置。');
+        return;
+      }
+      setOutputTouched(true);
+      update('output', output);
+    } catch (error) {
+      setError(friendlyError(error));
+    }
+  }
+
   async function handleSubmit() {
     setError(null);
     setMessage(null);
@@ -298,8 +323,10 @@ export function OsgbConvert() {
           '任务已创建'
         ),
       );
-      // Refresh output suggestion to avoid overwriting just-created output
-      setOutputTouched(false);
+      // Keep the fresh unique path fixed. Clearing this flag would let the
+      // input auto-suggest effect immediately replace it with the old `_tiles`
+      // path after the successful submission.
+      setOutputTouched(true);
       const nextOut = suggestOutputPath(form.input, defaultOutputRoot, `_tiles_${Date.now().toString(36)}`);
       if (nextOut) setForm((f) => ({ ...f, output: nextOut }));
     } catch (e) {
@@ -371,12 +398,7 @@ export function OsgbConvert() {
             onChange={(v) => update('input', v)}
             onBlur={() => void runScan(form.input)}
             onPick={
-              isTauri()
-                ? () =>
-                    void selectInputDirectory().then((p) => {
-                      if (p) update('input', p);
-                    })
-                : undefined
+              isTauri() ? () => void pickInputDirectory() : undefined
             }
             feedback={inputFeedback}
           />
@@ -541,22 +563,14 @@ export function OsgbConvert() {
 
         <FormSection title="输出">
           <PathField
-            label="输出目录"
+            label="成果目录（选择父目录后自动生成）"
             value={form.output}
             onChange={(v) => {
               setOutputTouched(true);
               update('output', v);
             }}
             onPick={
-              isTauri()
-                ? () =>
-                    void selectOutputDirectory().then((p) => {
-                      if (p) {
-                        setOutputTouched(true);
-                        update('output', p);
-                      }
-                    })
-                : undefined
+              isTauri() ? () => void pickOutputParent() : undefined
             }
           />
         </FormSection>

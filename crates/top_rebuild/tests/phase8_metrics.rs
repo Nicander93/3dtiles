@@ -58,10 +58,7 @@ fn phase8_4x4_metrics_report() {
     assert_eq!(m["budgets"]["maxTextureSize"], 128);
     assert!(m["totals"]["glb_bytes"].as_u64().unwrap() > 0);
     // With inject_test_textures, proxies should carry some texture bytes
-    assert!(
-        report.total_texture_bytes > 0,
-        "expected textured proxies"
-    );
+    assert!(report.total_texture_bytes > 0, "expected textured proxies");
     assert!(report.texture.max_dimension_after <= 128);
     println!(
         "phase8 metrics OK maxGap={:.4} P95={:.4} tex_unique={} glb_b={} path={}",

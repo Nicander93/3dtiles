@@ -87,20 +87,15 @@ fn walk_tileset(
     }
     let key = canonicalize_soft(tileset_path);
     if !visited.insert(key.clone()) {
-        return Err(ValidateError::new(
-            "TILESET_CYCLE",
-            tileset_path,
-            "cyclic tileset reference",
-        )
-        .display());
+        return Err(
+            ValidateError::new("TILESET_CYCLE", tileset_path, "cyclic tileset reference").display(),
+        );
     }
 
-    let text = fs::read_to_string(tileset_path).map_err(|e| {
-        ValidateError::new("TILESET_READ", tileset_path, e.to_string()).display()
-    })?;
-    let v: Value = serde_json::from_str(&text).map_err(|e| {
-        ValidateError::new("TILESET_JSON", tileset_path, e.to_string()).display()
-    })?;
+    let text = fs::read_to_string(tileset_path)
+        .map_err(|e| ValidateError::new("TILESET_READ", tileset_path, e.to_string()).display())?;
+    let v: Value = serde_json::from_str(&text)
+        .map_err(|e| ValidateError::new("TILESET_JSON", tileset_path, e.to_string()).display())?;
 
     if !v.is_object() {
         return Err(ValidateError::new(
@@ -113,17 +108,11 @@ fn walk_tileset(
     let asset = v.get("asset").ok_or_else(|| {
         ValidateError::new("TILESET_ASSET", tileset_path, "missing asset").display()
     })?;
-    let version = asset
-        .get("version")
-        .and_then(|x| x.as_str())
-        .unwrap_or("");
+    let version = asset.get("version").and_then(|x| x.as_str()).unwrap_or("");
     if version.is_empty() {
-        return Err(ValidateError::new(
-            "TILESET_VERSION",
-            tileset_path,
-            "asset.version required",
-        )
-        .display());
+        return Err(
+            ValidateError::new("TILESET_VERSION", tileset_path, "asset.version required").display(),
+        );
     }
     let root = v.get("root").ok_or_else(|| {
         ValidateError::new("TILESET_ROOT", tileset_path, "missing root").display()
@@ -187,7 +176,10 @@ fn visit_tile(
         )
         .display());
     }
-    check_finite_number(tile.get("geometricError"), "geometricError", base_dir)?;
+    let geometric_error = tile.get("geometricError").ok_or_else(|| {
+        ValidateError::new("BAD_NUMBER", base_dir, "geometricError required").display()
+    })?;
+    check_finite_number(Some(geometric_error), "geometricError", base_dir)?;
     if let Some(b) = tile.get("boundingVolume") {
         check_bounding_volume(b, base_dir)?;
     }
@@ -238,20 +230,14 @@ fn resolve_and_check_content(
     };
     let resolved = normalize_join(&joined);
     if !is_under_root(data_root, &resolved) {
-        return Err(ValidateError::new(
-            "PATH_ESCAPE",
-            &resolved,
-            "content URI escapes data root",
-        )
-        .display());
+        return Err(
+            ValidateError::new("PATH_ESCAPE", &resolved, "content URI escapes data root").display(),
+        );
     }
     if !resolved.is_file() {
-        return Err(ValidateError::new(
-            "MISSING_CONTENT",
-            &resolved,
-            "referenced file missing",
-        )
-        .display());
+        return Err(
+            ValidateError::new("MISSING_CONTENT", &resolved, "referenced file missing").display(),
+        );
     }
 
     let lower = resolved
@@ -275,7 +261,7 @@ fn resolve_and_check_content(
             let data = fs::read(&resolved).map_err(|e| e.to_string())?;
             check_glb_bytes(&resolved, &data)?;
         }
-        "gltf" => check_gltf_external(&resolved)?,
+        "gltf" => check_gltf_external(data_root, &resolved)?,
         "i3dm" | "pnts" | "cmpt" => {
             emitter.log(&format!(
                 "[validate] skip deep check for .{ext}: {}",
@@ -303,45 +289,63 @@ fn looks_like_external_tileset(path: &Path) -> bool {
 }
 
 fn check_finite_number(v: Option<&Value>, name: &str, ctx: &Path) -> Result<(), String> {
-    if let Some(n) = v.and_then(|x| x.as_f64()) {
+    if let Some(value) = v {
+        let n = value.as_f64().ok_or_else(|| {
+            ValidateError::new("BAD_NUMBER", ctx, format!("{name} must be a number")).display()
+        })?;
         if !n.is_finite() {
-            return Err(ValidateError::new(
-                "BAD_NUMBER",
-                ctx,
-                format!("{name} must be finite"),
-            )
-            .display());
+            return Err(
+                ValidateError::new("BAD_NUMBER", ctx, format!("{name} must be finite")).display(),
+            );
         }
     }
     Ok(())
 }
 
 fn check_bounding_volume(b: &Value, ctx: &Path) -> Result<(), String> {
-    if let Some(boxv) = b.get("box").and_then(|x| x.as_array()) {
-        if boxv.len() != 12 {
-            return Err(ValidateError::new("BAD_BOUNDS", ctx, "box must have 12 values").display());
+    let object = b.as_object().ok_or_else(|| {
+        ValidateError::new("BAD_BOUNDS", ctx, "boundingVolume must be an object").display()
+    })?;
+    let variants = ["box", "region", "sphere"]
+        .iter()
+        .filter(|key| object.contains_key(**key))
+        .count();
+    if variants != 1 {
+        return Err(ValidateError::new(
+            "BAD_BOUNDS",
+            ctx,
+            "boundingVolume must contain exactly one of box, region, sphere",
+        )
+        .display());
+    }
+    for (key, expected) in [("box", 12usize), ("region", 6), ("sphere", 4)] {
+        let Some(value) = object.get(key) else {
+            continue;
+        };
+        let values = value.as_array().ok_or_else(|| {
+            ValidateError::new("BAD_BOUNDS", ctx, format!("{key} must be an array")).display()
+        })?;
+        if values.len() != expected {
+            return Err(ValidateError::new(
+                "BAD_BOUNDS",
+                ctx,
+                format!("{key} must have {expected} values"),
+            )
+            .display());
         }
-        for n in boxv {
-            let f = n.as_f64().ok_or_else(|| {
-                ValidateError::new("BAD_BOUNDS", ctx, "box values must be numbers").display()
+        for value in values {
+            let number = value.as_f64().ok_or_else(|| {
+                ValidateError::new("BAD_BOUNDS", ctx, format!("{key} values must be numbers"))
+                    .display()
             })?;
-            if !f.is_finite() {
-                return Err(ValidateError::new("BAD_BOUNDS", ctx, "box has non-finite").display());
+            if !number.is_finite() {
+                return Err(ValidateError::new(
+                    "BAD_BOUNDS",
+                    ctx,
+                    format!("{key} has non-finite value"),
+                )
+                .display());
             }
-        }
-    }
-    if let Some(region) = b.get("region").and_then(|x| x.as_array()) {
-        if region.len() != 6 {
-            return Err(
-                ValidateError::new("BAD_BOUNDS", ctx, "region must have 6 values").display(),
-            );
-        }
-    }
-    if let Some(sphere) = b.get("sphere").and_then(|x| x.as_array()) {
-        if sphere.len() != 4 {
-            return Err(
-                ValidateError::new("BAD_BOUNDS", ctx, "sphere must have 4 values").display(),
-            );
         }
     }
     Ok(())
@@ -409,12 +413,9 @@ fn check_b3dm(path: &Path) -> Result<(), String> {
         .and_then(|x| x.checked_add(bt_bin))
         .ok_or_else(|| ValidateError::new("B3DM_TABLES", path, "table size overflow").display())?;
     if tables > file_len {
-        return Err(ValidateError::new(
-            "B3DM_TABLES",
-            path,
-            "feature/batch tables exceed file",
-        )
-        .display());
+        return Err(
+            ValidateError::new("B3DM_TABLES", path, "feature/batch tables exceed file").display(),
+        );
     }
     // Read embedded GLB if present
     let data = fs::read(path).map_err(|e| e.to_string())?;
@@ -468,13 +469,13 @@ fn check_glb_bytes(path: &Path, glb: &[u8]) -> Result<(), String> {
         .checked_add(json_len)
         .filter(|e| *e <= glb.len())
         .ok_or_else(|| ValidateError::new("GLB_JSON", path, "JSON chunk OOB").display())?;
-    let root: Value = serde_json::from_slice(&glb[20..json_end]).map_err(|e| {
-        ValidateError::new("GLB_JSON", path, e.to_string()).display()
-    })?;
+    let root: Value = serde_json::from_slice(&glb[20..json_end])
+        .map_err(|e| ValidateError::new("GLB_JSON", path, e.to_string()).display())?;
     let bin_start = if json_end < glb.len() {
         // optional BIN chunk
         if json_end + 8 <= glb.len() && &glb[json_end + 4..json_end + 8] == b"BIN\0" {
-            let bin_len = u32::from_le_bytes(glb[json_end..json_end + 4].try_into().unwrap()) as usize;
+            let bin_len =
+                u32::from_le_bytes(glb[json_end..json_end + 4].try_into().unwrap()) as usize;
             let bin_data_start = json_end + 8;
             let bin_data_end = bin_data_start
                 .checked_add(bin_len)
@@ -490,10 +491,7 @@ fn check_glb_bytes(path: &Path, glb: &[u8]) -> Result<(), String> {
 
     if let Some(views) = root.get("bufferViews").and_then(|v| v.as_array()) {
         for (i, view) in views.iter().enumerate() {
-            let offset = view
-                .get("byteOffset")
-                .and_then(|x| x.as_u64())
-                .unwrap_or(0) as usize;
+            let offset = view.get("byteOffset").and_then(|x| x.as_u64()).unwrap_or(0) as usize;
             let length = view
                 .get("byteLength")
                 .and_then(|x| x.as_u64())
@@ -506,12 +504,10 @@ fn check_glb_bytes(path: &Path, glb: &[u8]) -> Result<(), String> {
                     .display()
                 })? as usize;
             if let Some((bs, be)) = bin_start {
-                let end = offset
-                    .checked_add(length)
-                    .ok_or_else(|| {
-                        ValidateError::new("BUFFER_VIEW", path, format!("bufferView[{i}] overflow"))
-                            .display()
-                    })?;
+                let end = offset.checked_add(length).ok_or_else(|| {
+                    ValidateError::new("BUFFER_VIEW", path, format!("bufferView[{i}] overflow"))
+                        .display()
+                })?;
                 let bin_len = be - bs;
                 if end > bin_len {
                     return Err(ValidateError::new(
@@ -527,7 +523,7 @@ fn check_glb_bytes(path: &Path, glb: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-fn check_gltf_external(path: &Path) -> Result<(), String> {
+fn check_gltf_external(data_root: &Path, path: &Path) -> Result<(), String> {
     let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
     let root: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
@@ -545,7 +541,15 @@ fn check_gltf_external(path: &Path) -> Result<(), String> {
                     )
                     .display());
                 }
-                let p = base.join(uri);
+                let p = normalize_join(&base.join(uri));
+                if !is_under_root(data_root, &p) {
+                    return Err(ValidateError::new(
+                        "PATH_ESCAPE",
+                        &p,
+                        format!("gltf buffer[{i}] escapes data root"),
+                    )
+                    .display());
+                }
                 if !p.is_file() {
                     return Err(ValidateError::new(
                         "MISSING_BUFFER",
@@ -571,7 +575,15 @@ fn check_gltf_external(path: &Path) -> Result<(), String> {
                     )
                     .display());
                 }
-                let p = base.join(uri);
+                let p = normalize_join(&base.join(uri));
+                if !is_under_root(data_root, &p) {
+                    return Err(ValidateError::new(
+                        "PATH_ESCAPE",
+                        &p,
+                        format!("gltf image[{i}] escapes data root"),
+                    )
+                    .display());
+                }
                 if !p.is_file() {
                     return Err(ValidateError::new(
                         "MISSING_IMAGE",
@@ -583,10 +595,7 @@ fn check_gltf_external(path: &Path) -> Result<(), String> {
             }
         }
     }
-    if let Some(req) = root
-        .get("extensionsRequired")
-        .and_then(|e| e.as_array())
-    {
+    if let Some(req) = root.get("extensionsRequired").and_then(|e| e.as_array()) {
         for ext in req {
             let name = ext.as_str().unwrap_or("");
             if name == "KHR_draco_mesh_compression" {
@@ -641,7 +650,10 @@ fn is_under_root(root: &Path, child: &Path) -> bool {
         normalize_join(child)
     };
     #[cfg(windows)]
-    let eq = |a: &Path, b: &Path| a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy());
+    let eq = |a: &Path, b: &Path| {
+        a.to_string_lossy()
+            .eq_ignore_ascii_case(&b.to_string_lossy())
+    };
     #[cfg(not(windows))]
     let eq = |a: &Path, b: &Path| a == b;
 
@@ -678,14 +690,13 @@ mod tests {
     #[test]
     fn rejects_missing_root() {
         let dir = tmp();
-        fs::write(
-            dir.join("tileset.json"),
-            r#"{"asset":{"version":"1.0"}}"#,
-        )
-        .unwrap();
+        fs::write(dir.join("tileset.json"), r#"{"asset":{"version":"1.0"}}"#).unwrap();
         let e = Emitter::new("t");
         let err = validate_tileset_dir(&e, &dir).unwrap_err();
-        assert!(err.contains("TILESET_ROOT") || err.contains("missing root"), "{err}");
+        assert!(
+            err.contains("TILESET_ROOT") || err.contains("missing root"),
+            "{err}"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -724,6 +735,37 @@ mod tests {
         let e = Emitter::new("t");
         let err = validate_tileset_dir(&e, &dir).unwrap_err();
         assert!(err.contains("MISSING_CONTENT"), "{err}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rejects_invalid_bounding_volume_shape() {
+        let dir = tmp();
+        let tileset = r#"{"asset":{"version":"1.0"},"root":{"geometricError":1,"boundingVolume":{"box":[0,1]}}}"#;
+        fs::write(dir.join("tileset.json"), tileset).unwrap();
+        let e = Emitter::new("t");
+        let err = validate_tileset_dir(&e, &dir).unwrap_err();
+        assert!(err.contains("BAD_BOUNDS"), "{err}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rejects_gltf_external_path_escape() {
+        let dir = tmp();
+        fs::write(dir.join("outside.bin"), b"outside").unwrap();
+        fs::write(
+            dir.join("nested.gltf"),
+            r#"{"asset":{"version":"2.0"},"buffers":[{"uri":"../outside.bin","byteLength":7}]}"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.join("tileset.json"),
+            r#"{"asset":{"version":"1.0"},"root":{"geometricError":1,"content":{"uri":"nested.gltf"}}}"#,
+        )
+        .unwrap();
+        let e = Emitter::new("t");
+        let err = validate_tileset_dir(&e, &dir).unwrap_err();
+        assert!(err.contains("PATH_ESCAPE"), "{err}");
         let _ = fs::remove_dir_all(&dir);
     }
 
