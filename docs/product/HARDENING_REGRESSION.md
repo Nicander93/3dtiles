@@ -30,7 +30,7 @@
 | 06 | 开发 CLI | 隔离 synthetic grid 4×4（以有效 B3DM 替换零字节占位） | `processor.exe process-tileset --rebuild-top --levels 2 --texture keep` | `.tmp-hardening-grid4-output` | 通过 | 0 | processor JSONL | 完成 scan→rebuild→validate→commit；输出含 `tileset.json`、`rebuild_metrics.json` 和 4 个 proxy L1/1 个 proxy L2；不是 OSGB 验收 |
 | 07 | 开发前端 | 纯函数回归 | `npm test` | — | 通过 | 0 | npm stdout | 覆盖错误文本、输出目录建议、路径比较和真实进度计算；不替代安装版验收 |
 | 08 | 开发前端 | 按锁文件干净安装 | `npm ci --no-audit --no-fund`（临时工作区缓存） | — | 通过 | 0 | npm stdout | 随后重新执行 `npm test` 与 `npm run build`；未修改 package-lock；不替代安装版验收 |
-| 09 | 开发 CLI/Tauri | 健壮性回归 | `cargo test`；Tauri `cargo test --lib` | — | 通过 | 0 | cargo stdout | processor 27 项、workspace 90 项、Tauri 7 项；新增协议行上限、marker 归属、Tileset 边界、GLTF 路径越界和分块取消检查 |
+| 09 | 开发 CLI/Tauri | 健壮性回归 | `cargo test`；Tauri `cargo test --lib` | — | 通过 | 0 | cargo stdout | processor 27 项、workspace 90 项、Tauri 8 项；新增协议行上限、marker 归属、Tileset 边界、GLTF 路径越界和分块取消检查 |
 | 10 | 开发 CLI | 隔离 synthetic grid 4×4（替换零字节 B3DM） | `processor.exe process-tileset --rebuild-top --levels 2 --texture keep` | 临时目录（已清理） | 通过 | 0 | processor JSONL | 在新增 geometricError/boundingVolume/GLTF 越界校验后重跑；scan→rebuild→validate→commit 全部通过；不替代真实 OSGB/安装版验收 |
 | 11 | 发布脚本 | PowerShell 语法与门槛检查 | `Parser.ParseFile` 检查 `prepare-converter.ps1`、`prepare-runtime.ps1`、`package-windows.ps1` | — | 通过 | 0 | PowerShell stdout | converter help 非零/超时现在阻止 staging；runtime manifest 含 SHA256；未执行真实 installer |
 | 12 | converter 源码 | FFI 参数边界审查 | `cargo metadata --no-deps`；`git diff --check`；审查 `osgb23dtile_path`/`osgb2glb` | — | 通过 | — | — | 入口拒绝空指针、负层级、非有限坐标；JSON 返回检查空值、`int` 长度上限和分配失败 |

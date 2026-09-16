@@ -90,7 +90,7 @@ cargo check                         通过
 cargo test -p geoforge-protocol     通过
 cargo test                            90 项通过（16 suites）
 cargo test -p processor --lib        27 项通过
-desktop Tauri cargo test --lib      7 项通过
+desktop Tauri cargo test --lib      8 项通过
 npm test                             通过（纯函数回归）
 npm run build                        通过
 desktop Tauri cargo check (Windows target) 通过
