@@ -96,6 +96,40 @@ mod tests {
   }
 }
 
+#[cfg(all(test, windows))]
+mod windows_job_tests {
+  use super::attach_job_object;
+  use std::process::Command;
+  use std::thread;
+  use std::time::{Duration, Instant};
+
+  #[test]
+  fn kill_on_close_terminates_attached_processor_child() {
+    let started = Instant::now();
+    let mut child = Command::new("cmd.exe")
+      .args(["/C", "ping.exe 127.0.0.1 -n 30 > NUL"])
+      .spawn()
+      .expect("spawn Windows child for Job Object smoke test");
+    let (job, error) = attach_job_object(&child);
+    assert!(error.is_none(), "Job Object setup failed: {error:?}");
+    drop(job);
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+      if let Some(status) = child.try_wait().expect("poll child after job close") {
+        let elapsed = started.elapsed();
+        assert!(
+          elapsed < Duration::from_secs(3),
+          "child exited too slowly after Job Object close: {elapsed:?} (status {status:?})"
+        );
+        break;
+      }
+      assert!(Instant::now() < deadline, "Job Object did not terminate child");
+      thread::sleep(Duration::from_millis(25));
+    }
+  }
+}
+
 #[cfg(windows)]
 #[repr(C)]
 struct JobObjectBasicLimitInformation {
@@ -388,6 +422,67 @@ const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: u32 = 9;
 #[cfg(windows)]
 const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
 
+#[cfg(windows)]
+fn attach_job_object(child: &Child) -> (Option<JobHandle>, Option<&'static str>) {
+  use std::os::windows::io::AsRawHandle;
+
+  unsafe {
+    let h = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
+    if h.is_null() {
+      return (
+        None,
+        Some("CreateJobObjectW failed; process tree is not job-controlled"),
+      );
+    }
+    let mut limits = JobObjectExtendedLimitInformation {
+      basic_limit_information: JobObjectBasicLimitInformation {
+        per_process_user_time_limit: 0,
+        per_job_user_time_limit: 0,
+        limit_flags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        minimum_working_set_size: 0,
+        maximum_working_set_size: 0,
+        active_process_limit: 0,
+        affinity: 0,
+        priority_class: 0,
+        scheduling_class: 0,
+      },
+      io_info: IoCounters {
+        read_operations: 0,
+        write_operations: 0,
+        other_operations: 0,
+        read_bytes: 0,
+        write_bytes: 0,
+        other_bytes: 0,
+      },
+      process_memory_limit: 0,
+      job_memory_limit: 0,
+      peak_process_memory_used: 0,
+      peak_job_memory_used: 0,
+    };
+    let configured = SetInformationJobObject(
+      h,
+      JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+      (&mut limits as *mut JobObjectExtendedLimitInformation).cast(),
+      std::mem::size_of::<JobObjectExtendedLimitInformation>() as u32,
+    );
+    if configured == 0 {
+      let _ = CloseHandle(h);
+      (
+        None,
+        Some("SetInformationJobObject failed; process tree is not job-controlled"),
+      )
+    } else if AssignProcessToJobObject(h, child.as_raw_handle() as *mut _) == 0 {
+      let _ = CloseHandle(h);
+      (
+        None,
+        Some("AssignProcessToJobObject failed; process tree is not job-controlled"),
+      )
+    } else {
+      (Some(JobHandle(h)), None)
+    }
+  }
+}
+
 #[cfg(unix)]
 fn libc_kill(pid: i32, sig: i32) {
   extern "C" {
@@ -661,63 +756,7 @@ fn run_processor_task(
     .map_err(|e| format!("spawn processor failed: {e}"))?;
 
   #[cfg(windows)]
-  let (job, job_error) = unsafe {
-    let h = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
-    if !h.is_null() {
-      let mut limits = JobObjectExtendedLimitInformation {
-        basic_limit_information: JobObjectBasicLimitInformation {
-          per_process_user_time_limit: 0,
-          per_job_user_time_limit: 0,
-          limit_flags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-          minimum_working_set_size: 0,
-          maximum_working_set_size: 0,
-          active_process_limit: 0,
-          affinity: 0,
-          priority_class: 0,
-          scheduling_class: 0,
-        },
-        io_info: IoCounters {
-          read_operations: 0,
-          write_operations: 0,
-          other_operations: 0,
-          read_bytes: 0,
-          write_bytes: 0,
-          other_bytes: 0,
-        },
-        process_memory_limit: 0,
-        job_memory_limit: 0,
-        peak_process_memory_used: 0,
-        peak_job_memory_used: 0,
-      };
-      let configured = SetInformationJobObject(
-        h,
-        JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
-        (&mut limits as *mut JobObjectExtendedLimitInformation).cast(),
-        std::mem::size_of::<JobObjectExtendedLimitInformation>() as u32,
-      );
-      use std::os::windows::io::AsRawHandle;
-      if configured == 0 {
-        let _ = CloseHandle(h);
-        (
-          None,
-          Some("SetInformationJobObject failed; process tree is not job-controlled"),
-        )
-      } else if AssignProcessToJobObject(h, child.as_raw_handle() as *mut _) == 0 {
-        let _ = CloseHandle(h);
-        (
-          None,
-          Some("AssignProcessToJobObject failed; process tree is not job-controlled"),
-        )
-      } else {
-        (Some(JobHandle(h)), None)
-      }
-    } else {
-      (
-        None,
-        Some("CreateJobObjectW failed; process tree is not job-controlled"),
-      )
-    }
-  };
+  let (job, job_error) = attach_job_object(&child);
   #[cfg(windows)]
   if let Some(error) = job_error {
     let _ = tasks.append_log(task_id, &format!("[desktop:windows] {error}"));

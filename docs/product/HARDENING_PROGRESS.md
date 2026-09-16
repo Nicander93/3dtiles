@@ -16,7 +16,7 @@
 | H08 | 已完成（本机候选构建） | OSG `OSG_USE_UTF8_FILENAME` 路径修复、URI/JSON 修改已进入候选 runtime；真实中文输入/输出目录转换通过 |
 | H09 | 未触发 | 尚未取得同一新 binary 的原生崩溃证据 |
 | H10 | 本机候选已验证，正式发布待更新 | 本机候选 runtime 已通过 `--help`、负向输入、真实 OSGB 和 NSIS 临时安装；固定清单仍保留已发布 SHA256，待发布新 converter 后再更新 |
-| H11 | 代码完成，processor 取消已验证 | 大样本 CLI 取消返回 `CANCELLED`，无最终/临时目录和残留进程；桌面关闭后的 Job Object 进程树测试仍待单独验收 |
+| H11 | Job Object 单元测试完成，桌面关闭场景待验收 | Windows unit test 直接验证 `KILL_ON_JOB_CLOSE` 会在 3 秒内结束附着子进程；大样本 CLI 取消无最终/临时目录和残留进程；完整 GUI 关闭/多级子进程仍待安装版验收 |
 | H12 | 已完成 | 文件 tail 有界并处理 UTF-8 边界 |
 | H13 | 已完成 | scanner/layout/capabilities 单测和 smoke 通过 |
 | H14 | 代码完成，已取得大样本取消/收尾证据 | 磁盘、线程、峰值内存指标已接入；约 932 MB/4567 Tile 样本取消后无残留；完整成功资源曲线、权限/磁盘故障注入仍待执行 |
@@ -76,6 +76,7 @@
 - 对已存在成果目录执行输出安全回归：返回 `PATH_OUTPUT_EXISTS`（退出码 1），sentinel 内容保持不变且未创建 `tileset.json`；使用极高 `GEOFORGE_LOW_DISK_BYTES` 做受控阈值回归时发出 `LOW_DISK_SPACE` warning，仍能完成小样本提交（详见回归 22–23）。
 - 将输出父路径设为已有普通文件时，processor 返回 `PATH_OUTPUT_NOT_WRITABLE`（退出码 1），未创建子目录且原文件内容保持不变；真实 ACL 拒绝写入仍需安装版测试（回归 25）。
 - 扫描负向 fixture：缺失 `metadata.xml` 与未闭合 XML 均在转换前返回 `valid=false`、退出码 1，并保留具体路径/解析错误（回归 26–27）。
+- Desktop Rust Windows unit test 直接覆盖 Job Object kill-on-close：附着 30 秒测试子进程后关闭 Job，子进程在 3 秒内退出，8 项桌面库测试全部通过（回归 28）。
 
 验证命令：
 

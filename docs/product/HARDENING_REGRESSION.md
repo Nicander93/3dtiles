@@ -49,6 +49,7 @@
 | 25 | processor 本机 Release runtime | 输出父路径实际为文件 | `convert-osgb --output safety-checks\\not-a-directory\\child` | `.cache\\safety-checks\\not-a-directory` | 通过（拒绝） | 1 | stdout JSONL | 返回 `PATH_OUTPUT_NOT_WRITABLE`，父文件和内容保持不变，未创建 child；真实 ACL 无写权限仍待安装版人工验收 |
 | 26 | processor 本机 CLI | 缺少 `metadata.xml` | `scan-osgb --path .cache\\scan-negative\\missing-metadata` | — | 通过（拒绝） | 1 | stdout JSON | `valid=false`，错误明确包含 `Missing metadata.xml`，未进入转换 |
 | 27 | processor 本机 CLI | 损坏 `metadata.xml` | `scan-osgb --path .cache\\scan-negative\\broken-metadata` | — | 通过（拒绝） | 1 | stdout JSON | `valid=false`，错误明确包含 `XML parse error: unclosed tag <SRS>`，未进入转换 |
+| 28 | Desktop Rust Windows unit test | Job Object kill-on-close | `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib --locked` | — | 通过 | 0（8/8） | cargo stdout | 直接调用桌面实际 Job Object 绑定，关闭 Job 后 30 秒 `cmd/ping` 子进程在 3 秒内结束；不是完整 GUI 关闭验收 |
 
 ## 单次记录模板
 
