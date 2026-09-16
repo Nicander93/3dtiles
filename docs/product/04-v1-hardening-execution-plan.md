@@ -1,6 +1,6 @@
 # GeoForge V1 可用性与健壮性执行计划
 
-日期：2026-09-15。主仓库审阅基线：`4b72121`；相邻 converter 源码基线：`9f0629b`。
+日期：2026-09-15。初始审阅基线：主仓库 `4b72121`、相邻 converter `9f0629b`；本轮实施提交：主仓库 `e23d604`、converter `76ef4d6`。
 
 本计划结合用户提供的《03-v1-hardening-and-release-plan-v2.md》、崩溃建议截图及当前源码编制。附件中的实现建议作为待核对材料，不代表已经验证的原因。随后已按任务卡执行主仓库和桌面端的可重复验证，并完成 H02–H08、H11–H15 的代码改动；H07/H08 已在本机 MSVC/vcpkg 环境构建出候选 converter，修复 OSG UTF-8 输入路径，并完成真实 OSGB、10 次重复、本地 Cesium 页面和临时 NSIS 安装验收。正式发布、安装桌面 WebView、桌面关闭/Job Object 及当前用户失败样本仍单独列为待完成项，详见 `HARDENING_PROGRESS.md` 与 `RELEASE_ACCEPTANCE.md`。
 

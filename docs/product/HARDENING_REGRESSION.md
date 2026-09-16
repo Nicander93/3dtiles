@@ -6,10 +6,10 @@
 
 | 项目 | 值 |
 | --- | --- |
-| GeoForge commit | `4b721218b347ffe8e7bd2ddf8c8325c39a26364e` |
+| GeoForge commit | `e23d60476abbd651b12cb4fa82098013d5f6b6d4` |
 | GeoForge 版本 | `0.1.0`（仓库/桌面配置） |
 | Processor 路径 | `D:\\code\\3dtiles\\target\\debug\\processor.exe` |
-| Converter 版本 / source commit | `0.1.0` / `9f0629b7bad467296133b59fde75430c69d44dbf`（源码基线 + 本地未提交 hardening diff） |
+| Converter 版本 / source commit | `0.1.0` / `76ef4d6ce419c675c9742ed13cf600d74ca5c78e`（本机候选构建） |
 | Converter SHA256 | 本机候选 runtime `_3dtile.exe`: `7da792b3ecc51176bc829cb317da97c77f86fbfd34806c41ceb471b0e47fe2e7`; 固定发布清单值为 `77cadd01941add0297a52a22ce26918d8d22c3729a0ae564556fce14327b5c5b`，两者不一致，不能宣称已更新正式发布包 |
 | Runtime 根目录 | `D:\\code\\3dtiles\\dist\\runtime`（本机候选，converter `--help` 返回 0；已完成临时 NSIS 安装验收） |
 | Installer SHA256 | 本机候选 `GeoForge 3D_0.1.0_x64-setup.exe`: `04c2cb84c94a18692945fd33d9628d99074bdd00f2cd53b1cbdebb2c19359da0` |
