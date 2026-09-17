@@ -91,6 +91,7 @@
 - 损坏子 Tile 回归确认 converter 和 processor 都严格失败：具体读取错误进入 stderr tail，返回 `CONVERTER_EXIT_NONZERO`，最终目录和 `tileset.json` 不存在（回归 42）。
 - 运行中强制终止 converter 的回归通过：processor 返回 `CONVERTER_EXIT_NONZERO`，保留 `convert exited -1`、stderr tail 和任务日志，最终目录不存在且无残留进程（回归 44）。
 - 发布脚本新增可选 `-ConverterZip` 参数并完成回归：弱 Agent 可用本地候选 zip 重复生成 runtime 和 SHA256 manifest，默认正式 URL/SHA256 流程不变（回归 45）。
+- 发布脚本将 `-ConverterZip` 和 `-OutDir` 规范化为绝对路径，排除旧 `manifest.json` 自引用，并在 manifest 中标记本地候选来源；从 `apps/desktop` 工作目录使用相对参数的 staging 回归通过（回归 46）。
 
 验证命令：
 

@@ -17,6 +17,7 @@ $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..\..")
 if (-not $OutDir) {
   $OutDir = Join-Path $RepoRoot "dist\runtime"
 }
+$OutDir = [System.IO.Path]::GetFullPath($OutDir)
 
 Write-Host "Repo: $RepoRoot"
 Write-Host "Out: $OutDir"
@@ -36,8 +37,14 @@ $converterArgs = @(
   "-File", (Join-Path $PSScriptRoot "prepare-converter.ps1"),
   "-OutDir", $ConverterOut
 )
+$converterSourceNote = "Converter comes from third_party/3dtiles-converter.json Release; no local OSG/vcpkg build."
 if ($ConverterZip) {
-  $converterArgs += @("-LocalZip", $ConverterZip)
+  $resolvedConverterZip = Resolve-Path -LiteralPath $ConverterZip -ErrorAction Stop
+  if ((Get-Item -LiteralPath $resolvedConverterZip.Path).PSIsContainer) {
+    throw "ConverterZip must be a file: $($resolvedConverterZip.Path)"
+  }
+  $converterArgs += @("-LocalZip", $resolvedConverterZip.Path)
+  $converterSourceNote = "Converter comes from a caller-supplied local zip via -ConverterZip."
 }
 & pwsh -NoProfile @converterArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -52,7 +59,10 @@ foreach ($name in @("processor.exe", "top_rebuild.exe")) {
   Copy-Item -Force $src (Join-Path $ProductBin $name)
 }
 
-$files = Get-ChildItem -Recurse $OutDir -File | ForEach-Object {
+$ManifestPath = Join-Path $OutDir "manifest.json"
+$files = Get-ChildItem -Recurse $OutDir -File |
+  Where-Object { $_.FullName -ne $ManifestPath } |
+  ForEach-Object {
   @{ path = $_.FullName.Substring($OutDir.Length).TrimStart('\', '/'); size = $_.Length; sha256 = (Get-FileHash -Algorithm SHA256 -Path $_.FullName).Hash.ToLowerInvariant() }
 }
 $manifest = @{
@@ -60,7 +70,7 @@ $manifest = @{
   platform = "windows-x64"
   converterExe = "converter/_3dtile.exe"
   files = $files
-  notes = "Converter comes from third_party/3dtiles-converter.json Release; no local OSG/vcpkg build."
+  notes = $converterSourceNote
 }
-$manifest | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 (Join-Path $OutDir "manifest.json")
+$manifest | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 $ManifestPath
 Write-Host "Runtime staged at $OutDir"
