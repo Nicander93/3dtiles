@@ -7,7 +7,7 @@
 - [x] 根仓库 `cargo test` 通过（90 项，16 suites）。
 - [x] `apps/desktop` 前端 `npm ci && npm test && npm run build` 通过（2026-09-16；`npm ci` 使用工作区临时缓存，未修改 lockfile）。
 - [x] 干净安装后的 `npm test` 和 `npm run build` 通过。
-- [x] Desktop Tauri library 测试通过（10 项，包含关闭清理、Job Object 和启动恢复回归）；关闭事件同时覆盖 `CloseRequested`/`Destroyed` 并显式退出应用，安装版完整 WebView 点击验收仍保留为人工项。
+- [x] Desktop Tauri library 测试通过（11 项，包含关闭清理、Job Object、启动恢复和错误诊断回归）；关闭事件同时覆盖 `CloseRequested`/`Destroyed` 并显式退出应用，安装版完整 WebView 点击验收仍保留为人工项。
 - [x] Desktop Windows target `cargo check` 通过。
 - [x] `processor capabilities --json` 能报告 converter、top_rebuild 和纹理能力。
 - [x] `git diff --check` 通过。
