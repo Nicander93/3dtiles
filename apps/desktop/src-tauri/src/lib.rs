@@ -96,3 +96,25 @@ pub fn run() {
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }
+
+#[cfg(test)]
+mod capability_tests {
+  const DEFAULT_CAPABILITY: &str = include_str!("../capabilities/default.json");
+  const COMMAND_PERMISSIONS: &str = include_str!("../permissions/path-dialogs.toml");
+
+  #[test]
+  fn default_capability_allows_runtime_inspection_commands() {
+    assert!(DEFAULT_CAPABILITY.contains("\"allow-runtime-inspection\""));
+    for command in [
+      "health",
+      "capabilities",
+      "get_resource_server_info",
+      "scan_osgb",
+    ] {
+      assert!(
+        COMMAND_PERMISSIONS.contains(&format!("\"{command}\"")),
+        "runtime command missing from ACL: {command}"
+      );
+    }
+  }
+}

@@ -39,3 +39,13 @@ commands.allow = [
 identifier = "allow-settings"
 description = "Settings get/update"
 commands.allow = ["get_settings", "update_settings"]
+
+[[permission]]
+identifier = "allow-runtime-inspection"
+description = "Runtime health, capabilities, resource server info, and OSGB input inspection"
+commands.allow = [
+  "health",
+  "capabilities",
+  "get_resource_server_info",
+  "scan_osgb"
+]

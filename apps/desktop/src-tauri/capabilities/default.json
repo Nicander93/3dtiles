@@ -11,6 +11,7 @@
     "allow-select-tileset-file",
     "allow-task-store",
     "allow-artifact-store",
-    "allow-settings"
+    "allow-settings",
+    "allow-runtime-inspection"
   ]
 }
