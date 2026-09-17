@@ -22,6 +22,7 @@
 - [x] 同一最新候选成果完成 `rebuild-top --levels 0 --texture keep`→validate→commit；退出码 0，耗时 73,910 ms，输出 11,208 个文件，85/85 个 content URI 可解析（回归 41）。
 - [x] 最新 converter Rust 候选（commit `219b29b`）完成 Release 构建；发布脚本用本地候选 zip 完成 converter/runtime staging，`--help` 返回 0，manifest 不包含自身，真实 OSGB 转换返回 0，损坏输入返回 1（回归 48）。
 - [x] converter `d06a495` 对有效 EPSG:4544 原点完成转换；投影域外原点返回明确 `OSGB_EPSG_TRANSFORM_FAILED`，processor 退出 1 且不提交最终目录（回归 49）。
+- [x] 最新候选 v2 已重新打包 NSIS；安装到隔离目录后可启动并创建 `tasks.db`，安装内 converter `--help` 与真实 OSGB 转换成功，强制结束后无残留进程（回归 52）。
 
 ## Windows 安装验收
 

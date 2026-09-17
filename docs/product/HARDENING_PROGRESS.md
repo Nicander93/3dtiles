@@ -15,7 +15,7 @@
 | H07 | 已完成（本机候选构建） | converter Rust/C++ 修改已用 MSVC 18.6.2 + vcpkg x64-windows 构建；最新地理参考错误处理候选已通过 `cargo check`、Release 构建、真实 OSGB、EPSG:4544 和损坏输入负向回归 |
 | H08 | 已完成（本机候选构建） | OSG `OSG_USE_UTF8_FILENAME` 路径修复、URI/JSON 修改已进入候选 runtime；真实中文输入/输出目录和中文 Tile 目录/文件名转换均通过 |
 | H09 | 未触发 | 尚未取得同一新 binary 的原生崩溃证据 |
-| H10 | 本机候选已验证，正式发布待更新 | 最新本机候选 runtime 已通过 `--help`、负向输入、真实 OSGB 和发布脚本 staging；固定清单仍保留已发布 SHA256，待发布新 converter 后再更新 |
+| H10 | 本机候选已验证，正式发布待更新 | 最新本机候选 runtime 已通过 `--help`、负向输入、真实 OSGB、发布脚本 staging 和 NSIS 临时安装；固定清单仍保留已发布 SHA256，待发布新 converter 后再更新 |
 | H11 | 关闭清理代码完成，安装版场景待验收 | Tauri 关闭窗口会标记 queued/running/cancelling 任务为 `interrupted`、清除旧 PID/结束字段并终止活动 processor；10 项 Tauri library tests 覆盖 shutdown 与启动恢复；完整安装 GUI/多级子进程仍待验收 |
 | H12 | 已完成 | 文件 tail 有界并处理 UTF-8 边界 |
 | H13 | 已完成 | scanner/layout/capabilities 单测和 smoke 通过 |
@@ -99,6 +99,7 @@
 - converter 提交 `d06a495` 将 OSGB 元数据、ENU/EPSG/WKT 原点转换和非法配置改为显式失败：`EPSG:4544` 有效原点可完成转换；投影域外原点返回 `OSGB_EPSG_TRANSFORM_FAILED`、退出码 1，processor 不提交最终目录（回归 49）。最新候选 `_3dtile.exe` SHA256 为 `376d02d7cd99e8091b43928772a1917d91d598c5e9a8f45868fede37f6742f76`。
 - `mark_stale_interrupted` 现在在桌面重启恢复时同时写入 `finished_at`、清除旧 `pid` 和 `cancel_requested`；新增启动恢复单测，Tauri library tests 由 9 项增至 10 项（回归 50）。
 - Windows ACL 临时故障注入已通过：撤销当前用户对 `.cache` 输出父目录的写权限时，processor 返回 `PATH_OUTPUT_NOT_WRITABLE`（包含“拒绝访问”），未创建最终成果；权限已恢复并清理测试目录（回归 51）。
+- 用候选 v2 runtime 重新生成 NSIS 并安装到隔离目录：安装器退出 0，安装版创建隔离 `tasks.db` 并可驻留；强制结束安装版进程后没有残留 processor/converter，安装内 converter hash 与候选一致，直接真实 OSGB 转换返回 0（回归 52）。这仍不等同于“有活动任务时点击窗口关闭并重启”的 GUI 验收。
 
 验证命令：
 
