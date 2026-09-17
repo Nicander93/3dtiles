@@ -6,10 +6,10 @@
 
 - 主仓库：`D:\code\3dtiles`
 - converter 仓库：`D:\code\geoforge-converter`
-- 最新主仓库提交：`ac9720d`（文档）/ `214b978`（关窗收尾代码）
+- 最新主仓库提交：`a6843d8`（候选包验收文档）/ `b03bf48`（Tileset 输入校验）
 - converter 候选提交：`bbe1426`
 - 最新候选安装包：`apps/desktop/src-tauri/target/release/bundle/nsis/GeoForge 3D_0.1.0_x64-setup.exe`
-- 最新候选安装包 SHA256：`3e82519973d00abc377d9422a716dcf021579c8a1ee419dc91e32c18e6e91d4f`
+- 最新候选安装包 SHA256：`f40fe1e6506db3cccb83230e34ac1493e14e9abc473b490a9606005ee47a3a55`
 
 仓库中已有的 `apps/desktop/src-tauri/windows-numerics.crate` 和 converter 仓库的 `Cargo.lock` 是既有未跟踪文件，不要删除、提交或覆盖。
 
