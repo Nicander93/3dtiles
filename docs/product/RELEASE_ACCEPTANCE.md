@@ -24,7 +24,7 @@
 - [x] Windows converter 发布 zip 已包含 x64 MSVC release CRT；桌面 runtime 将 CRT 同时部署到 converter 与 processor/top_rebuild 目录，并在 staging/NSIS 清单中强制检查（回归 54）。
 - [x] converter `d06a495` 对有效 EPSG:4544 原点完成转换；投影域外原点返回明确 `OSGB_EPSG_TRANSFORM_FAILED`，processor 退出 1 且不提交最终目录（回归 49）。
 - [x] 最新含 CRT/Unicode 修复的候选已重新打包 NSIS；安装到隔离目录后可启动并创建 `tasks.db`，安装内 converter/processor 对中文输入根、中文 Tile 名和中文/空格输出路径均成功，强制结束后无残留进程（回归 52–55）。
-- [x] H11 代码变更后已重新构建 NSIS（SHA256=`a953cfe5314bd1ca6380192e6187e9e9c0bb8ff6f7f497b6fc62c1b58dd22e51`）；全新隔离安装完成 `--help`、中文输入转换、processor 能力探测和中文数据目录启动检查（回归 56）。
+- [x] H11 代码变更后已重新构建 NSIS（SHA256=`3e82519973d00abc377d9422a716dcf021579c8a1ee419dc91e32c18e6e91d4f`）；全新隔离安装完成 `--help`、中文输入转换、processor 能力探测和中文数据目录启动检查（回归 56）。
 
 ## Windows 安装验收
 
