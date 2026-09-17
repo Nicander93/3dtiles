@@ -74,6 +74,10 @@ fn error_code_for_message(message: &str) -> &'static str {
     } else if lower.contains("not writable")
         || lower.contains("cannot create output parent")
         || lower.contains("cannot write output directory")
+        || lower.contains("access denied")
+        || lower.contains("permission denied")
+        || lower.contains("拒绝访问")
+        || lower.contains("os error 5")
     {
         "PATH_OUTPUT_NOT_WRITABLE"
     } else if lower.contains("must not") && lower.contains("input") {
@@ -418,6 +422,10 @@ mod tests {
         assert_eq!(
             error_code_for_message("output already exists: C:/out"),
             "PATH_OUTPUT_EXISTS"
+        );
+        assert_eq!(
+            error_code_for_message("D:/out: 拒绝访问。 (os error 5)"),
+            "PATH_OUTPUT_NOT_WRITABLE"
         );
         assert_eq!(
             error_code_for_message("convert exited 1: converter stderr"),

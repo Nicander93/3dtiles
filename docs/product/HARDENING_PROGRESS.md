@@ -19,7 +19,7 @@
 | H11 | 关闭清理代码完成，安装版场景待验收 | Tauri 关闭窗口会标记 queued/running/cancelling 任务为 `interrupted`、清除旧 PID/结束字段并终止活动 processor；10 项 Tauri library tests 覆盖 shutdown 与启动恢复；完整安装 GUI/多级子进程仍待验收 |
 | H12 | 已完成 | 文件 tail 有界并处理 UTF-8 边界 |
 | H13 | 已完成 | scanner/layout/capabilities 单测和 smoke 通过 |
-| H14 | 代码完成，资源曲线已取得 | 磁盘、线程、峰值内存指标已接入；1/2/4 worker 真实样本曲线均成功；约 932 MB/4567 Tile 样本取消后无残留；香港 8×8（约 2.47 GB、11,124 OSGB）2 worker 全量转换及顶层重建均成功；真实 ACL/磁盘满故障注入仍待执行 |
+| H14 | 代码完成，资源曲线已取得 | 磁盘、线程、峰值内存指标已接入；1/2/4 worker 真实样本曲线均成功；约 932 MB/4567 Tile 样本取消后无残留；香港 8×8（约 2.47 GB、11,124 OSGB）2 worker 全量转换及顶层重建均成功；真实 ACL 拒绝写入已通过，真实磁盘写满仍不注入用户系统盘 |
 | H15 | CI 门槛完成，安装验收部分完成 | `npm ci`、前端测试/构建、Rust/Tauri、NSIS 临时安装、带空格安装路径、真实 OSGB 与中文路径、10 次重复和香港 8×8 候选 runtime 完整链路回归已通过；Cesium、当前用户失败样本、完整桌面关闭/多级进程树仍待执行 |
 | H16 | 按计划延期 | 保持严格失败，不启用部分成果 |
 
@@ -98,6 +98,7 @@
 - 同一候选 runtime 对真实 `OSGBny` 完成 85 文件的 convert-only；隔离副本中破坏一个 `.osgb` 文件时返回退出码 1，未生成最终 `tileset.json`（回归 48）。
 - converter 提交 `d06a495` 将 OSGB 元数据、ENU/EPSG/WKT 原点转换和非法配置改为显式失败：`EPSG:4544` 有效原点可完成转换；投影域外原点返回 `OSGB_EPSG_TRANSFORM_FAILED`、退出码 1，processor 不提交最终目录（回归 49）。最新候选 `_3dtile.exe` SHA256 为 `376d02d7cd99e8091b43928772a1917d91d598c5e9a8f45868fede37f6742f76`。
 - `mark_stale_interrupted` 现在在桌面重启恢复时同时写入 `finished_at`、清除旧 `pid` 和 `cancel_requested`；新增启动恢复单测，Tauri library tests 由 9 项增至 10 项（回归 50）。
+- Windows ACL 临时故障注入已通过：撤销当前用户对 `.cache` 输出父目录的写权限时，processor 返回 `PATH_OUTPUT_NOT_WRITABLE`（包含“拒绝访问”），未创建最终成果；权限已恢复并清理测试目录（回归 51）。
 
 验证命令：
 

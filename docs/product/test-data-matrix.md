@@ -14,7 +14,7 @@
 | 08 | 单个 OSGB 损坏 | 首版严格失败且指出 Tile | 通过（严格失败）：损坏子 Tile 被明确指出，converter/processor 返回非零，最终目录和 `tileset.json` 均不存在 | HARDENING_REGRESSION 42 |
 | 09 | 单个纹理损坏 | 明确失败或 warning，按当前能力记录 | 待执行 | — |
 | 10 | 输出成果目录已存在 | 提交前拒绝覆盖 | 通过：返回 `PATH_OUTPUT_EXISTS`，sentinel 未改动且未创建 `tileset.json` | HARDENING_REGRESSION 22 |
-| 11 | 输出目录不可写 | 明确错误并包含路径 | 部分通过：父路径为文件时返回 `PATH_OUTPUT_NOT_WRITABLE` 且不创建 child；真实 ACL 无写权限仍待执行 | HARDENING_REGRESSION 25 |
+| 11 | 输出目录不可写 | 明确错误并包含路径 | 通过：父路径为文件和临时 Windows ACL 拒绝写入均返回 `PATH_OUTPUT_NOT_WRITABLE`，未创建最终成果 | HARDENING_REGRESSION 25、51 |
 | 12 | 磁盘空间不足 | 明确错误或预警 | 部分通过：受控抬高 `GEOFORGE_LOW_DISK_BYTES` 后产生 `LOW_DISK_SPACE` warning；真实磁盘写满仍待执行 | HARDENING_REGRESSION 23 |
 | 13 | 中途取消 | cancelled，输入和既有成果不变 | 通过：约 932 MB/4567 Tile 样本取消返回 `CANCELLED`，无最终/临时目录和残留进程；桌面关闭另测 | HARDENING_REGRESSION 21 |
 | 14 | converter 异常退出 | failed，保留 stderr 诊断 | 通过（明确失败）：运行中强制终止 converter 后，processor 返回 `CONVERTER_EXIT_NONZERO`，保留退出码和 stderr tail，未提交最终目录 | HARDENING_REGRESSION 44 |
