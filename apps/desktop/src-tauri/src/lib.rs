@@ -20,10 +20,18 @@ pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
     .on_window_event(|window, event| {
-      if matches!(event, WindowEvent::CloseRequested { .. }) {
+      if matches!(
+        event,
+        WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed
+      ) {
         if let Some(state) = window.try_state::<AppState>() {
           state.processes.shutdown(&state.tasks);
         }
+        // A WebView/desktop window can disappear without ending the Tauri
+        // event loop (especially when the native window is closed by the OS).
+        // Shutdown is synchronous above, so explicitly terminate the app only
+        // after queued/running tasks and their child processes are settled.
+        window.app_handle().exit(0);
       }
     })
     .setup(|app| {
