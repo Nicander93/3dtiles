@@ -62,8 +62,16 @@ impl Drop for JobHandle {
 
 #[cfg(test)]
 mod tests {
-  use super::{copy_raw_stream, read_bounded_protocol_line, MAX_DIAGNOSTIC_DISPLAY_BYTES};
+  use super::{
+    apply_event, copy_raw_stream, read_bounded_protocol_line, MAX_DIAGNOSTIC_DISPLAY_BYTES,
+  };
+  use crate::db::init_schema;
+  use crate::task_store::TaskStore;
+  use parking_lot::Mutex;
+  use rusqlite::Connection;
+  use serde_json::json;
   use std::io::BufReader;
+  use std::sync::Arc;
 
   #[test]
   fn raw_stream_preserves_bytes_while_bounding_display_fragments() {
@@ -95,6 +103,46 @@ mod tests {
     assert_eq!(raw, input);
     assert_eq!(display.len(), super::MAX_PROTOCOL_LINE_BYTES);
     assert!(truncated);
+  }
+
+  #[test]
+  fn error_event_preserves_code_stage_message_and_log() {
+    let conn = Connection::open_in_memory().expect("open sqlite");
+    init_schema(&conn).expect("create schema");
+    let data_dir = std::env::temp_dir().join(format!(
+      "geoforge-process-error-event-{}",
+      std::process::id()
+    ));
+    let tasks = TaskStore::new(Arc::new(Mutex::new(conn)), data_dir.clone());
+    let task = tasks
+      .create("convert-osgb", "input", "output", json!({}), "error-event")
+      .expect("create task");
+    tasks
+      .update_fields(&task.id, |saved| saved.stage = "convert".into())
+      .expect("set stage");
+
+    let mut result_path = None;
+    apply_event(
+      &tasks,
+      &task.id,
+      &json!({
+        "type": "error",
+        "code": "CONVERTER_EXIT_NONZERO",
+        "message": "Tile_甲.osgb failed: access denied"
+      }),
+      &mut result_path,
+    );
+
+    let saved = tasks
+      .get(&task.id)
+      .expect("read task")
+      .expect("task exists");
+    assert_eq!(saved.error.as_deref(), Some("Tile_甲.osgb failed: access denied"));
+    assert_eq!(saved.progress["errorCode"], "CONVERTER_EXIT_NONZERO");
+    assert_eq!(saved.progress["failedStage"], "convert");
+    assert!(saved.log.contains("[error:CONVERTER_EXIT_NONZERO]"));
+    assert!(saved.log.contains("Tile_甲.osgb failed"));
+    let _ = std::fs::remove_dir_all(data_dir);
   }
 }
 
