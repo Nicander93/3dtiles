@@ -7,7 +7,7 @@
 | 01 | 标准 ContextCapture OSGB（仓库 `OSGBny`） | 成功 | 通过：converter 与 processor 均完成转换 | HARDENING_REGRESSION 17–18 |
 | 02 | 已验证 CRS（EPSG:4544） | 成功 | 通过：隔离 `OSGBny` 的 metadata 使用有效 EPSG:4544 原点完成 processor 转换；投影域外原点另有明确失败回归 | HARDENING_REGRESSION 49 |
 | 03 | 中文数据根目录 | 在支持范围内成功 | 通过：converter `bbe1426` 保留绝对路径 UTF-8，最新 NSIS 安装版直接转换生成 85 个文件，processor 生成 86 个文件；中文/空格输出路径均成功 | HARDENING_REGRESSION 55 |
-| 04 | 中文 Tile/文件名 | 在 converter 支持范围内成功或提前报错 | 通过：隔离复制真实 `OSGBny`，将一个 Tile 重命名为 `Tile_中文_+006_+006` 后转换成功；生成 85 个文件，6/6 URI 可解析且含中文 URI | HARDENING_REGRESSION 38 |
+| 04 | 中文 Tile/文件名 | 在 converter 支持范围内成功或提前报错 | 通过：最新含 CRT 安装版隔离复制真实 `OSGBny`，将一个 Tile 目录和 OSGB 重命名为 `Tile_中文_+006_+006` 后转换成功，生成 85 个文件；旧候选结果仍保留在回归 38 | HARDENING_REGRESSION 38、55 |
 | 05 | 路径包含空格、括号、方括号、加号或短横线 | 成功 | 通过：真实样本覆盖中文/空格；候选 converter 对方括号、加号和括号路径也成功，根 URI 6/6 可解析 | HARDENING_REGRESSION 17–18、32 |
 | 06 | metadata.xml 缺失 | 转换前明确错误 | 通过：`scan-osgb` 返回 `valid=false` 和 `Missing metadata.xml` | HARDENING_REGRESSION 26 |
 | 07 | metadata.xml 损坏 | 转换前明确错误 | 通过：`scan-osgb` 返回 `valid=false` 和具体 XML parse error | HARDENING_REGRESSION 27 |
