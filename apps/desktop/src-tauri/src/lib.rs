@@ -13,12 +13,19 @@ pub use resource_server::start_resource_server;
 pub use process_manager::ProcessManager;
 pub use state::{init_headless, AppState};
 
-use tauri::Manager;
+use tauri::{Manager, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
+    .on_window_event(|window, event| {
+      if matches!(event, WindowEvent::CloseRequested { .. }) {
+        if let Some(state) = window.try_state::<AppState>() {
+          state.processes.shutdown(&state.tasks);
+        }
+      }
+    })
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(

@@ -2,7 +2,7 @@
 
 日期：2026-09-15。初始审阅基线：主仓库 `4b72121`、相邻 converter `9f0629b`；本轮实施提交：主仓库 `e23d604`、converter `76ef4d6`。
 
-本计划结合用户提供的《03-v1-hardening-and-release-plan-v2.md》、崩溃建议截图及当前源码编制。附件中的实现建议作为待核对材料，不代表已经验证的原因。随后已按任务卡执行主仓库和桌面端的可重复验证，并完成 H02–H08、H11–H15 的代码改动；H07/H08 已在本机 MSVC/vcpkg 环境构建出候选 converter，修复 OSG UTF-8 输入路径，并完成真实 OSGB、10 次重复、本地 Cesium 页面和临时 NSIS 安装验收。正式发布、安装桌面 WebView、桌面关闭/Job Object 及当前用户失败样本仍单独列为待完成项，详见 `HARDENING_PROGRESS.md` 与 `RELEASE_ACCEPTANCE.md`。
+本计划结合用户提供的《03-v1-hardening-and-release-plan-v2.md》、崩溃建议截图及当前源码编制。附件中的实现建议作为待核对材料，不代表已经验证的原因。随后已按任务卡执行主仓库和桌面端的可重复验证，并完成 H02–H08、H11–H15 的代码改动；H07/H08 已在本机 MSVC/vcpkg 环境构建出候选 converter，修复 OSG UTF-8 输入路径，并完成真实 OSGB、10 次重复、本地 Cesium 页面和临时 NSIS 安装验收。正式发布、安装桌面 WebView、安装版实际关闭/重启及当前用户失败样本仍单独列为待完成项，详见 `HARDENING_PROGRESS.md` 与 `RELEASE_ACCEPTANCE.md`。
 
 ## 1. 这轮要交付什么
 
@@ -41,7 +41,7 @@
 - **tail 并非尾部读取：** `get_logs` 先 `read_to_string` 整个文件再取末尾行；大日志轮询仍会产生大量 I/O 和内存分配。
 - **临时目录清理不证明归属：** `prepare_temp` 删除所有同名旧目录；错误收尾从原始 output/taskId 重新计算路径。路径校验失败也可能进入清理。还应覆盖 input 恰等于派生临时目录的场景。
 - **组件探测存在假阳性：** `capabilities.rs::probe_bin` 把任意可用退出码视为 launchOk；超过 3 秒被 kill 后也设置 ok=true。
-- **强杀恢复尚不能由已有 Job Object 推导为安全：** 当前创建并分配 Job，但没有发现 kill-on-close 配置；存在分配失败退化和启动后分配的窗口。需实测孤儿进程。
+- **关闭收尾仍需安装版实测：** 当前已配置 `KILL_ON_JOB_CLOSE`，并覆盖 Job Object 与 `ProcessManager::shutdown` 的 Windows 单元测试；仍需在安装版验证窗口关闭/重启、多级子进程和 Job 分配失败时的实际行为。
 - **既有实数回归不等于安装版通过：** `REAL_DATA_VALIDATION.md` 的部分转换基线来自 Docker，不能代替本轮 Windows 固定 runtime 端到端验证。
 
 以上为源码审阅发现的可达风险或证据缺口，未声称已经在本机复现所有故障。
@@ -265,7 +265,7 @@
 
 ## 4. 验证命令与执行边界
 
-以下是执行 agent 修改后应使用的命令；本轮已运行的结果记录在 `HARDENING_PROGRESS.md` 与 `HARDENING_REGRESSION.md`。真实 OSGB 的候选 runtime/临时安装、10 次重复和 processor CLI 取消结果已记录；Cesium、桌面关闭/Job Object 和正式发布仍需按清单执行。
+以下是执行 agent 修改后应使用的命令；本轮已运行的结果记录在 `HARDENING_PROGRESS.md` 与 `HARDENING_REGRESSION.md`。真实 OSGB 的候选 runtime/临时安装、10 次重复、processor CLI 取消和桌面关闭清理单元结果已记录；安装桌面 WebView、实际关闭/重启、多级进程树和正式发布仍需按清单执行。
 
 主仓库根 `D:/code/3dtiles`：
 

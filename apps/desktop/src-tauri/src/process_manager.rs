@@ -24,6 +24,8 @@ pub struct ProcessManager {
   inner: Arc<Mutex<HashMap<String, ActiveProc>>>,
   /// Single-flight serial runner.
   scheduler: Arc<Mutex<Scheduler>>,
+  /// Set when the desktop is closing so the scheduler cannot start another task.
+  stopping: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
@@ -98,8 +100,14 @@ mod tests {
 
 #[cfg(all(test, windows))]
 mod windows_job_tests {
-  use super::attach_job_object;
+  use super::{attach_job_object, ActiveProc, ProcessManager};
+  use crate::db::init_schema;
+  use crate::task_store::TaskStore;
+  use parking_lot::Mutex;
+  use rusqlite::Connection;
   use std::process::Command;
+  use std::sync::atomic::AtomicBool;
+  use std::sync::Arc;
   use std::thread;
   use std::time::{Duration, Instant};
 
@@ -127,6 +135,59 @@ mod windows_job_tests {
       assert!(Instant::now() < deadline, "Job Object did not terminate child");
       thread::sleep(Duration::from_millis(25));
     }
+  }
+
+  #[test]
+  fn shutdown_marks_task_interrupted_and_kills_processor_child() {
+    let conn = Connection::open_in_memory().expect("open sqlite");
+    init_schema(&conn).expect("create schema");
+    let data_dir = std::env::temp_dir().join(format!(
+      "geoforge-shutdown-test-{}",
+      std::process::id()
+    ));
+    let tasks = TaskStore::new(Arc::new(Mutex::new(conn)), data_dir.clone());
+    let task = tasks
+      .create("convert-osgb", "input", "output", serde_json::json!({}), "test")
+      .expect("create task");
+
+    let child = Command::new("cmd.exe")
+      .args(["/C", "ping.exe 127.0.0.1 -n 30 > NUL"])
+      .spawn()
+      .expect("spawn Windows shutdown child");
+    let (job, error) = attach_job_object(&child);
+    assert!(error.is_none(), "Job Object setup failed: {error:?}");
+    let manager = ProcessManager::new();
+    manager.inner.lock().insert(
+      task.id.clone(),
+      ActiveProc {
+        child,
+        stdin: None,
+        job,
+        force_kill: Arc::new(AtomicBool::new(false)),
+        committed: Arc::new(AtomicBool::new(false)),
+      },
+    );
+
+    manager.shutdown(&tasks);
+
+    let saved = tasks.get(&task.id).expect("read task").expect("task exists");
+    assert_eq!(saved.status, "interrupted");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+      let exited = manager
+        .inner
+        .lock()
+        .get_mut(&task.id)
+        .and_then(|proc| proc.child.try_wait().ok().flatten())
+        .is_some();
+      if exited {
+        break;
+      }
+      assert!(Instant::now() < deadline, "shutdown child did not exit");
+      thread::sleep(Duration::from_millis(25));
+    }
+    manager.inner.lock().remove(&task.id);
+    let _ = std::fs::remove_dir_all(data_dir);
   }
 }
 
@@ -225,10 +286,18 @@ impl ProcessManager {
     let mgr = self.clone();
     thread::spawn(move || {
       loop {
-        let _ = rx.recv();
+        if mgr.stopping.load(Ordering::SeqCst) || rx.recv().is_err() {
+          break;
+        }
+        if mgr.stopping.load(Ordering::SeqCst) {
+          break;
+        }
         // Drain extra kicks
         while rx.try_recv().is_ok() {}
         loop {
+          if mgr.stopping.load(Ordering::SeqCst) {
+            break;
+          }
           {
             let sched = mgr.scheduler.lock();
             if sched.running.is_some() {
@@ -262,6 +331,9 @@ impl ProcessManager {
             };
             let _ = tasks.append_log(&tid, &format!("[processor] error: {e}"));
             let _ = tasks.update_fields(&tid, |t| {
+              if mgr.stopping.load(Ordering::SeqCst) {
+                return;
+              }
               if t.status != "cancelled" && t.status != "cancelling" {
                 // Keep first useful error if already set
                 if t.error.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
@@ -397,6 +469,25 @@ impl ProcessManager {
   pub fn notify_idle(&self) {
     self.kick();
   }
+
+  /// Stop scheduling and terminate every processor owned by this desktop.
+  ///
+  /// Tasks are marked interrupted before termination so the next launch can
+  /// offer a clear recovery state. The scheduler observes `stopping` and
+  /// exits after the current processor task unwinds.
+  pub fn shutdown(&self, tasks: &TaskStore) {
+    self.stopping.store(true, Ordering::SeqCst);
+    let _ = tasks.mark_stale_interrupted();
+
+    let mut map = self.inner.lock();
+    for proc in map.values_mut() {
+      proc.force_kill.store(true, Ordering::SeqCst);
+      terminate_active_process(proc);
+    }
+    drop(map);
+    // Wake a scheduler blocked in recv so it can observe stopping.
+    self.kick();
+  }
 }
 
 #[cfg(windows)]
@@ -500,6 +591,11 @@ fn force_terminate_process(mgr: &ProcessManager, task_id: &str) {
   let Some(proc) = map.get_mut(task_id) else {
     return;
   };
+  proc.force_kill.store(true, Ordering::SeqCst);
+  terminate_active_process(proc);
+}
+
+fn terminate_active_process(proc: &mut ActiveProc) {
   #[cfg(windows)]
   {
     if let Some(job) = proc.job.as_ref() {
@@ -675,6 +771,9 @@ fn run_processor_task(
   task_id: &str,
   data_dir: &Path,
 ) -> Result<(), String> {
+  if mgr.stopping.load(Ordering::SeqCst) {
+    return Ok(());
+  }
   // Re-check cancel at claim time
   let task = tasks
     .get(task_id)?
@@ -818,7 +917,16 @@ fn run_processor_task(
     );
   }
 
+  // A close request can race with process creation. Re-check after the
+  // process is visible in the manager so the shutdown path cannot miss it.
+  if mgr.stopping.load(Ordering::SeqCst) {
+    force_terminate_process(mgr, task_id);
+  }
+
   let _ = tasks.update_fields(task_id, |t| {
+    if mgr.stopping.load(Ordering::SeqCst) {
+      return;
+    }
     t.status = "running".into();
     t.stage = "scan".into();
     t.started_at = Some(now_secs());
@@ -904,6 +1012,12 @@ fn run_processor_task(
   let task_now = tasks
     .get(task_id)?
     .ok_or_else(|| "task missing".to_string())?;
+
+  // Shutdown already persisted `interrupted`; do not rewrite it as success,
+  // cancellation, or a generic processor failure while the child unwinds.
+  if mgr.stopping.load(Ordering::SeqCst) {
+    return Ok(());
+  }
 
   // Success + result: never rewrite to cancelled
   if exit_code == 0 && (result_path.is_some() || committed.load(Ordering::SeqCst)) {

@@ -16,7 +16,7 @@
 | H08 | 已完成（本机候选构建） | OSG `OSG_USE_UTF8_FILENAME` 路径修复、URI/JSON 修改已进入候选 runtime；真实中文输入/输出目录和中文 Tile 目录/文件名转换均通过 |
 | H09 | 未触发 | 尚未取得同一新 binary 的原生崩溃证据 |
 | H10 | 本机候选已验证，正式发布待更新 | 本机候选 runtime 已通过 `--help`、负向输入、真实 OSGB 和 NSIS 临时安装；固定清单仍保留已发布 SHA256，待发布新 converter 后再更新 |
-| H11 | Job Object 单元测试完成，桌面关闭场景待验收 | Windows unit test 直接验证 `KILL_ON_JOB_CLOSE` 会在 3 秒内结束附着子进程；大样本 CLI 取消无最终/临时目录和残留进程；完整 GUI 关闭/多级子进程仍待安装版验收 |
+| H11 | 关闭清理代码完成，安装版场景待验收 | Tauri 关闭窗口会标记 queued/running/cancelling 任务为 `interrupted`、终止活动 processor 并停止调度；Windows unit test 验证 Job Object 与 shutdown 子进程均在 3 秒内结束；完整安装 GUI/多级子进程仍待验收 |
 | H12 | 已完成 | 文件 tail 有界并处理 UTF-8 边界 |
 | H13 | 已完成 | scanner/layout/capabilities 单测和 smoke 通过 |
 | H14 | 代码完成，资源曲线已取得 | 磁盘、线程、峰值内存指标已接入；1/2/4 worker 真实样本曲线均成功；约 932 MB/4567 Tile 样本取消后无残留；香港 8×8（约 2.47 GB、11,124 OSGB）2 worker 全量转换及顶层重建均成功；真实 ACL/磁盘满故障注入仍待执行 |
@@ -72,11 +72,12 @@
 - 修复 converter 在 `OSG_USE_UTF8_FILENAME=ON` 下错误转入系统代码页的问题；真实 `OSGBny`（78 个 Tile、约 14 MB）放在中文输入根目录时，候选 converter 直接转换和 processor 的 scan→convert→validate→commit 均退出 0，中文/空格输出目录中的 `tileset.json` 和 85 个成果文件可读。
 - 对同一真实成果执行 `rebuild-top` 时，因其布局不是规则网格而明确返回 `GRID_SPATIAL_MISMATCH`，退出码 1 且不提交输出；这是布局约束的预期拒绝，不是崩溃。
 - 在同一真实 `OSGBny` 上连续执行 10 次 `convert-osgb`，10/10 返回 0 并生成完整成果；日志记录耗时 1627–1729 ms、峰值工作集 34,897,920–37,687,296 字节，汇总见 `.cache/repeat-osgbny/summary.json`。
-- 对约 932 MB、4567 个 Tile 的真实样本执行 processor CLI 取消回归：约 1200 ms 后发送 `cancel`，返回 `CANCELLED`（退出码 2），最终输出和临时目录均不存在，未发现残留 processor/converter 进程；完整桌面关闭/Job Object 仍需 Windows 安装版验收。
+- 对约 932 MB、4567 个 Tile 的真实样本执行 processor CLI 取消回归：约 1200 ms 后发送 `cancel`，返回 `CANCELLED`（退出码 2），最终输出和临时目录均不存在，未发现残留 processor/converter 进程；完整桌面关闭仍需 Windows 安装版验收。
 - 对已存在成果目录执行输出安全回归：返回 `PATH_OUTPUT_EXISTS`（退出码 1），sentinel 内容保持不变且未创建 `tileset.json`；使用极高 `GEOFORGE_LOW_DISK_BYTES` 做受控阈值回归时发出 `LOW_DISK_SPACE` warning，仍能完成小样本提交（详见回归 22–23）。
 - 将输出父路径设为已有普通文件时，processor 返回 `PATH_OUTPUT_NOT_WRITABLE`（退出码 1），未创建子目录且原文件内容保持不变；真实 ACL 拒绝写入仍需安装版测试（回归 25）。
 - 扫描负向 fixture：缺失 `metadata.xml` 与未闭合 XML 均在转换前返回 `valid=false`、退出码 1，并保留具体路径/解析错误（回归 26–27）。
-- Desktop Rust Windows unit test 直接覆盖 Job Object kill-on-close：附着 30 秒测试子进程后关闭 Job，子进程在 3 秒内退出，8 项桌面库测试全部通过（回归 28）。
+- Desktop Rust Windows unit test 直接覆盖 Job Object kill-on-close：附着 30 秒测试子进程后关闭 Job，子进程在 3 秒内退出，9 项桌面库测试全部通过（回归 28、47）。
+- Desktop Rust 增加关闭清理回归：`ProcessManager::shutdown` 先把活动任务标为 `interrupted`，再终止附着子进程并阻止调度器启动新任务；Windows shutdown 单元测试通过（回归 47）。
 - 临时 NSIS 安装的默认启动在当前受限环境因 AppData 只读而阻塞；隔离数据目录下进程可驻留但窗口未被自动化接口枚举，未把它记为安装 GUI 通过（回归 29）。
 - 同一真实 `OSGBny` 以 1、2、4 个 converter worker 各运行一次，三次均成功；耗时随并发下降（3035→1629→1025 ms），峰值工作集随并发上升（29,237,248→35,753,984→47,386,624 字节），成果均完整（回归 30）。
 - 将 NSIS 安装器安装到带空格的目录后，从安装版 runtime 执行 ASCII `OSGBny` convert-only；退出码为 0，生成 85 个文件且根 URI 6/6 可解析，随后静默卸载并确认安装目录移除（回归 31）。
@@ -100,7 +101,7 @@ cargo check                         通过
 cargo test -p geoforge-protocol     通过
 cargo test                            90 项通过（16 suites）
 cargo test -p processor --lib        27 项通过
-desktop Tauri cargo test --lib      8 项通过
+desktop Tauri cargo test --lib      9 项通过
 npm test                             通过（纯函数回归）
 npm run build                        通过
 desktop Tauri cargo check (Windows target) 通过
@@ -123,7 +124,7 @@ Hardening follow-up:
 - OSGB scanning now reports directory read errors and covers UTF-8 dataset paths, missing tile entries, and non-standard directories.
 - Product and Windows CI now build the desktop frontend and run the Tauri library smoke test.
 - Full converter validation now has a local MSVC/vcpkg candidate build; real OSGB conversion and CJK input/output paths pass locally, while release publication remains pending.
-- Desktop Windows-specific Job Object code has passed `cargo check --target x86_64-pc-windows-msvc`; runtime kill-on-close behavior still needs an actual Windows process-tree test.
+- Desktop Windows-specific Job Object code has passed `cargo check --target x86_64-pc-windows-msvc`; Job Object kill-on-close and shutdown child termination have Windows unit coverage, while an installed GUI close/restart run remains manual.
 - 旧固定 runtime 的无效输入负向测试仍返回退出码 0；本机候选 runtime 已返回非零并完成临时 NSIS 安装验收，不能把旧固定 runtime 当作本轮修复证据。
 
 
