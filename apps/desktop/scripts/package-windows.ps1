@@ -4,7 +4,8 @@
 
 param(
   [switch]$SkipBuild,
-  [switch]$SkipTextureBundle
+  [switch]$SkipTextureBundle,
+  [string]$ConverterZip = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,6 +19,7 @@ Write-Host "=== GeoForge Windows package ==="
 # 1) Converter Release + product runtime
 $prepArgs = @("-File", (Join-Path $PSScriptRoot "prepare-runtime.ps1"), "-OutDir", $RuntimeDir)
 if ($SkipBuild) { $prepArgs += "-SkipBuild" }
+if ($ConverterZip) { $prepArgs += @("-ConverterZip", $ConverterZip) }
 & pwsh @prepArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

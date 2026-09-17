@@ -90,6 +90,7 @@
 - 最新候选下香港 8×8 全量转换再次通过；耗时 99,842 ms，converter 峰值 161,906,688 bytes，输出 11,186 个文件、约 3.11 GB，64/64 URI 可解析（回归 40）。同一成果顶层重建再次通过，耗时 73,910 ms，输出 11,208 个文件、约 3.15 GB，85/85 URI 可解析（回归 41）。
 - 损坏子 Tile 回归确认 converter 和 processor 都严格失败：具体读取错误进入 stderr tail，返回 `CONVERTER_EXIT_NONZERO`，最终目录和 `tileset.json` 不存在（回归 42）。
 - 运行中强制终止 converter 的回归通过：processor 返回 `CONVERTER_EXIT_NONZERO`，保留 `convert exited -1`、stderr tail 和任务日志，最终目录不存在且无残留进程（回归 44）。
+- 发布脚本新增可选 `-ConverterZip` 参数并完成回归：弱 Agent 可用本地候选 zip 重复生成 runtime 和 SHA256 manifest，默认正式 URL/SHA256 流程不变（回归 45）。
 
 验证命令：
 

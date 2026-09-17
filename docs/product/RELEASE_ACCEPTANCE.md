@@ -12,6 +12,7 @@
 - [x] `processor capabilities --json` 能报告 converter、top_rebuild 和纹理能力。
 - [x] `git diff --check` 通过。
 - [x] Release Windows workflow 在 `npm ci` 后执行 `npm test`；安装器本身仍需 Windows 安装验收。
+- [x] 发布脚本支持 `-ConverterZip` 本地候选输入并生成一致的 runtime manifest；正式构建默认仍使用 `third_party/3dtiles-converter.json`（回归 45）。
 - [x] 本机候选 converter 已完成 MSVC/vcpkg Release 构建，NSIS 临时安装后 `--help` 正常，负向输入返回非零且无伪造成果。
 - [x] 本机候选 converter 对真实 `OSGBny`（中文输入/输出目录）完成 convert-only 与 processor scan→convert→validate→commit，退出码均为 0。
 - [x] 本机候选 converter 对包含中文 Tile 目录/文件名的真实样本完成 convert-only；输出 85 个文件，6/6 个根 URI 可解析（回归 38）。

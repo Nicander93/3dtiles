@@ -8,7 +8,8 @@
 
 param(
   [string]$OutDir = "",
-  [switch]$SkipBuild
+  [switch]$SkipBuild,
+  [string]$ConverterZip = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,7 +32,14 @@ if (-not $SkipBuild) {
 }
 
 $ConverterOut = Join-Path $OutDir "converter"
-& pwsh -NoProfile -File (Join-Path $PSScriptRoot "prepare-converter.ps1") -OutDir $ConverterOut
+$converterArgs = @(
+  "-File", (Join-Path $PSScriptRoot "prepare-converter.ps1"),
+  "-OutDir", $ConverterOut
+)
+if ($ConverterZip) {
+  $converterArgs += @("-LocalZip", $ConverterZip)
+}
+& pwsh -NoProfile @converterArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $ProductBin = Join-Path $OutDir "bin"
