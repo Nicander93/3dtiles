@@ -29,4 +29,25 @@ assert.equal(forms.pathsEqual('C:\\DATA\\scene\\', 'c:/data/scene'), true);
 assert.equal(forms.realProgressPercent({ completed: 1, total: 4 }), 25);
 assert.equal(forms.realProgressPercent({ completed: 0, total: 0 }), null);
 
+const textureCaps = await loadTypeScript('../src/lib/textureCaps.ts');
+const unavailableCaps = {
+  textureModes: [
+    { mode: 'ktx2-etc1s', supported: false },
+    { mode: 'ktx2-uastc', supported: false },
+  ],
+  postprocessBasisu: { available: false },
+};
+const availableCaps = {
+  textureModes: [
+    { mode: 'ktx2-etc1s', supported: true },
+    { mode: 'ktx2-uastc', supported: true, processTileset: { supported: true } },
+  ],
+  postprocessBasisu: { available: false },
+};
+assert.equal(textureCaps.textureModeEnabled(null, 'keep'), true);
+assert.equal(textureCaps.textureModeEnabled(null, 'ktx2-etc1s'), false);
+assert.equal(textureCaps.textureModeEnabled(unavailableCaps, 'ktx2-uastc'), false);
+assert.equal(textureCaps.textureModeEnabled(availableCaps, 'ktx2-etc1s'), true);
+assert.equal(textureCaps.textureModeEnabled(availableCaps, 'ktx2-uastc', true), true);
+
 console.log('desktop pure-function tests passed');

@@ -1,6 +1,6 @@
 //! `processor capabilities --json` — single source for tool probe (T06).
 
-use crate::util::tool_paths;
+use crate::util::{hide_console_window, tool_paths};
 use serde_json::{json, Value};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -12,7 +12,7 @@ pub fn capabilities_json() -> Value {
     let top = probe_bin(&tools.top_rebuild, &["top_rebuild", "--help"]);
     let texture = if tools.texture_bin.is_file() {
         probe_bin(&tools.texture_bin, &["geoforge-texture", "--help"])
-    } else if tools.texture_py.is_file() {
+    } else if !tools.packaged && tools.texture_py.is_file() {
         probe_script(&tools.texture_py, &tools.python)
     } else {
         json!({
@@ -36,11 +36,10 @@ pub fn capabilities_json() -> Value {
         .get("launchOk")
         .and_then(|v| v.as_bool())
         .unwrap_or(false)
-        && (tools.texture_bin.is_file()
-            || basisu
-                .get("exists")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false));
+        && basisu
+            .get("exists")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
     json!({
         "ok": true,
@@ -102,12 +101,13 @@ fn probe_bin(path: &Path, _hint: &[&str]) -> Value {
             "error": format!("missing: {}", path.display()),
         });
     }
-    let child = match Command::new(path)
+    let mut command = Command::new(path);
+    command
         .arg("--help")
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
+        .stderr(Stdio::null());
+    hide_console_window(&mut command);
+    let child = match command.spawn() {
         Ok(c) => c,
         Err(e) => {
             return json!({
@@ -122,13 +122,14 @@ fn probe_bin(path: &Path, _hint: &[&str]) -> Value {
 }
 
 fn probe_script(script: &Path, interpreter: &Path) -> Value {
-    let child = match Command::new(interpreter)
+    let mut command = Command::new(interpreter);
+    command
         .arg(script)
         .arg("--help")
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
+        .stderr(Stdio::null());
+    hide_console_window(&mut command);
+    let child = match command.spawn() {
         Ok(c) => c,
         Err(e) => {
             return json!({

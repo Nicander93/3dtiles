@@ -2,7 +2,7 @@
 
 use crate::cancel::CancelFlag;
 use crate::protocol::{Emitter, Stage};
-use crate::util::{run_logged, tool_paths};
+use crate::util::{command_available, run_logged, tool_paths, ToolPaths};
 use serde_json::Value;
 use std::path::Path;
 use std::sync::Arc;
@@ -29,6 +29,30 @@ pub fn is_keep(mode: &str) -> bool {
     normalize_mode(Some(mode)) == "keep"
 }
 
+fn validate_texture_mode_with_tools(mode: &str, tools: &ToolPaths) -> Result<(), String> {
+    if is_keep(mode) {
+        return Ok(());
+    }
+    if tools.texture_bin.is_file() && tools.basisu.is_file() {
+        return Ok(());
+    }
+    if !tools.packaged
+        && tools.texture_py.is_file()
+        && command_available(&tools.python)
+        && tools.basisu.is_file()
+    {
+        return Ok(());
+    }
+    Err(format!(
+        "texture mode={mode} is unavailable: the texture encoder or basisu is missing; choose keep or install the texture component"
+    ))
+}
+
+pub fn validate_texture_mode(mode: &str) -> Result<(), String> {
+    let mode = normalize_mode(Some(mode));
+    validate_texture_mode_with_tools(&mode, tool_paths())
+}
+
 pub fn finish_texture(
     emitter: &Arc<Emitter>,
     cancel: &CancelFlag,
@@ -46,13 +70,15 @@ pub fn finish_texture(
         return Ok(());
     }
 
+    let tools = tool_paths();
+    validate_texture_mode_with_tools(&mode, tools)?;
+
     emitter.stage_extra(
         Stage::Texture,
         &format!("post-process basisu mode={mode}"),
         serde_json::json!({ "textureMode": mode, "postprocess": true }),
     );
 
-    let tools = tool_paths();
     let mut cmd: Vec<String> = Vec::new();
 
     if tools.texture_bin.is_file() {
@@ -66,19 +92,8 @@ pub fn finish_texture(
             cmd.push(tools.basisu.to_string_lossy().into_owned());
         }
     } else {
-        let py = if tools.python.is_file() {
-            tools.python.to_string_lossy().into_owned()
-        } else {
-            "python3".into()
-        };
-        cmd.push(py);
-        if tools.texture_py.is_file() {
-            cmd.push(tools.texture_py.to_string_lossy().into_owned());
-        } else {
-            return Err(format!(
-                "KTX2 mode={mode} requested but geoforge-texture / texture_ktx2 not found"
-            ));
-        }
+        cmd.push(tools.python.to_string_lossy().into_owned());
+        cmd.push(tools.texture_py.to_string_lossy().into_owned());
         cmd.push("-i".into());
         cmd.push(out_dir.to_string_lossy().into_owned());
         cmd.push("--mode".into());
@@ -222,6 +237,7 @@ pub fn texture_mode_from_options(options: &Value) -> String {
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -239,5 +255,33 @@ mod tests {
         .unwrap();
         assert!(walk_has_ktx2(&dir));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn packaged_mode_does_not_use_source_texture_script() {
+        let n = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("geoforge-texture-packaged-{n}"));
+        let source_script = root.join("source/tools/texture_ktx2/run.py");
+        fs::create_dir_all(source_script.parent().unwrap()).unwrap();
+        fs::write(&source_script, b"print('source-only')").unwrap();
+        let tools = ToolPaths {
+            repo_root: root.join("runtime"),
+            runtime_root: root.join("runtime"),
+            convert_bin: PathBuf::from("_3dtile"),
+            top_rebuild: PathBuf::from("top_rebuild"),
+            rebuild_py: PathBuf::from("missing-rebuild.py"),
+            texture_py: source_script,
+            texture_bin: PathBuf::from("missing-geoforge-texture"),
+            basisu: PathBuf::from("missing-basisu"),
+            python: PathBuf::from("python"),
+            packaged: true,
+        };
+
+        let error = validate_texture_mode_with_tools("ktx2-etc1s", &tools).unwrap_err();
+        assert!(error.contains("texture mode=ktx2-etc1s is unavailable"));
+        let _ = fs::remove_dir_all(root);
     }
 }

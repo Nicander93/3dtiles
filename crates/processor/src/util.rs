@@ -33,16 +33,28 @@ pub fn tool_paths() -> &'static ToolPaths {
     PATHS.get_or_init(|| {
         let packaged = std::env::var("GEOFORGE_PACKAGED").ok().as_deref() == Some("1")
             || std::env::var("GEOFORGE_RUNTIME_ROOT").is_ok();
-        let repo_root = discover_repo_root();
-        let runtime_root = resolve_runtime_root(&repo_root);
+        let source_root = discover_repo_root();
+        let runtime_root = resolve_runtime_root(&source_root);
+        // Release binaries embed CARGO_MANIFEST_DIR. Never let an installed
+        // app discover optional tools from a source checkout that happens to
+        // exist on the same machine.
+        let repo_root = if packaged {
+            runtime_root.clone()
+        } else {
+            source_root
+        };
         let convert_bin = resolve_3dtile(&repo_root, &runtime_root);
         let top_rebuild = resolve_top_rebuild(&repo_root, &runtime_root);
         let rebuild_py = std::env::var("GEOFORGE_REBUILD_TOP")
             .map(PathBuf::from)
             .unwrap_or_else(|_| resolve_rebuild_py(&repo_root));
-        let texture_py = repo_root.join("tools/texture_ktx2/run.py");
+        let texture_py = if packaged {
+            runtime_root.join("texture").join("run.py")
+        } else {
+            repo_root.join("tools/texture_ktx2/run.py")
+        };
         let texture_bin = resolve_texture_bin(&runtime_root);
-        let basisu = resolve_basisu(&runtime_root, &repo_root);
+        let basisu = resolve_basisu(&runtime_root, &repo_root, packaged);
         let python = std::env::var("GEOFORGE_PYTHON")
             .map(PathBuf::from)
             .unwrap_or_else(|_| {
@@ -100,20 +112,59 @@ fn resolve_texture_bin(runtime_root: &Path) -> PathBuf {
     PathBuf::from("geoforge-texture")
 }
 
-fn resolve_basisu(runtime_root: &Path, repo_root: &Path) -> PathBuf {
+fn resolve_basisu(runtime_root: &Path, repo_root: &Path, packaged: bool) -> PathBuf {
     if let Ok(p) = std::env::var("GEOFORGE_BASISU") {
         return PathBuf::from(p);
     }
-    for c in [
+    let mut candidates = vec![
         runtime_root.join("texture").join("basisu.exe"),
         runtime_root.join("texture").join("basisu"),
-        repo_root.join("vcpkg_installed/x64-windows/tools/basisu/basisu.exe"),
-    ] {
+    ];
+    if !packaged {
+        candidates.push(repo_root.join("vcpkg_installed/x64-windows/tools/basisu/basisu.exe"));
+    }
+    for c in candidates {
         if c.is_file() {
             return c;
         }
     }
     PathBuf::from("basisu")
+}
+
+pub fn command_available(command: &Path) -> bool {
+    if command.is_file() {
+        return true;
+    }
+    if command.components().count() != 1 {
+        return false;
+    }
+    let Some(search_path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&search_path).any(|dir| {
+        let candidate = dir.join(command);
+        if candidate.is_file() {
+            return true;
+        }
+        #[cfg(windows)]
+        if command.extension().is_none() && candidate.with_extension("exe").is_file() {
+            return true;
+        }
+        false
+    })
+}
+
+/// Console-subsystem tools should stay invisible when launched by the desktop
+/// app. Redirected stdin/stdout/stderr and Job Object control keep working.
+pub fn hide_console_window(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    let _ = command;
 }
 
 fn rebuild_markers(root: &Path) -> bool {
@@ -312,6 +363,7 @@ pub fn run_logged_env_result(
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
+    hide_console_window(&mut command);
 
     #[cfg(unix)]
     {

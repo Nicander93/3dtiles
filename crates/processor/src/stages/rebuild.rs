@@ -341,11 +341,7 @@ fn run_rebuild_python(
         .and_then(|v| v.as_f64())
         .unwrap_or(0.5);
 
-    let py = if tools.python.is_file() {
-        tools.python.to_string_lossy().into_owned()
-    } else {
-        "python3".into()
-    };
+    let py = tools.python.to_string_lossy().into_owned();
 
     let cmd = vec![
         py,

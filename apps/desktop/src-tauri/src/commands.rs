@@ -294,7 +294,9 @@ pub fn scan_osgb(path: String) -> Result<Value, String> {
   let bin = ProcessManager::processor_bin().ok_or_else(|| {
     "找不到 processor 组件，无法扫描。请修复安装或设置 GEOFORGE_PROCESSOR。".to_string()
   })?;
-  let output = Command::new(&bin)
+  let mut command = Command::new(&bin);
+  ProcessManager::apply_runtime_env(&mut command);
+  let output = command
     .args(["scan-osgb", "--path", &path])
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())

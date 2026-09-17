@@ -294,6 +294,7 @@ impl ProcessManager {
   }
 
   pub fn apply_runtime_env(command: &mut Command) {
+    processor::util::hide_console_window(command);
     if let Some(runtime) = Self::packaged_runtime_root() {
       command.env("GEOFORGE_RUNTIME_ROOT", &runtime);
       command.env("GEOFORGE_PACKAGED", "1");

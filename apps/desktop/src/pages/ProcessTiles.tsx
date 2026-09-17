@@ -14,7 +14,7 @@ import {
   rebuildQualityOptions,
   type RebuildQuality,
 } from '../lib/rebuildQuality';
-import { ktx2Etc1sEnabled, ktx2UastcEnabled } from '../lib/textureCaps';
+import { ktx2Etc1sEnabled, ktx2UastcEnabled, textureModeEnabled } from '../lib/textureCaps';
 import { isTauri, selectInputDirectory, selectOutputDirectory, selectTilesetFile } from '../lib/tauri';
 
 const CONFIG_KEY = 'geoforge.tiles.process.config';
@@ -225,11 +225,8 @@ export function ProcessTiles() {
       setError('请启用顶层重建，或选择非保留的纹理模式。');
       return;
     }
-    const pt = caps?.textureModes?.find(
-      (m) => m.mode === (form.textureMode === 'ktx2' ? 'ktx2-etc1s' : form.textureMode),
-    );
-    if (form.textureMode !== 'keep' && pt?.processTileset?.supported === false) {
-      setError(pt.processTileset.reason || '当前无法做纹理压缩，请检查运行环境。');
+    if (!textureModeEnabled(caps, form.textureMode, true)) {
+      setError('当前安装包未包含可用的纹理压缩组件，请选择“保留原纹理”。');
       return;
     }
     setSubmitting(true);

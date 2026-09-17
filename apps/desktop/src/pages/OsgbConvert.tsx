@@ -16,7 +16,7 @@ import {
   rebuildQualityOptions,
   type RebuildQuality,
 } from '../lib/rebuildQuality';
-import { ktx2Etc1sEnabled, ktx2UastcEnabled } from '../lib/textureCaps';
+import { ktx2Etc1sEnabled, ktx2UastcEnabled, textureModeEnabled } from '../lib/textureCaps';
 import { isTauri, selectInputDirectory, selectOutputDirectory } from '../lib/tauri';
 
 const CONFIG_KEY = 'geoforge.osgb.convert.config';
@@ -278,6 +278,10 @@ export function OsgbConvert() {
     }
     if (scan && !scan.valid) {
       setError(scanError || '输入校验未通过，请修正后再提交。');
+      return;
+    }
+    if (!textureModeEnabled(caps, form.textureMode)) {
+      setError('当前安装包未包含可用的纹理压缩组件，请选择“保留原纹理”。');
       return;
     }
     setSubmitting(true);

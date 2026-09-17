@@ -16,6 +16,17 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+fn hide_console_window(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    let _ = command;
+}
+
 /// Raw decoded texture carried through the proxy pipeline.
 #[derive(Clone, Debug)]
 pub struct TextureData {
@@ -117,7 +128,10 @@ pub fn find_basisu() -> Option<PathBuf> {
             return Some(pb);
         }
     }
-    if let Ok(out) = Command::new("which").arg("basisu").output() {
+    let mut lookup = Command::new("which");
+    lookup.arg("basisu");
+    hide_console_window(&mut lookup);
+    if let Ok(out) = lookup.output() {
         if out.status.success() {
             let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if !s.is_empty() {
@@ -183,15 +197,17 @@ fn encode_ktx2(basisu: &Path, png_bytes: &[u8], work: &Path) -> Result<Vec<u8>> 
     let png_path = work.join("in.png");
     let out_path = work.join("out.ktx2");
     std::fs::write(&png_path, png_bytes)?;
-    let status = Command::new(basisu)
-        .args([
-            "-ktx2",
-            "-etc1s",
-            "-file",
-            png_path.to_str().unwrap_or("in.png"),
-            "-output_file",
-            out_path.to_str().unwrap_or("out.ktx2"),
-        ])
+    let mut command = Command::new(basisu);
+    command.args([
+        "-ktx2",
+        "-etc1s",
+        "-file",
+        png_path.to_str().unwrap_or("in.png"),
+        "-output_file",
+        out_path.to_str().unwrap_or("out.ktx2"),
+    ]);
+    hide_console_window(&mut command);
+    let status = command
         .status()
         .map_err(|e| TopRebuildError::Other(format!("basisu spawn: {e}")))?;
     if !status.success() {

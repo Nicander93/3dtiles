@@ -116,6 +116,8 @@ fn run_convert_osgb(
     cancel: &CancelFlag,
 ) -> Result<PathBuf, String> {
     let options = config.options_obj();
+    let tex_mode = texture::texture_mode_from_options(options);
+    texture::validate_texture_mode(&tex_mode)?;
     let validated = path_policy::validate_io_paths(
         Path::new(config.input_path()),
         Path::new(config.output_path()),
@@ -216,7 +218,6 @@ fn run_convert_osgb(
         work = rebuild_out;
     }
 
-    let tex_mode = texture::texture_mode_from_options(options);
     texture::finish_texture(emitter, cancel, &work, &tex_mode)?;
     check_cancel(cancel)?;
 
@@ -264,6 +265,7 @@ fn run_process_tileset(
             "process-tileset requires rebuildTop.enabled and/or texture.mode != keep".into(),
         );
     }
+    texture::validate_texture_mode(&tex_mode)?;
 
     let validated = path_policy::validate_io_paths(
         Path::new(config.input_path()),
