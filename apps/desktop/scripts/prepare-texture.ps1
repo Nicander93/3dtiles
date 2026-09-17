@@ -45,6 +45,45 @@ try {
 }
 
 Copy-Item -LiteralPath $BasisuPath -Destination (Join-Path $DistDir "basisu.exe") -Force
+
+# basisu.exe is a native MSVC binary. Windows loads CRT from the exe directory
+# first; shipping DLLs beside basisu avoids 0xc0000135 when users run it directly
+# or when PATH does not yet include runtime/bin.
+$crtNames = @(
+  "concrt140.dll",
+  "msvcp140.dll",
+  "msvcp140_1.dll",
+  "msvcp140_2.dll",
+  "msvcp140_atomic_wait.dll",
+  "msvcp140_codecvt_ids.dll",
+  "vccorlib140.dll",
+  "vcruntime140.dll",
+  "vcruntime140_1.dll",
+  "vcruntime140_threads.dll"
+)
+$crtSearchRoots = @(
+  (Join-Path $RepoRoot "dist\runtime\converter"),
+  (Join-Path $RepoRoot "dist\runtime\bin"),
+  (Join-Path $RepoRoot "apps\desktop\src-tauri\resources\runtime\converter"),
+  (Join-Path $RepoRoot "apps\desktop\src-tauri\resources\runtime\bin"),
+  (Split-Path -Parent $BasisuPath)
+)
+foreach ($name in $crtNames) {
+  $src = $null
+  foreach ($root in $crtSearchRoots) {
+    $cand = Join-Path $root $name
+    if (Test-Path -LiteralPath $cand -PathType Leaf) { $src = $cand; break }
+  }
+  if ($src) {
+    Copy-Item -LiteralPath $src -Destination (Join-Path $DistDir $name) -Force
+  }
+}
+$requiredBasisuCrt = @("msvcp140.dll", "msvcp140_2.dll", "vcruntime140.dll", "vcruntime140_1.dll")
+$missingBasisuCrt = $requiredBasisuCrt | Where-Object { -not (Test-Path (Join-Path $DistDir $_)) }
+if ($missingBasisuCrt) {
+  Write-Warning ("basisu CRT not fully staged (will rely on PATH/runtime/bin): " + ($missingBasisuCrt -join ', '))
+}
+
 & $Exe --help | Out-Null
 if ($LASTEXITCODE -ne 0) {
   throw "geoforge-texture.exe --help failed with exit code $LASTEXITCODE"

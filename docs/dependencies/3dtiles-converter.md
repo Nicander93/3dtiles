@@ -53,9 +53,10 @@ resources/runtime/
 ```
 
 `top_rebuild` prepends `runtime/texture` and sibling `runtime/bin` to `PATH` when
-spawning `basisu` (encode + unpack), so CRT DLLs resolve without a system-wide
-VC++ install. Prefer also shipping CRT **next to** `basisu.exe`, or ensure
-`runtime/bin` remains the CRT home that `top_rebuild` adds to `PATH`.
+spawning `basisu` (encode + unpack). Packaging also copies MSVC CRT DLLs
+**next to** `basisu.exe` (`prepare-texture.ps1` / `package-windows.ps1`) so a
+direct `basisu.exe -version` does not fail with `0xc0000135` when VC++ is not
+installed system-wide. `runtime/bin` remains a second CRT home on `PATH`.
 
 If unpack still fails, rebuild keeps the original `image/ktx2` bytes as opaque
 pass-through (no invented pixels) and logs a warning.
