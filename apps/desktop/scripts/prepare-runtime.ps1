@@ -80,7 +80,12 @@ foreach ($name in $crtFiles) {
     Copy-Item -Force $src (Join-Path $ProductBin $name)
   }
 }
-$missingProductCrt = @("msvcp140.dll", "vcruntime140.dll") |
+$missingProductCrt = @(
+  "msvcp140.dll",
+  "msvcp140_2.dll",
+  "vcruntime140.dll",
+  "vcruntime140_1.dll"
+) |
   Where-Object { -not (Test-Path (Join-Path $ProductBin $_)) }
 if ($missingProductCrt) {
   Write-Error "Product runtime missing MSVC DLLs: $($missingProductCrt -join ', ')"

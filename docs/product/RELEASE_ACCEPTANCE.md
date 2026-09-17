@@ -26,6 +26,7 @@
 - [x] 最新含 CRT/Unicode 修复的候选已重新打包 NSIS；安装到隔离目录后可启动并创建 `tasks.db`，安装内 converter/processor 对中文输入根、中文 Tile 名和中文/空格输出路径均成功，强制结束后无残留进程（回归 52–55）。
 - [x] H11/H13 代码变更后已重新构建 NSIS（SHA256=`f40fe1e6506db3cccb83230e34ac1493e14e9abc473b490a9606005ee47a3a55`）；全新隔离安装完成 converter/top_rebuild `--help`、中文输入转换检查（回归 56）。
 - [x] processor 重建坐标溢出修复已重新打入 NSIS（SHA256=`5dd2c9242ebc47759571d362c7dd5c7c71bf6fcbbeead5e66915cccc392f15af`）；全新隔离安装完成 converter `--help`、真实转换和 processor capabilities 检查（回归 59）。
+- [x] 最新前端结构化错误解析、设置页目录选择失败提示和产品 CRT 完整门槛已打入 NSIS（SHA256=`a6b92ecdde25d2eddac08b9fb477f8658c7ad877a268d3caadcbe4386fc3d9ea`）；全新隔离安装完成 converter `--help`、85 文件真实转换、processor 86 文件转换和 capabilities 检查（回归 61）。
 
 ## Windows 安装验收
 

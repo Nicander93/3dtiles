@@ -61,7 +61,9 @@ $required = @(
   (Join-Path $BundleDir "bin\processor.exe"),
   (Join-Path $BundleDir "bin\top_rebuild.exe"),
   (Join-Path $BundleDir "bin\msvcp140.dll"),
-  (Join-Path $BundleDir "bin\vcruntime140.dll")
+  (Join-Path $BundleDir "bin\msvcp140_2.dll"),
+  (Join-Path $BundleDir "bin\vcruntime140.dll"),
+  (Join-Path $BundleDir "bin\vcruntime140_1.dll")
 )
 $missing = @()
 foreach ($r in $required) {

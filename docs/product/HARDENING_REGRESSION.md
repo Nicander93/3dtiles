@@ -12,7 +12,7 @@
 | Converter 版本 / source commit | `0.1.0` / `a464f0b8e89c13ddfbf0f50af84ea153cdc90b0b`（本机候选构建） |
 | Converter SHA256 | 本机候选 runtime `_3dtile.exe`: `40015f4d776db5acb187a8537e08905a8a47efd80e3c771d07a9bdb24fa6a32e`; 固定发布清单值为 `77cadd01941add0297a52a22ce26918d8d22c3729a0ae564556fce14327b5c5b`，两者不一致，不能宣称已更新正式发布包 |
 | Runtime 根目录 | `D:\\code\\3dtiles\\dist\\runtime`（本机候选，converter `--help` 返回 0；已完成临时 NSIS 安装验收） |
-| Installer SHA256 | 本机最新候选 `GeoForge 3D_0.1.0_x64-setup.exe`: `5dd2c9242ebc47759571d362c7dd5c7c71bf6fcbbeead5e66915cccc392f15af`（H11/H13/H14 重打包；回归 59） |
+| Installer SHA256 | 本机最新候选 `GeoForge 3D_0.1.0_x64-setup.exe`: `a6b92ecdde25d2eddac08b9fb477f8658c7ad877a268d3caadcbe4386fc3d9ea`（前端错误诊断与产品 CRT 门槛重打包；回归 61） |
 | Windows 版本 | 未能读取 WMI；本记录不伪造版本 |
 | CPU / 内存 | 未能读取 WMI；本记录不伪造硬件数据 |
 
@@ -83,6 +83,7 @@
 | 59 | 最新 processor sidecar NSIS | 将 `8047027` 的重建坐标溢出修复打入 processor sidecar，重新安装候选并执行 converter/processor 运行时检查 | NSIS SHA256=`5dd2c9242ebc47759571d362c7dd5c7c71bf6fcbbeead5e66915cccc392f15af`；安装到 `.cache\\installed-final-v7-20260917`；安装内 `_3dtile.exe --help`、真实中文/ASCII OSGB 转换、`processor capabilities --json` | `.cache\\installed-final-v7-output` | 通过：安装与运行时检查 | 0（全部） | `.cache\\installed-final-v7-help.log`、`.cache\\installed-final-v7-converter.log`、`.cache\\installed-final-v7-capabilities.jsonl` | converter 85 个文件且有 `tileset.json`；正式 WebView/干净 VM 仍按清单待人工验收。 |
 
 | 60 | 桌面错误事件诊断链 | 用内存 TaskStore 注入 processor `error` 事件，确认任务记录保留错误正文、`errorCode`、`failedStage` 和日志文本 | `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib --locked` | — | 通过：11 项测试 | 0 | cargo stdout | `error_event_preserves_code_stage_message_and_log` 通过；代码修改仅在测试和事件持久化边界，未改变协议 schema。 |
+| 61 | 最新前端错误诊断与产品 CRT NSIS | 将 `590154b` 前端结构化错误解析、设置页目录选择失败提示和产品 CRT 完整门槛打入 NSIS，并在隔离安装目录执行运行时检查 | `package-windows.ps1 -SkipBuild -SkipTextureBundle -ConverterZip .cache\\geoforge-converter-0.1.1-unicode-crt.zip`；安装到 `.cache\\installed-final-v8-20260917`；安装内 `_3dtile.exe --help`、真实 `OSGBny` 转换、`processor.exe convert-osgb`、`processor capabilities --json` | `.cache\\installed-final-v8-20260917`、`.cache\\installed-final-v8-output`、`.cache\\installed-final-v8-processor-output` | 通过：安装/运行时检查 | 0（全部） | `.cache\\installed-final-v8-20260917\\v8-help.log`、`v8-converter.log`、`v8-processor.jsonl`、`v8-capabilities.jsonl` | NSIS SHA256=`a6b92ecdde25d2eddac08b9fb477f8658c7ad877a268d3caadcbe4386fc3d9ea`；converter/bin 均含 `msvcp140.dll`、`msvcp140_2.dll`、`vcruntime140.dll`、`vcruntime140_1.dll`；converter 输出 85 个文件，processor 输出 86 个文件且均有 `tileset.json`；干净 VM/WebView 仍待人工验收。 |
 ## 单次记录模板
 
 ```text

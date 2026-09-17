@@ -109,6 +109,7 @@
 - processor 重建预检改用检查过的 `i64/usize` 网格尺寸计算，极端合法坐标跨度不会触发整数溢出；新增负向单测，processor library tests 增至 28 项通过（回归 58）。
 - `8047027` 已重新打入 processor sidecar 并生成最新 NSIS（SHA256=`5dd2c9242ebc47759571d362c7dd5c7c71bf6fcbbeead5e66915cccc392f15af`）；安装版 converter/processor 能力探测和真实转换通过（回归 59）。
 - 桌面错误事件新增回归：`CONVERTER_EXIT_NONZERO` 会同时保留错误正文、错误码、失败阶段和日志；Tauri library tests 增至 11 项通过（回归 60）。
+- `590154b` 的结构化前端错误解析、设置页目录选择失败提示以及产品 CRT 完整门槛已打入最新 NSIS（SHA256=`a6b92ecdde25d2eddac08b9fb477f8658c7ad877a268d3caadcbe4386fc3d9ea`）；全新隔离安装后 converter `--help`、85 文件真实转换、processor 86 文件转换和 capabilities 均通过（回归 61）。
 
 验证命令：
 
