@@ -23,7 +23,7 @@
 - [x] 最新 converter Rust 候选（commit `bbe1426`，包含 `219b29b` 的错误传播修复）完成 Release 构建；发布脚本用本地候选 zip 完成 converter/runtime staging，`--help` 返回 0，manifest 不包含自身，真实 OSGB 转换返回 0，损坏输入返回 1，中文绝对路径转换返回 0（回归 48、55）。
 - [x] Windows converter 发布 zip 已包含 x64 MSVC release CRT；桌面 runtime 将 CRT 同时部署到 converter 与 processor/top_rebuild 目录，并在 staging/NSIS 清单中强制检查（回归 54）。
 - [x] converter `d06a495` 对有效 EPSG:4544 原点完成转换；投影域外原点返回明确 `OSGB_EPSG_TRANSFORM_FAILED`，processor 退出 1 且不提交最终目录（回归 49）。
-- [x] 最新候选 v2 已重新打包 NSIS；安装到隔离目录后可启动并创建 `tasks.db`，安装内 converter `--help` 与真实 OSGB 转换成功，强制结束后无残留进程（回归 52）。
+- [x] 最新含 CRT/Unicode 修复的候选已重新打包 NSIS；安装到隔离目录后可启动并创建 `tasks.db`，安装内 converter/processor 对中文输入根、中文 Tile 名和中文/空格输出路径均成功，强制结束后无残留进程（回归 52–55）。
 
 ## Windows 安装验收
 
