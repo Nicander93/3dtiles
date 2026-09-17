@@ -34,7 +34,7 @@ cargo test --manifest-path apps\desktop\src-tauri\Cargo.toml --lib --locked
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File apps\desktop\scripts\package-windows.ps1 `
-  -SkipBuild -SkipTextureBundle `
+  -SkipBuild `
   -ConverterZip D:\code\3dtiles\.cache\geoforge-converter-0.1.1-unicode-crt.zip
 ```
 

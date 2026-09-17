@@ -79,7 +79,7 @@ git push origin v0.1.1
 
 也可在 Actions 里手动跑 `workflow_dispatch`（只上传 artifact，不建 Release）。
 
-当前安装包开箱支持 **OSGB → 3D Tiles** 与 **顶层重建**；**不含** KTX2 / `geoforge-texture`（后续就绪后再去掉打包脚本的 `-SkipTextureBundle`）。未签名，首次安装可能被 SmartScreen 拦截。
+当前安装包开箱支持 **OSGB → 3D Tiles**、**顶层重建** 与 **KTX2 纹理压缩**。ETC1S 可由 converter 原生生成，UASTC 和已有 Tiles 纹理处理由随包提供的 `geoforge-texture` / `basisu` 完成。安装包未签名，首次安装可能被 SmartScreen 拦截。
 
 ## 文档
 

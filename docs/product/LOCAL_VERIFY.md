@@ -45,10 +45,10 @@ Task DB and preview cache live under `.geoforge` (gitignored).
 
 ```powershell
 cd apps/desktop
-powershell -NoProfile -File scripts/package-windows.ps1 -SkipTextureBundle
+powershell -NoProfile -File scripts/package-windows.ps1
 ```
 
-`package-windows.ps1` 会清理并 staging `processor.exe`、`top_rebuild.exe`、`_3dtile.exe` 及其 OSG/GDAL/PROJ 和 MSVC runtime DLL。`-SkipTextureBundle` 表示首版只验证转换与重建；UI 不应把纹理压缩显示为可用。Cesium 运行时已经随应用打包，可离线加载本地 3D Tiles。
+`package-windows.ps1` 会清理并 staging `processor.exe`、`top_rebuild.exe`、`_3dtile.exe`、`geoforge-texture.exe`、`basisu.exe` 及其 OSG/GDAL/PROJ 和 MSVC runtime DLL。Cesium 运行时已经随应用打包，可离线加载本地 3D Tiles。
 
 NSIS 产物位于 `src-tauri/target/release/bundle/nsis/`。2026-09-12 的 `0.1.0` 包已通过隔离静默安装和首次启动冒烟。
 

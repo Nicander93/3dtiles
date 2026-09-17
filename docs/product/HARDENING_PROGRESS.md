@@ -111,6 +111,7 @@
 - 桌面错误事件新增回归：`CONVERTER_EXIT_NONZERO` 会同时保留错误正文、错误码、失败阶段和日志；Tauri library tests 增至 11 项通过（回归 60）。
 - `590154b` 的结构化前端错误解析、设置页目录选择失败提示以及产品 CRT 完整门槛已打入最新 NSIS（SHA256=`a6b92ecdde25d2eddac08b9fb477f8658c7ad877a268d3caadcbe4386fc3d9ea`）；全新隔离安装后 converter `--help`、85 文件真实转换、processor 86 文件转换和 capabilities 均通过（回归 61）。
 - 安装版误用编译期源码目录纹理脚本的问题已修复：打包模式只在 runtime 内查找可选纹理组件，前端与 processor 都会在转换前拒绝不可用的 KTX2；Windows 启动 processor、converter、top_rebuild 和 basisu 时统一使用 `CREATE_NO_WINDOW`。新 NSIS 的 KTX2 预检未创建输出，`keep` 真实转换生成 86 个文件（回归 62，SHA256=`bcd0f0672f6d3baacd4bc58914915dfcf56134ce95c5b5451d54435720fce4b9`）。
+- KTX2 已改为随安装包交付：converter 原生 ETC1S 经实际 `KHR_texture_basisu` 验证，`geoforge-texture.exe` / `basisu.exe` 提供 UASTC 和已有 Tiles 后处理；release workflow 会构建并检查两项组件。香港样本暴露的并发空 JSON/Windows 原生崩溃会自动清理任务临时输出并单线程重试一次；同一数据单线程和最终安装版均生成 4,586 个文件（回归 63）。
 
 验证命令：
 
