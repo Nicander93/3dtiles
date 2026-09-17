@@ -41,7 +41,7 @@ if (-not $SkipTextureBundle -and -not (Test-Path (Join-Path $TextureSrc "geoforg
 if (Test-Path $TextureSrc) {
   New-Item -ItemType Directory -Force -Path $TextureDst | Out-Null
   Copy-Item -Recurse -Force (Join-Path $TextureSrc "*") $TextureDst
-  # Ensure MSVC CRT sits beside basisu.exe (direct launch / 0xc0000135 packaging fix).
+  # Ensure MSVC CRT and zstd.dll sit beside basisu.exe (direct launch / 0xc0000135 packaging fix).
   $crtNames = @(
     "concrt140.dll",
     "msvcp140.dll",
@@ -52,7 +52,8 @@ if (Test-Path $TextureSrc) {
     "vccorlib140.dll",
     "vcruntime140.dll",
     "vcruntime140_1.dll",
-    "vcruntime140_threads.dll"
+    "vcruntime140_threads.dll",
+    "zstd.dll"
   )
   $crtSrcDirs = @(
     (Join-Path $BundleDir "bin"),
@@ -105,7 +106,7 @@ if (-not $SkipTextureBundle) {
   $tex = Get-ChildItem -Recurse $TextureDst -Filter "geoforge-texture.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
   if (-not $tex) { $missing += "resources/runtime/texture/geoforge-texture.exe" }
   if (-not (Test-Path (Join-Path $TextureDst "basisu.exe"))) { $missing += "resources/runtime/texture/basisu.exe" }
-  foreach ($dll in @("msvcp140.dll", "msvcp140_2.dll", "vcruntime140.dll", "vcruntime140_1.dll")) {
+  foreach ($dll in @("msvcp140.dll", "msvcp140_2.dll", "vcruntime140.dll", "vcruntime140_1.dll", "zstd.dll")) {
     if (-not (Test-Path (Join-Path $TextureDst $dll))) {
       $missing += ("resources/runtime/texture/" + $dll)
     }

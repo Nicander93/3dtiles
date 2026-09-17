@@ -1,5 +1,6 @@
-# Copy MSVC CRT from runtime\bin (or converter) beside basisu.exe.
-# Fixes direct basisu launch failing with 0xc0000135 on machines without VC++ redist.
+# Copy MSVC CRT and zstd.dll from runtime\bin (or converter) beside basisu.exe.
+# Fixes direct basisu launch failing with 0xc0000135 (STATUS_DLL_NOT_FOUND) on machines
+# without VC++ redist or when zstd.dll is missing.
 # Usage:
 #   powershell -File apps/desktop/scripts/fix-basisu-crt.ps1 [-RuntimeRoot "D:\sofware\GeoForge 3D\resources\runtime"]
 param(
@@ -34,7 +35,8 @@ $crtNames = @(
   "vccorlib140.dll",
   "vcruntime140.dll",
   "vcruntime140_1.dll",
-  "vcruntime140_threads.dll"
+  "vcruntime140_threads.dll",
+  "zstd.dll"
 )
 $srcDirs = @(
   (Join-Path $RuntimeRoot "bin"),
@@ -52,7 +54,7 @@ foreach ($name in $crtNames) {
     }
   }
 }
-Write-Host "Copied CRT beside basisu: $($copied -join ', ')"
+Write-Host "Copied CRT + zstd beside basisu: $($copied -join ', ')"
 Write-Host "Probing: $Basisu -version"
 & $Basisu -version
 Write-Host "EXIT=$LASTEXITCODE"

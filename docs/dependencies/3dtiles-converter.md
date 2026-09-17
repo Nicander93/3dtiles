@@ -53,7 +53,7 @@ resources/runtime/
 ```
 
 `top_rebuild` prepends `runtime/texture` and sibling `runtime/bin` to `PATH` when
-spawning `basisu` (encode + unpack). Packaging also copies MSVC CRT DLLs
+spawning `basisu` (encode + unpack). Packaging also copies MSVC CRT DLLs and **zstd.dll**
 **next to** `basisu.exe` (`prepare-texture.ps1` / `package-windows.ps1`) so a
 direct `basisu.exe -version` does not fail with `0xc0000135` when VC++ is not
 installed system-wide. `runtime/bin` remains a second CRT home on `PATH`.
