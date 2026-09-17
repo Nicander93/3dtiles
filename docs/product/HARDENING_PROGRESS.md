@@ -12,11 +12,11 @@
 | H04 | 已完成 | 临时目录归属、task marker、独占创建和 no-overwrite 单测通过 |
 | H05 | 已完成 | 两个转换页面和错误解析已构建验证 |
 | H06 | 已完成 | stderr/stdout sidecar、受控非零 converter fixture、退出码和任务详情链路已验证 |
-| H07 | 已完成（本机候选构建） | converter Rust/C++ 修改已用 MSVC 18.6.2 + vcpkg x64-windows 构建；最新 Rust 输入错误处理候选已通过 `cargo check`、Release 构建、真实 OSGB 和损坏输入负向回归 |
+| H07 | 已完成（本机候选构建） | converter Rust/C++ 修改已用 MSVC 18.6.2 + vcpkg x64-windows 构建；最新地理参考错误处理候选已通过 `cargo check`、Release 构建、真实 OSGB、EPSG:4544 和损坏输入负向回归 |
 | H08 | 已完成（本机候选构建） | OSG `OSG_USE_UTF8_FILENAME` 路径修复、URI/JSON 修改已进入候选 runtime；真实中文输入/输出目录和中文 Tile 目录/文件名转换均通过 |
 | H09 | 未触发 | 尚未取得同一新 binary 的原生崩溃证据 |
 | H10 | 本机候选已验证，正式发布待更新 | 最新本机候选 runtime 已通过 `--help`、负向输入、真实 OSGB 和发布脚本 staging；固定清单仍保留已发布 SHA256，待发布新 converter 后再更新 |
-| H11 | 关闭清理代码完成，安装版场景待验收 | Tauri 关闭窗口会标记 queued/running/cancelling 任务为 `interrupted`、终止活动 processor 并停止调度；Windows unit test 验证 Job Object 与 shutdown 子进程均在 3 秒内结束；完整安装 GUI/多级子进程仍待验收 |
+| H11 | 关闭清理代码完成，安装版场景待验收 | Tauri 关闭窗口会标记 queued/running/cancelling 任务为 `interrupted`、清除旧 PID/结束字段并终止活动 processor；10 项 Tauri library tests 覆盖 shutdown 与启动恢复；完整安装 GUI/多级子进程仍待验收 |
 | H12 | 已完成 | 文件 tail 有界并处理 UTF-8 边界 |
 | H13 | 已完成 | scanner/layout/capabilities 单测和 smoke 通过 |
 | H14 | 代码完成，资源曲线已取得 | 磁盘、线程、峰值内存指标已接入；1/2/4 worker 真实样本曲线均成功；约 932 MB/4567 Tile 样本取消后无残留；香港 8×8（约 2.47 GB、11,124 OSGB）2 worker 全量转换及顶层重建均成功；真实 ACL/磁盘满故障注入仍待执行 |
@@ -76,7 +76,7 @@
 - 对已存在成果目录执行输出安全回归：返回 `PATH_OUTPUT_EXISTS`（退出码 1），sentinel 内容保持不变且未创建 `tileset.json`；使用极高 `GEOFORGE_LOW_DISK_BYTES` 做受控阈值回归时发出 `LOW_DISK_SPACE` warning，仍能完成小样本提交（详见回归 22–23）。
 - 将输出父路径设为已有普通文件时，processor 返回 `PATH_OUTPUT_NOT_WRITABLE`（退出码 1），未创建子目录且原文件内容保持不变；真实 ACL 拒绝写入仍需安装版测试（回归 25）。
 - 扫描负向 fixture：缺失 `metadata.xml` 与未闭合 XML 均在转换前返回 `valid=false`、退出码 1，并保留具体路径/解析错误（回归 26–27）。
-- Desktop Rust Windows unit test 直接覆盖 Job Object kill-on-close：附着 30 秒测试子进程后关闭 Job，子进程在 3 秒内退出，9 项桌面库测试全部通过（回归 28、47）。
+- Desktop Rust Windows unit test 直接覆盖 Job Object kill-on-close：附着 30 秒测试子进程后关闭 Job，子进程在 3 秒内退出；另有启动恢复回归，10 项桌面库测试全部通过（回归 28、47、50）。
 - Desktop Rust 增加关闭清理回归：`ProcessManager::shutdown` 先把活动任务标为 `interrupted`，再终止附着子进程并阻止调度器启动新任务；Windows shutdown 单元测试通过（回归 47）。
 - 临时 NSIS 安装的默认启动在当前受限环境因 AppData 只读而阻塞；隔离数据目录下进程可驻留但窗口未被自动化接口枚举，未把它记为安装 GUI 通过（回归 29）。
 - 同一真实 `OSGBny` 以 1、2、4 个 converter worker 各运行一次，三次均成功；耗时随并发下降（3035→1629→1025 ms），峰值工作集随并发上升（29,237,248→35,753,984→47,386,624 字节），成果均完整（回归 30）。
@@ -96,6 +96,8 @@
 - converter 仓库提交 `219b29b` 已完成输入路径、元数据和 Tile 结果的错误返回收敛：异常 CString、非法数值、文件/JSON/目录读取失败均返回明确失败，不再因 `unwrap` 触发进程 panic；MSVC Release 构建和自带完整 DLL 的临时 runtime `--help` 均通过。
 - 用该最新 converter 生成临时候选 zip 并执行 `prepare-converter.ps1`、`prepare-runtime.ps1 -SkipBuild -ConverterZip`：staging 通过，manifest 文件数 362，未包含自身；候选 `_3dtile.exe` SHA256 为 `c54c49f00063c3fda473c182dfe98a5000d63d7fd244db7823fdf81f1fc8d648`（回归 48）。
 - 同一候选 runtime 对真实 `OSGBny` 完成 85 文件的 convert-only；隔离副本中破坏一个 `.osgb` 文件时返回退出码 1，未生成最终 `tileset.json`（回归 48）。
+- converter 提交 `d06a495` 将 OSGB 元数据、ENU/EPSG/WKT 原点转换和非法配置改为显式失败：`EPSG:4544` 有效原点可完成转换；投影域外原点返回 `OSGB_EPSG_TRANSFORM_FAILED`、退出码 1，processor 不提交最终目录（回归 49）。最新候选 `_3dtile.exe` SHA256 为 `376d02d7cd99e8091b43928772a1917d91d598c5e9a8f45868fede37f6742f76`。
+- `mark_stale_interrupted` 现在在桌面重启恢复时同时写入 `finished_at`、清除旧 `pid` 和 `cancel_requested`；新增启动恢复单测，Tauri library tests 由 9 项增至 10 项（回归 50）。
 
 验证命令：
 
@@ -104,7 +106,7 @@ cargo check                         通过
 cargo test -p geoforge-protocol     通过
 cargo test                            90 项通过（16 suites）
 cargo test -p processor --lib        27 项通过
-desktop Tauri cargo test --lib      9 项通过
+desktop Tauri cargo test --lib      10 项通过
 npm test                             通过（纯函数回归）
 npm run build                        通过
 desktop Tauri cargo check (Windows target) 通过

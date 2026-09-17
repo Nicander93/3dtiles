@@ -61,7 +61,8 @@ impl TaskStore {
     conn
       .execute(
         "UPDATE tasks SET status = 'interrupted', stage = COALESCE(NULLIF(stage,''), 'interrupted'),
-         updated_at = ?1
+         updated_at = ?1, finished_at = COALESCE(finished_at, ?1), pid = NULL,
+         cancel_requested = 0
          WHERE status IN ('running', 'cancelling', 'queued')",
         params![now_secs()],
       )
@@ -525,6 +526,46 @@ mod tests {
     assert_eq!(final_task.error.as_deref(), Some("controlled failure"));
     assert_eq!(final_task.stage, "convert");
     assert!(final_task.log.contains("log-99"));
+
+    let _ = fs::remove_dir_all(data_dir);
+  }
+
+  #[test]
+  fn startup_marks_stale_tasks_interrupted_and_clears_runtime_fields() {
+    let conn = Connection::open_in_memory().expect("open sqlite");
+    init_schema(&conn).expect("create schema");
+    let data_dir = std::env::temp_dir().join(format!(
+      "geoforge-startup-recovery-{}",
+      SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock before unix epoch")
+        .as_nanos()
+    ));
+    let store = super::TaskStore::new(Arc::new(Mutex::new(conn)), data_dir.clone());
+    let task = store
+      .create("convert-osgb", "input", "output", serde_json::json!({}), "stale")
+      .expect("create task");
+    store
+      .update_fields(&task.id, |record| {
+        record.status = "running".into();
+        record.stage = "convert".into();
+        record.pid = Some(12345);
+        record.cancel_requested = true;
+      })
+      .expect("mark task running");
+
+    store
+      .mark_stale_interrupted()
+      .expect("mark stale task interrupted");
+    let recovered = store
+      .get(&task.id)
+      .expect("read recovered task")
+      .expect("task exists");
+    assert_eq!(recovered.status, "interrupted");
+    assert_eq!(recovered.stage, "convert");
+    assert!(recovered.finished_at.is_some());
+    assert_eq!(recovered.pid, None);
+    assert!(!recovered.cancel_requested);
 
     let _ = fs::remove_dir_all(data_dir);
   }

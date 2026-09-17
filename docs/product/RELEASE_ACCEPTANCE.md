@@ -7,7 +7,7 @@
 - [x] 根仓库 `cargo test` 通过（90 项，16 suites）。
 - [x] `apps/desktop` 前端 `npm ci && npm test && npm run build` 通过（2026-09-16；`npm ci` 使用工作区临时缓存，未修改 lockfile）。
 - [x] 干净安装后的 `npm test` 和 `npm run build` 通过。
-- [x] Desktop Tauri library 测试通过（9 项，包含关闭清理与 Job Object 回归）。
+- [x] Desktop Tauri library 测试通过（10 项，包含关闭清理、Job Object 和启动恢复回归）。
 - [x] Desktop Windows target `cargo check` 通过。
 - [x] `processor capabilities --json` 能报告 converter、top_rebuild 和纹理能力。
 - [x] `git diff --check` 通过。
@@ -21,6 +21,7 @@
 - [x] 最新本机候选 converter 对香港 8×8 真实 OSGB（11,124 个 OSGB、约 2.47 GB）完成全量 convert→validate→commit；退出码 0，耗时 99,842 ms，输出 11,186 个文件，64/64 个根 URI 可解析（回归 40）。
 - [x] 同一最新候选成果完成 `rebuild-top --levels 0 --texture keep`→validate→commit；退出码 0，耗时 73,910 ms，输出 11,208 个文件，85/85 个 content URI 可解析（回归 41）。
 - [x] 最新 converter Rust 候选（commit `219b29b`）完成 Release 构建；发布脚本用本地候选 zip 完成 converter/runtime staging，`--help` 返回 0，manifest 不包含自身，真实 OSGB 转换返回 0，损坏输入返回 1（回归 48）。
+- [x] converter `d06a495` 对有效 EPSG:4544 原点完成转换；投影域外原点返回明确 `OSGB_EPSG_TRANSFORM_FAILED`，processor 退出 1 且不提交最终目录（回归 49）。
 
 ## Windows 安装验收
 
