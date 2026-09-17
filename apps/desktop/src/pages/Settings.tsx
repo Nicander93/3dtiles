@@ -99,9 +99,11 @@ export function Settings() {
             onPick={
               isTauri()
                 ? () =>
-                    void selectOutputDirectory().then((p) => {
-                      if (p) setForm({ ...form, defaultOutputRoot: p });
-                    })
+                    void selectOutputDirectory()
+                      .then((p) => {
+                        if (p) setForm({ ...form, defaultOutputRoot: p });
+                      })
+                      .catch((e) => setLoadError(friendlyError(e)))
                 : undefined
             }
             hint="新建任务时用于建议输出路径"

@@ -17,7 +17,9 @@ async function loadTypeScript(relativePath) {
 const errors = await loadTypeScript('../src/api/errorUtils.ts');
 assert.equal(errors.friendlyError('xxx'), 'xxx');
 assert.equal(errors.friendlyError(new Error('xxx')), 'xxx');
+assert.equal(errors.friendlyError({ error: 'structured failure' }), 'structured failure');
 assert.equal(errors.friendlyError({ detail: { message: 'nested' } }), 'nested');
+assert.equal(errors.friendlyError({}), '发生未知错误，请查看任务日志。');
 
 const forms = await loadTypeScript('../src/lib/formUtilsCore.ts');
 assert.equal(forms.suggestOutputPath('C:\\data\\scene.osgb', '', '_tiles'), 'C:\\data\\scene.osgb_tiles');
