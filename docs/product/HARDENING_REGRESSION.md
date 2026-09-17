@@ -12,7 +12,7 @@
 | Converter 版本 / source commit | `0.1.0` / `a464f0b8e89c13ddfbf0f50af84ea153cdc90b0b`（本机候选构建） |
 | Converter SHA256 | 本机候选 runtime `_3dtile.exe`: `40015f4d776db5acb187a8537e08905a8a47efd80e3c771d07a9bdb24fa6a32e`; 固定发布清单值为 `77cadd01941add0297a52a22ce26918d8d22c3729a0ae564556fce14327b5c5b`，两者不一致，不能宣称已更新正式发布包 |
 | Runtime 根目录 | `D:\\code\\3dtiles\\dist\\runtime`（本机候选，converter `--help` 返回 0；已完成临时 NSIS 安装验收） |
-| Installer SHA256 | 本机最新候选 `GeoForge 3D_0.1.0_x64-setup.exe`: `5dd2c9242ebc47759571d362c7dd5c7c71bf6fcbbead5e66915cccc392f15af`（H11/H13/H14 重打包；回归 59） |
+| Installer SHA256 | 本机最新候选 `GeoForge 3D_0.1.0_x64-setup.exe`: `5dd2c9242ebc47759571d362c7dd5c7c71bf6fcbbeead5e66915cccc392f15af`（H11/H13/H14 重打包；回归 59） |
 | Windows 版本 | 未能读取 WMI；本记录不伪造版本 |
 | CPU / 内存 | 未能读取 WMI；本记录不伪造硬件数据 |
 
@@ -80,7 +80,7 @@
 | 56 | H11/H13 最新 NSIS 重打包 | 重新构建包含 `214b978` 关窗收尾代码、`b03bf48` 顶层重建输入校验、`bbe1426` converter 和 MSVC CRT 的安装包；全新隔离目录安装后执行 converter/processor/启动检查 | NSIS SHA256=`f40fe1e6506db3cccb83230e34ac1493e14e9abc473b490a9606005ee47a3a55`；安装到 `.cache\\installed-final-v6-20260917`；`_3dtile.exe --help`、中文输入转换、`top_rebuild.exe --help` | `.cache\\installed-final-v6-20260917`、`.cache\\installed-final-v6-output` | 通过：安装与运行时检查 | 0（全部） | `.cache\\installed-final-v6-help.log`、`.cache\\installed-final-v6-converter.log`、`.cache\\installed-final-v6-top-help.log` | converter 85 个文件且有 `tileset.json`；受限环境无法把 `WM_CLOSE` 视为 Tauri `CloseRequested/Destroyed`，未将其计为完整 GUI 关闭验收。 |
 | 57 | 顶层重建非法 Tileset 输入 | 对外部 `boundingVolume.box` 含非数字值和长度不足的 `transform` 执行适配器负向单测；非法数据必须返回 `InvalidTileset`，不能静默变成 0 | `cargo test -p top_rebuild` | — | 通过：38 项测试 | 0 | cargo stdout | `rejects_non_numeric_bounding_box_values`、`rejects_malformed_transform_shape` 通过；修改提交 `b03bf48`。 |
 | 58 | processor 重建坐标跨度 | 对两个合法但相距 `i32` 边界的 Tile 坐标执行预检；网格尺寸计算不得整数溢出，必须明确拒绝稀疏跨度 | `cargo test -p processor --lib` | — | 通过：28 项测试 | 0 | cargo stdout | `rejects_extreme_coordinate_span_without_overflow` 通过；修改尚未重新打包到 NSIS，下一次候选包需更新 sidecar。 |
-| 59 | 最新 processor sidecar NSIS | 将 `8047027` 的重建坐标溢出修复打入 processor sidecar，重新安装候选并执行 converter/processor 运行时检查 | NSIS SHA256=`5dd2c9242ebc47759571d362c7dd5c7c71bf6fcbbbead5e66915cccc392f15af`；安装到 `.cache\\installed-final-v7-20260917`；安装内 `_3dtile.exe --help`、真实中文/ASCII OSGB 转换、`processor capabilities --json` | `.cache\\installed-final-v7-output` | 通过：安装与运行时检查 | 0（全部） | `.cache\\installed-final-v7-help.log`、`.cache\\installed-final-v7-converter.log`、`.cache\\installed-final-v7-capabilities.jsonl` | converter 85 个文件且有 `tileset.json`；正式 WebView/干净 VM 仍按清单待人工验收。 |
+| 59 | 最新 processor sidecar NSIS | 将 `8047027` 的重建坐标溢出修复打入 processor sidecar，重新安装候选并执行 converter/processor 运行时检查 | NSIS SHA256=`5dd2c9242ebc47759571d362c7dd5c7c71bf6fcbbeead5e66915cccc392f15af`；安装到 `.cache\\installed-final-v7-20260917`；安装内 `_3dtile.exe --help`、真实中文/ASCII OSGB 转换、`processor capabilities --json` | `.cache\\installed-final-v7-output` | 通过：安装与运行时检查 | 0（全部） | `.cache\\installed-final-v7-help.log`、`.cache\\installed-final-v7-converter.log`、`.cache\\installed-final-v7-capabilities.jsonl` | converter 85 个文件且有 `tileset.json`；正式 WebView/干净 VM 仍按清单待人工验收。 |
 
 | 60 | 桌面错误事件诊断链 | 用内存 TaskStore 注入 processor `error` 事件，确认任务记录保留错误正文、`errorCode`、`failedStage` 和日志文本 | `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib --locked` | — | 通过：11 项测试 | 0 | cargo stdout | `error_event_preserves_code_stage_message_and_log` 通过；代码修改仅在测试和事件持久化边界，未改变协议 schema。 |
 ## 单次记录模板

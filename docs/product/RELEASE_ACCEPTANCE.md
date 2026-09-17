@@ -25,7 +25,7 @@
 - [x] converter `d06a495` 对有效 EPSG:4544 原点完成转换；投影域外原点返回明确 `OSGB_EPSG_TRANSFORM_FAILED`，processor 退出 1 且不提交最终目录（回归 49）。
 - [x] 最新含 CRT/Unicode 修复的候选已重新打包 NSIS；安装到隔离目录后可启动并创建 `tasks.db`，安装内 converter/processor 对中文输入根、中文 Tile 名和中文/空格输出路径均成功，强制结束后无残留进程（回归 52–55）。
 - [x] H11/H13 代码变更后已重新构建 NSIS（SHA256=`f40fe1e6506db3cccb83230e34ac1493e14e9abc473b490a9606005ee47a3a55`）；全新隔离安装完成 converter/top_rebuild `--help`、中文输入转换检查（回归 56）。
-- [x] processor 重建坐标溢出修复已重新打入 NSIS（SHA256=`5dd2c9242ebc47759571d362c7dd5c7c71bf6fcbbead5e66915cccc392f15af`）；全新隔离安装完成 converter `--help`、真实转换和 processor capabilities 检查（回归 59）。
+- [x] processor 重建坐标溢出修复已重新打入 NSIS（SHA256=`5dd2c9242ebc47759571d362c7dd5c7c71bf6fcbbeead5e66915cccc392f15af`）；全新隔离安装完成 converter `--help`、真实转换和 processor capabilities 检查（回归 59）。
 
 ## Windows 安装验收
 
