@@ -102,6 +102,7 @@
 - 用候选 v2 runtime 重新生成 NSIS 并安装到隔离目录：安装器退出 0，安装版创建隔离 `tasks.db` 并可驻留；强制结束安装版进程后没有残留 processor/converter，安装内 converter hash 与候选一致，直接真实 OSGB 转换返回 0（回归 52）。这仍不等同于“有活动任务时点击窗口关闭并重启”的 GUI 验收。
 - 在同一安装版隔离数据目录预置 `running` 任务后重新启动安装版，实际数据库状态变为 `interrupted`，旧 PID 被清除、`finished_at` 写入且未启动伪造任务（回归 53）；活动任务关闭窗口的完整 GUI 操作仍待可操作桌面环境。
 - 复核安装包依赖时发现 v2 候选依赖开发机全局 MSVC runtime；converter 的 `_3dtile.exe` 和产品 `processor.exe` 分别会加载 `MSVCP140.dll` / `VCRUNTIME140*.dll`。converter 发布脚本现在把 x64 MSVC release CRT 打进 zip，主仓库 staging 同时复制到 `converter/` 与 `bin/` 并设为硬门槛（converter `8e66070`）。用含 CRT 的候选 zip 重新生成 NSIS：安装版 `--help`、真实 OSGB 转换、processor capabilities 和桌面启动均通过（回归 54）；旧 v2 安装包只代表已有 VC++ runtime 的开发机验证。
+- 继续复核安装版 Unicode 路径时发现 H08 的遗漏：Windows `canonicalize()` 生成的 `\\?\` 前缀会让旧 OSG 插件无法读取中文输入根目录；converter `bbe1426` 对已有绝对路径保持普通 UTF-8，只对相对路径 canonicalize。含 CRT 的新 NSIS 安装版已用中文输入目录、中文/空格输出目录分别完成 converter 85 文件和 processor 86 文件转换，桌面隔离中文数据目录也能启动并创建 `tasks.db`（回归 55）。
 
 验证命令：
 
