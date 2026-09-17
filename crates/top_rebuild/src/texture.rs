@@ -3,7 +3,8 @@
 //! - Hash dedup (SHA-256 of decoded RGBA)
 //! - Resize to `maxTextureSize`
 //! - Enforce `maxTextureBytes` (iterative downscale + warnings)
-//! - Optional KTX2 via `basisu` CLI (honest if unavailable)
+//! - Optional KTX2 encode/decode via `basisu` CLI (honest if unavailable)
+//! - Input `image/ktx2` is unpacked with basisu (`GEOFORGE_BASISU` / PATH / vcpkg)
 //!
 //! V1: no atlas / UV remap / baking. Original UVs preserved on mesh.
 
@@ -120,7 +121,12 @@ pub struct TextureMetrics {
     pub warnings: Vec<String>,
 }
 
-/// Locate `basisu` (PATH, GEOFORGE_BASISU, or vcpkg_installed relative to cwd/repo).
+/// Locate `basisu` for KTX2 encode/decode.
+///
+/// Search order:
+/// 1. `GEOFORGE_BASISU` (absolute path to the binary; preferred on Windows packaging)
+/// 2. `basisu` / `basisu.exe` on `PATH` (`which` / bare spawn)
+/// 3. `vcpkg_installed/*/tools/basisu/basisu[.exe]` relative to cwd / known roots
 pub fn find_basisu() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("GEOFORGE_BASISU") {
         let pb = PathBuf::from(&p);
@@ -128,22 +134,31 @@ pub fn find_basisu() -> Option<PathBuf> {
             return Some(pb);
         }
     }
-    let mut lookup = Command::new("which");
-    lookup.arg("basisu");
-    hide_console_window(&mut lookup);
-    if let Ok(out) = lookup.output() {
-        if out.status.success() {
-            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !s.is_empty() {
-                let pb = PathBuf::from(s);
-                if pb.is_file() {
-                    return Some(pb);
+    for cmd in ["which", "where"] {
+        let mut lookup = Command::new(cmd);
+        lookup.arg("basisu");
+        hide_console_window(&mut lookup);
+        if let Ok(out) = lookup.output() {
+            if out.status.success() {
+                let s = String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                if !s.is_empty() {
+                    let pb = PathBuf::from(s);
+                    if pb.is_file() {
+                        return Some(pb);
+                    }
                 }
             }
         }
     }
     let candidates = [
         "vcpkg_installed/x64-linux/tools/basisu/basisu",
+        "vcpkg_installed/x64-windows/tools/basisu/basisu.exe",
+        "vcpkg_installed/x64-windows/tools/basisu/basisu",
         "../vcpkg_installed/x64-linux/tools/basisu/basisu",
         "../../vcpkg_installed/x64-linux/tools/basisu/basisu",
         "/workspace/repos/3dtiles/vcpkg_installed/x64-linux/tools/basisu/basisu",
@@ -154,12 +169,18 @@ pub fn find_basisu() -> Option<PathBuf> {
             return Some(pb);
         }
     }
-    // Walk up from CARGO_MANIFEST_DIR-style relative
+    // Walk up from cwd looking for vcpkg-installed basisu
     let mut cur = std::env::current_dir().ok()?;
     for _ in 0..6 {
-        let p = cur.join("vcpkg_installed/x64-linux/tools/basisu/basisu");
-        if p.is_file() {
-            return Some(p);
+        for rel in [
+            "vcpkg_installed/x64-linux/tools/basisu/basisu",
+            "vcpkg_installed/x64-windows/tools/basisu/basisu.exe",
+            "vcpkg_installed/x64-windows/tools/basisu/basisu",
+        ] {
+            let p = cur.join(rel);
+            if p.is_file() {
+                return Some(p);
+            }
         }
         if !cur.pop() {
             break;
@@ -197,7 +218,8 @@ fn encode_ktx2(basisu: &Path, png_bytes: &[u8], work: &Path) -> Result<Vec<u8>> 
     let png_path = work.join("in.png");
     let out_path = work.join("out.ktx2");
     std::fs::write(&png_path, png_bytes)?;
-    let mut command = Command::new(basisu);
+    let basisu = std::fs::canonicalize(basisu).unwrap_or_else(|_| basisu.to_path_buf());
+    let mut command = Command::new(&basisu);
     command.args([
         "-ktx2",
         "-etc1s",
@@ -220,6 +242,85 @@ fn encode_ktx2(basisu: &Path, png_bytes: &[u8], work: &Path) -> Result<Vec<u8>> 
         return Err(TopRebuildError::Other("basisu produced empty ktx2".into()));
     }
     Ok(bytes)
+}
+
+fn is_ktx2_payload(mime: Option<&str>, raw: &[u8]) -> bool {
+    mime == Some("image/ktx2")
+        || (raw.len() >= 12 && raw[1] == b'K' && raw[2] == b'T' && raw[3] == b'X')
+}
+
+/// Unpack KTX2 → RGBA via basisu `-unpack` (writes PNG into a temp dir).
+fn decode_ktx2_to_texture(ktx2_bytes: &[u8]) -> Result<TextureData> {
+    let basisu = find_basisu().ok_or_else(|| {
+        TopRebuildError::ContentUnreadable(
+            "TEXTURE_INVALID: image/ktx2 requires basisu CLI (set GEOFORGE_BASISU to the binary, or install basisu on PATH / vcpkg_installed)".into(),
+        )
+    })?;
+    // Absolute path: Command.current_dir would break relative vcpkg paths on Unix.
+    let basisu = std::fs::canonicalize(&basisu).unwrap_or(basisu);
+
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let work = std::env::temp_dir().join(format!(
+        "top_rebuild_ktx2_dec_{}_{}",
+        std::process::id(),
+        id
+    ));
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).map_err(|e| {
+        TopRebuildError::ContentUnreadable(format!("TEXTURE_INVALID: temp dir: {e}"))
+    })?;
+    let in_path = work.join("in.ktx2");
+    std::fs::write(&in_path, ktx2_bytes).map_err(|e| {
+        TopRebuildError::ContentUnreadable(format!("TEXTURE_INVALID: write ktx2: {e}"))
+    })?;
+
+    let mut command = Command::new(&basisu);
+    command.current_dir(&work);
+    command.args(["-unpack", "-file", "in.ktx2", "-no_ktx", "-etc1_only"]);
+    hide_console_window(&mut command);
+    let output = command.output().map_err(|e| {
+        TopRebuildError::ContentUnreadable(format!("TEXTURE_INVALID: basisu unpack spawn: {e}"))
+    })?;
+    if !output.status.success() {
+        let _ = std::fs::remove_dir_all(&work);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Err(TopRebuildError::ContentUnreadable(format!(
+            "TEXTURE_INVALID: basisu unpack failed ({status}): {stderr} {stdout}",
+            status = output.status
+        )));
+    }
+
+    let png_path = std::fs::read_dir(&work)
+        .map_err(|e| {
+            TopRebuildError::ContentUnreadable(format!("TEXTURE_INVALID: read unpack dir: {e}"))
+        })?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| {
+            p.extension().and_then(|ext| ext.to_str()) == Some("png")
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.contains("unpacked"))
+                    .unwrap_or(false)
+        });
+
+    let Some(png_path) = png_path else {
+        let _ = std::fs::remove_dir_all(&work);
+        return Err(TopRebuildError::ContentUnreadable(
+            "TEXTURE_INVALID: basisu unpack produced no PNG".into(),
+        ));
+    };
+    let png_bytes = std::fs::read(&png_path).map_err(|e| {
+        TopRebuildError::ContentUnreadable(format!("TEXTURE_INVALID: read unpacked PNG: {e}"))
+    })?;
+    let _ = std::fs::remove_dir_all(&work);
+
+    TextureData::from_encoded_bytes(&png_bytes).map_err(|e| {
+        TopRebuildError::ContentUnreadable(format!("TEXTURE_INVALID: decode unpacked PNG: {e}"))
+    })
 }
 
 /// Dedup + resize + optional KTX2. Returns processed textures keyed by original hash
@@ -374,12 +475,18 @@ pub fn process_textures(
     Ok((out, metrics))
 }
 
-/// Extract embedded images from a GLB (PNG/JPEG). Returns textures + map of
+/// Extract embedded images from a GLB (PNG/JPEG/KTX2→RGBA). Returns textures + map of
 /// glTF image index → hash.
+///
+/// Applies the same `reader_compatible_glb` preprocess as mesh load so converter
+/// B3DMs with `KHR_texture_basisu` (missing `textures[i].source`) are readable.
+/// KTX2 payloads are decoded via basisu; failure is `CONTENT_UNREADABLE` /
+/// `TEXTURE_INVALID` (no fake placeholder textures).
 pub fn extract_textures_from_glb(
     glb: &[u8],
 ) -> Result<(Vec<TextureData>, BTreeMap<usize, String>)> {
-    let gltf = gltf::Gltf::from_slice(glb)
+    let glb = crate::glb::reader_compatible_glb(glb)?;
+    let gltf = gltf::Gltf::from_slice(&glb)
         .map_err(|e| TopRebuildError::Other(format!("gltf parse: {e}")))?;
     let blob = gltf.blob.as_ref();
     let mut textures = Vec::new();
@@ -406,10 +513,8 @@ pub fn extract_textures_from_glb(
                 gltf::image::Source::View { mime_type, .. } => Some(mime_type.to_string()),
                 gltf::image::Source::Uri { mime_type, .. } => mime_type.map(|s| s.to_string()),
             };
-            let is_ktx2 = mime.as_deref() == Some("image/ktx2")
-                || (raw.len() > 12 && raw[1] == b'K' && raw[2] == b'T' && raw[3] == b'X');
-            if is_ktx2 {
-                let tex = TextureData::from_opaque_encoded("image/ktx2", &raw);
+            if is_ktx2_payload(mime.as_deref(), &raw) {
+                let tex = decode_ktx2_to_texture(&raw)?;
                 index_to_hash.insert(i, tex.hash.clone());
                 textures.push(tex);
             } else {
@@ -454,5 +559,53 @@ mod tests {
     fn find_basisu_may_exist() {
         // Honest: either found under vcpkg or not — just shouldn't panic
         let _ = find_basisu();
+    }
+
+    #[test]
+    fn decode_ktx2_via_basisu_when_available() {
+        let Some(basisu) = find_basisu() else {
+            eprintln!("skip decode_ktx2_via_basisu_when_available: basisu not found");
+            return;
+        };
+        let png = TextureData::solid(200, 10, 10, 255, 8);
+        let png_bytes = encode_png(&png).unwrap();
+        let work = std::env::temp_dir().join(format!(
+            "top_rebuild_ktx2_roundtrip_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&work);
+        let ktx = encode_ktx2(&basisu, &png_bytes, &work).unwrap();
+        assert!(is_ktx2_payload(Some("image/ktx2"), &ktx));
+        let decoded = decode_ktx2_to_texture(&ktx).unwrap();
+        assert_eq!(decoded.width, 8);
+        assert_eq!(decoded.height, 8);
+        assert_eq!(decoded.rgba.len(), 8 * 8 * 4);
+        assert!(decoded.opaque_encoded.is_none());
+        let _ = std::fs::remove_dir_all(&work);
+    }
+
+    #[test]
+    fn ktx2_missing_basisu_is_texture_invalid() {
+        let prev = std::env::var_os("GEOFORGE_BASISU");
+        // Point at a guaranteed-missing path so find_basisu fails even if vcpkg has basisu
+        // — only when PATH/vcpkg also miss. If basisu is installed, skip (cannot force miss).
+        if find_basisu().is_some() {
+            eprintln!("skip ktx2_missing_basisu_is_texture_invalid: basisu present");
+            if let Some(v) = prev {
+                std::env::set_var("GEOFORGE_BASISU", v);
+            }
+            return;
+        }
+        let err = decode_ktx2_to_texture(b"\xabKTX 20\xbb\r\n\x1a\n????").unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("TEXTURE_INVALID") || msg.contains("CONTENT_UNREADABLE"),
+            "unexpected err: {msg}"
+        );
+        if let Some(v) = prev {
+            std::env::set_var("GEOFORGE_BASISU", v);
+        } else {
+            std::env::remove_var("GEOFORGE_BASISU");
+        }
     }
 }

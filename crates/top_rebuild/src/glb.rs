@@ -8,9 +8,84 @@ use std::collections::BTreeMap;
 
 const KHR_TECHNIQUES_WEBGL: &str = "KHR_techniques_webgl";
 const KHR_MATERIALS_UNLIT: &str = "KHR_materials_unlit";
+const KHR_TEXTURE_BASISU: &str = "KHR_texture_basisu";
 
 fn is_stripped_required_extension(name: &str) -> bool {
-    name == KHR_TECHNIQUES_WEBGL || name == KHR_MATERIALS_UNLIT
+    name == KHR_TECHNIQUES_WEBGL
+        || name == KHR_MATERIALS_UNLIT
+        || name == KHR_TEXTURE_BASISU
+}
+
+/// Strip reader-unsupported `extensionsRequired` entries and fill missing
+/// `textures[i].source` from `KHR_texture_basisu` (gltf 1.4 rejects both).
+/// Returns true if `root` was mutated.
+pub(crate) fn normalize_gltf_root_for_reader(root: &mut serde_json::Value) -> bool {
+    let mut changed = false;
+
+    let strip_required = root
+        .get("extensionsRequired")
+        .and_then(|value| value.as_array())
+        .map(|required| {
+            required.iter().any(|value| {
+                value
+                    .as_str()
+                    .map(is_stripped_required_extension)
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false);
+    if strip_required {
+        if let Some(required) = root
+            .get_mut("extensionsRequired")
+            .and_then(|value| value.as_array_mut())
+        {
+            required.retain(|value| {
+                value
+                    .as_str()
+                    .map(|name| !is_stripped_required_extension(name))
+                    .unwrap_or(true)
+            });
+            changed = true;
+        }
+        let empty = root
+            .get("extensionsRequired")
+            .and_then(|value| value.as_array())
+            .map(|a| a.is_empty())
+            .unwrap_or(false);
+        if empty {
+            if let Some(obj) = root.as_object_mut() {
+                obj.remove("extensionsRequired");
+            }
+        }
+    }
+
+    if let Some(textures) = root
+        .get_mut("textures")
+        .and_then(|value| value.as_array_mut())
+    {
+        for tex in textures.iter_mut() {
+            if tex.get("source").is_some() {
+                continue;
+            }
+            let basisu_source = tex
+                .pointer("/extensions/KHR_texture_basisu/source")
+                .cloned()
+                .or_else(|| {
+                    tex.get("extensions")
+                        .and_then(|e| e.get(KHR_TEXTURE_BASISU))
+                        .and_then(|b| b.get("source"))
+                        .cloned()
+                });
+            if let Some(src) = basisu_source {
+                tex.as_object_mut()
+                    .expect("texture object")
+                    .insert("source".into(), src);
+                changed = true;
+            }
+        }
+    }
+
+    changed
 }
 
 /// One triangulated primitive in a local (already scene-expanded) frame.
@@ -77,22 +152,10 @@ fn replace_glb_json(glb: &[u8], old_json_end: usize, root: &serde_json::Value) -
     Ok(out)
 }
 
-fn reader_compatible_glb(glb: &[u8]) -> Result<Vec<u8>> {
+/// Rewrite GLB JSON so `gltf` 1.4 can parse converter KTX2 / legacy assets.
+pub(crate) fn reader_compatible_glb(glb: &[u8]) -> Result<Vec<u8>> {
     let (mut root, json_end) = parse_glb_json(glb)?;
-    let Some(required) = root
-        .get_mut("extensionsRequired")
-        .and_then(|value| value.as_array_mut())
-    else {
-        return Ok(glb.to_vec());
-    };
-    let before = required.len();
-    required.retain(|value| {
-        value
-            .as_str()
-            .map(|name| !is_stripped_required_extension(name))
-            .unwrap_or(true)
-    });
-    if required.len() == before {
+    if !normalize_gltf_root_for_reader(&mut root) {
         return Ok(glb.to_vec());
     }
     replace_glb_json(glb, json_end, &root)
@@ -772,5 +835,59 @@ mod tests {
         let cx: f32 =
             prim.positions.iter().map(|p| p[0]).sum::<f32>() / prim.positions.len() as f32;
         assert!((cx - 100.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn normalize_fills_basisu_source_and_strips_required() {
+        let mut root = serde_json::json!({
+            "extensionsUsed": [KHR_TEXTURE_BASISU],
+            "extensionsRequired": [KHR_TEXTURE_BASISU, "OTHER_KEEP"],
+            "textures": [{
+                "sampler": 0,
+                "extensions": { (KHR_TEXTURE_BASISU): { "source": 2 } }
+            }]
+        });
+        assert!(normalize_gltf_root_for_reader(&mut root));
+        assert_eq!(root["textures"][0]["source"], 2);
+        assert_eq!(
+            root["extensionsRequired"],
+            serde_json::json!(["OTHER_KEEP"])
+        );
+        assert_eq!(
+            root["extensionsUsed"],
+            serde_json::json!([KHR_TEXTURE_BASISU])
+        );
+        // Idempotent
+        assert!(!normalize_gltf_root_for_reader(&mut root));
+    }
+
+    #[test]
+    fn khr_texture_basisu_glb_loads_after_preprocess() {
+        let glb =
+            make_textured_box_glb(2.0, 2.0, 1.0, 2, "mat0:1,1,1,1", (10, 20, 30), 16).unwrap();
+        let (mut root, json_end) = parse_glb_json(&glb).unwrap();
+        root["extensionsUsed"] = serde_json::json!([KHR_TEXTURE_BASISU]);
+        root["extensionsRequired"] = serde_json::json!([KHR_TEXTURE_BASISU]);
+        // Converter style: source only under extension
+        let src = root["textures"][0]["source"].clone();
+        root["textures"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("source");
+        root["textures"][0]["extensions"] = serde_json::json!({
+            (KHR_TEXTURE_BASISU): { "source": src }
+        });
+        let basisu_style = replace_glb_json(&glb, json_end, &root).unwrap();
+
+        // Raw gltf crate rejects missing source + required basisu
+        assert!(
+            gltf::Gltf::from_slice(&basisu_style).is_err(),
+            "expected gltf 1.4 to reject converter-style KTX2 GLB"
+        );
+
+        let mesh = load_mesh_from_glb(&basisu_style).unwrap();
+        assert_eq!(mesh.textures.len(), 1);
+        assert!(mesh.primitives[0].texture_hash.is_some());
+        assert!(!mesh.primitives.is_empty());
     }
 }
