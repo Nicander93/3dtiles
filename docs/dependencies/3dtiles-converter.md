@@ -41,4 +41,23 @@ runtime also places the MSVC CRT beside `bin/processor.exe` and
 `bin/top_rebuild.exe`; a developer machine's globally installed VC++ runtime
 must not be required by the installer.
 
+
+## basisu / KTX2 (runtime/texture)
+
+Packaged layout:
+
+```text
+resources/runtime/
+├─ bin/           # processor, top_rebuild, MSVC release CRT (vcruntime140*.dll, …)
+└─ texture/       # basisu.exe (+ optional geoforge-texture)
+```
+
+`top_rebuild` prepends `runtime/texture` and sibling `runtime/bin` to `PATH` when
+spawning `basisu` (encode + unpack), so CRT DLLs resolve without a system-wide
+VC++ install. Prefer also shipping CRT **next to** `basisu.exe`, or ensure
+`runtime/bin` remains the CRT home that `top_rebuild` adds to `PATH`.
+
+If unpack still fails, rebuild keeps the original `image/ktx2` bytes as opaque
+pass-through (no invented pixels) and logs a warning.
+
 Do not use Docker as a product fallback. Do not pin fanvanzh `v0.4` zip as the runtime.

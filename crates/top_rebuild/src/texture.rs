@@ -5,6 +5,8 @@
 //! - Enforce `maxTextureBytes` (iterative downscale + warnings)
 //! - Optional KTX2 encode/decode via `basisu` CLI (honest if unavailable)
 //! - Input `image/ktx2` is unpacked with basisu (`GEOFORGE_BASISU` / PATH / vcpkg)
+//! - Windows packaging: spawn PATH includes `basisu` dir and sibling `../bin`
+//!   (MSVC CRT). Unpack failure → opaque `image/ktx2` pass-through (no fake pixels).
 //!
 //! V1: no atlas / UV remap / baking. Original UVs preserved on mesh.
 
@@ -13,6 +15,7 @@ use image::imageops::FilterType;
 use image::{DynamicImage, ImageBuffer, ImageFormat, RgbaImage};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -26,6 +29,57 @@ fn hide_console_window(command: &mut Command) {
     }
     #[cfg(not(windows))]
     let _ = command;
+}
+
+
+/// Directories to prepend to `PATH` when spawning `basisu`.
+///
+/// GeoForge Windows layout keeps `basisu.exe` under `resources/runtime/texture/`
+/// while MSVC CRT DLLs (`vcruntime140.dll`, …) live in sibling
+/// `resources/runtime/bin/`. Without `bin` on `PATH`, spawn exits
+/// `0xc0000135` (STATUS_DLL_NOT_FOUND).
+///
+/// Always includes the basisu parent directory; adds `../bin` when that
+/// directory exists.
+pub fn basisu_path_prefixes(basisu: &Path) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    let Some(parent) = basisu.parent() else {
+        return dirs;
+    };
+    dirs.push(parent.to_path_buf());
+    let sibling_bin = parent.join("..").join("bin");
+    if sibling_bin.is_dir() {
+        dirs.push(
+            std::fs::canonicalize(&sibling_bin).unwrap_or_else(|_| sibling_bin),
+        );
+    }
+    dirs
+}
+
+/// Build a `PATH` value with [`basisu_path_prefixes`] prepended to the process PATH.
+pub fn path_with_basisu_dirs(basisu: &Path) -> OsString {
+    let mut entries = basisu_path_prefixes(basisu);
+    if let Some(existing) = std::env::var_os("PATH") {
+        entries.extend(std::env::split_paths(&existing));
+    }
+    std::env::join_paths(&entries).unwrap_or_else(|_| {
+        std::env::var_os("PATH").unwrap_or_default()
+    })
+}
+
+/// Configure a `basisu` [`Command`]: PATH for CRT DLLs, cwd, hide console.
+///
+/// - Encode: pass `cwd = None` so cwd becomes the basisu parent (absolute I/O).
+/// - Unpack: pass a writable temp `cwd` — basisu writes PNGs to cwd, and
+///   packaged `runtime/texture` may be read-only. PATH still includes basisu
+///   parent and sibling `../bin` (Windows CRT layout; fixes `0xc0000135`).
+fn configure_basisu_command(command: &mut Command, basisu: &Path, cwd: Option<&Path>) {
+    let run_cwd = cwd.or_else(|| basisu.parent());
+    if let Some(dir) = run_cwd {
+        command.current_dir(dir);
+    }
+    command.env("PATH", path_with_basisu_dirs(basisu));
+    hide_console_window(command);
 }
 
 /// Raw decoded texture carried through the proxy pipeline.
@@ -219,16 +273,19 @@ fn encode_ktx2(basisu: &Path, png_bytes: &[u8], work: &Path) -> Result<Vec<u8>> 
     let out_path = work.join("out.ktx2");
     std::fs::write(&png_path, png_bytes)?;
     let basisu = std::fs::canonicalize(basisu).unwrap_or_else(|_| basisu.to_path_buf());
+    // Absolute I/O paths: configure_basisu_command sets cwd to basisu parent.
+    let png_abs = std::fs::canonicalize(&png_path).unwrap_or(png_path);
+    let out_abs = out_path.clone();
     let mut command = Command::new(&basisu);
     command.args([
         "-ktx2",
         "-etc1s",
         "-file",
-        png_path.to_str().unwrap_or("in.png"),
+        png_abs.to_str().unwrap_or("in.png"),
         "-output_file",
-        out_path.to_str().unwrap_or("out.ktx2"),
+        out_abs.to_str().unwrap_or("out.ktx2"),
     ]);
-    hide_console_window(&mut command);
+    configure_basisu_command(&mut command, &basisu, None);
     let status = command
         .status()
         .map_err(|e| TopRebuildError::Other(format!("basisu spawn: {e}")))?;
@@ -249,14 +306,15 @@ fn is_ktx2_payload(mime: Option<&str>, raw: &[u8]) -> bool {
         || (raw.len() >= 12 && raw[1] == b'K' && raw[2] == b'T' && raw[3] == b'X')
 }
 
-/// Unpack KTX2 → RGBA via basisu `-unpack` (writes PNG into a temp dir).
-fn decode_ktx2_to_texture(ktx2_bytes: &[u8]) -> Result<TextureData> {
+/// Try basisu `-unpack` → RGBA. On any failure, returns an error (caller may
+/// fall back to opaque pass-through).
+fn decode_ktx2_via_basisu(ktx2_bytes: &[u8]) -> Result<TextureData> {
     let basisu = find_basisu().ok_or_else(|| {
         TopRebuildError::ContentUnreadable(
             "TEXTURE_INVALID: image/ktx2 requires basisu CLI (set GEOFORGE_BASISU to the binary, or install basisu on PATH / vcpkg_installed)".into(),
         )
     })?;
-    // Absolute path: Command.current_dir would break relative vcpkg paths on Unix.
+    // Absolute path: relative vcpkg paths break once cwd changes.
     let basisu = std::fs::canonicalize(&basisu).unwrap_or(basisu);
 
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -276,10 +334,13 @@ fn decode_ktx2_to_texture(ktx2_bytes: &[u8]) -> Result<TextureData> {
         TopRebuildError::ContentUnreadable(format!("TEXTURE_INVALID: write ktx2: {e}"))
     })?;
 
+            // Writable temp cwd (basisu writes PNGs here). PATH includes basisu parent
+    // + sibling ../bin so Windows CRT DLLs resolve (packaging layout).
     let mut command = Command::new(&basisu);
-    command.current_dir(&work);
     command.args(["-unpack", "-file", "in.ktx2", "-no_ktx", "-etc1_only"]);
-    hide_console_window(&mut command);
+    configure_basisu_command(&mut command, &basisu, Some(&work));
+
+
     let output = command.output().map_err(|e| {
         TopRebuildError::ContentUnreadable(format!("TEXTURE_INVALID: basisu unpack spawn: {e}"))
     })?;
@@ -321,6 +382,23 @@ fn decode_ktx2_to_texture(ktx2_bytes: &[u8]) -> Result<TextureData> {
     TextureData::from_encoded_bytes(&png_bytes).map_err(|e| {
         TopRebuildError::ContentUnreadable(format!("TEXTURE_INVALID: decode unpacked PNG: {e}"))
     })
+}
+
+/// Unpack KTX2 → RGBA via basisu, or opaque `image/ktx2` pass-through on failure.
+///
+/// Does not invent placeholder pixels: either real RGBA from unpack, or the
+/// original encoded bytes preserved for later embed.
+fn decode_ktx2_to_texture(ktx2_bytes: &[u8]) -> TextureData {
+    match decode_ktx2_via_basisu(ktx2_bytes) {
+        Ok(tex) => tex,
+        Err(e) => {
+            eprintln!(
+                "warning: KTX2 unpack failed ({e}); opaque pass-through image/ktx2 ({} bytes)",
+                ktx2_bytes.len()
+            );
+            TextureData::from_opaque_encoded("image/ktx2", ktx2_bytes)
+        }
+    }
 }
 
 /// Dedup + resize + optional KTX2. Returns processed textures keyed by original hash
@@ -475,13 +553,13 @@ pub fn process_textures(
     Ok((out, metrics))
 }
 
-/// Extract embedded images from a GLB (PNG/JPEG/KTX2→RGBA). Returns textures + map of
-/// glTF image index → hash.
+/// Extract embedded images from a GLB (PNG/JPEG/KTX2→RGBA or opaque KTX2).
+/// Returns textures + map of glTF image index → hash.
 ///
 /// Applies the same `reader_compatible_glb` preprocess as mesh load so converter
 /// B3DMs with `KHR_texture_basisu` (missing `textures[i].source`) are readable.
-/// KTX2 payloads are decoded via basisu; failure is `CONTENT_UNREADABLE` /
-/// `TEXTURE_INVALID` (no fake placeholder textures).
+/// KTX2 payloads are unpacked via basisu when possible; on failure the original
+/// `image/ktx2` bytes are kept as opaque pass-through (no invented pixels).
 pub fn extract_textures_from_glb(
     glb: &[u8],
 ) -> Result<(Vec<TextureData>, BTreeMap<usize, String>)> {
@@ -514,7 +592,7 @@ pub fn extract_textures_from_glb(
                 gltf::image::Source::Uri { mime_type, .. } => mime_type.map(|s| s.to_string()),
             };
             if is_ktx2_payload(mime.as_deref(), &raw) {
-                let tex = decode_ktx2_to_texture(&raw)?;
+                let tex = decode_ktx2_to_texture(&raw);
                 index_to_hash.insert(i, tex.hash.clone());
                 textures.push(tex);
             } else {
@@ -576,7 +654,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&work);
         let ktx = encode_ktx2(&basisu, &png_bytes, &work).unwrap();
         assert!(is_ktx2_payload(Some("image/ktx2"), &ktx));
-        let decoded = decode_ktx2_to_texture(&ktx).unwrap();
+        let decoded = decode_ktx2_to_texture(&ktx);
         assert_eq!(decoded.width, 8);
         assert_eq!(decoded.height, 8);
         assert_eq!(decoded.rgba.len(), 8 * 8 * 4);
@@ -585,27 +663,77 @@ mod tests {
     }
 
     #[test]
-    fn ktx2_missing_basisu_is_texture_invalid() {
-        let prev = std::env::var_os("GEOFORGE_BASISU");
-        // Point at a guaranteed-missing path so find_basisu fails even if vcpkg has basisu
-        // — only when PATH/vcpkg also miss. If basisu is installed, skip (cannot force miss).
-        if find_basisu().is_some() {
-            eprintln!("skip ktx2_missing_basisu_is_texture_invalid: basisu present");
-            if let Some(v) = prev {
-                std::env::set_var("GEOFORGE_BASISU", v);
-            }
-            return;
-        }
-        let err = decode_ktx2_to_texture(b"\xabKTX 20\xbb\r\n\x1a\n????").unwrap_err();
-        let msg = err.to_string();
-        assert!(
-            msg.contains("TEXTURE_INVALID") || msg.contains("CONTENT_UNREADABLE"),
-            "unexpected err: {msg}"
+    fn ktx2_unpack_failure_is_opaque_passthrough() {
+        // Invalid KTX2 body: basisu present → unpack fails; absent → find fails.
+        // Either path must opaque-pass-through, never invent pixels / hard-fail.
+        let bytes = b"\xabKTX 20\xbb\r\n\x1a\n????not-a-real-ktx2????";
+        let tex = decode_ktx2_to_texture(bytes);
+        let (mime, enc) = tex
+            .opaque_encoded
+            .as_ref()
+            .expect("expected opaque image/ktx2 pass-through");
+        assert_eq!(mime, "image/ktx2");
+        assert_eq!(enc.as_slice(), bytes);
+        assert_eq!(tex.width, 1);
+        assert_eq!(tex.height, 1);
+    }
+
+    #[test]
+    fn from_opaque_encoded_preserves_bytes() {
+        let raw = b"fake-ktx2-payload";
+        let tex = TextureData::from_opaque_encoded("image/ktx2", raw);
+        assert_eq!(
+            tex.opaque_encoded.as_ref().map(|(m, b)| (m.as_str(), b.as_slice())),
+            Some(("image/ktx2", raw.as_slice()))
         );
-        if let Some(v) = prev {
-            std::env::set_var("GEOFORGE_BASISU", v);
-        } else {
-            std::env::remove_var("GEOFORGE_BASISU");
-        }
+        let (proc, m) = process_textures(&[tex], 64, 0, false, None).unwrap();
+        assert_eq!(proc.len(), 1);
+        assert_eq!(proc[0].mime, "image/ktx2");
+        assert_eq!(proc[0].bytes, raw);
+        assert!(proc[0].ktx2);
+        assert_eq!(m.ktx2_encoded, 1);
+    }
+
+    #[test]
+    fn basisu_path_prefixes_includes_parent_and_sibling_bin() {
+        let root = std::env::temp_dir().join(format!(
+            "top_rebuild_basisu_path_{}",
+            std::process::id()
+        ));
+        let texture = root.join("texture");
+        let bin = root.join("bin");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&texture).unwrap();
+        std::fs::create_dir_all(&bin).unwrap();
+        let exe = texture.join("basisu");
+        std::fs::write(&exe, b"").unwrap();
+
+        let prefixes = basisu_path_prefixes(&exe);
+        assert!(
+            prefixes.iter().any(|p| p == &texture || p.ends_with("texture")),
+            "expected texture parent in {prefixes:?}"
+        );
+        assert!(
+            prefixes.iter().any(|p| {
+                let c = std::fs::canonicalize(&bin).unwrap_or(bin.clone());
+                p == &c || p == &bin || p.ends_with("bin")
+            }),
+            "expected sibling bin in {prefixes:?}"
+        );
+
+        let path = path_with_basisu_dirs(&exe);
+        let path_s = path.to_string_lossy();
+        assert!(
+            path_s.contains("texture") || path_s.contains("bin"),
+            "PATH should mention layout dirs: {path_s}"
+        );
+
+        // Without sibling bin, only parent is prepended.
+        let _ = std::fs::remove_dir_all(&bin);
+        let prefixes2 = basisu_path_prefixes(&exe);
+        assert_eq!(prefixes2.len(), 1);
+        assert_eq!(prefixes2[0], texture);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
