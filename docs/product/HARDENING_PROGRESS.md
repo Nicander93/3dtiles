@@ -67,8 +67,8 @@
 - 使用 `package-lock.json` 完成一次干净 `npm ci`，随后重新通过 `npm test` 和 `npm run build`；安装版验收仍单独保留。
 - 在新增 Tileset 边界校验后重新执行 synthetic grid 4×4 的 `process-tileset`，再次完成 scan→rebuild→validate→commit，退出码为 0，临时输入/输出随后清理。
 - 使用候选 runtime 的 `top_rebuild.exe` 重新执行 processor synthetic grid 4×4 smoke，确认 packaged runtime 解析、重建、校验和提交链路均返回 0。
-- 在 Visual Studio 18.6.2/MSVC 14.51.36231 和 vcpkg `x64-windows` 依赖树上完成 converter Release 原生构建；加入 OSG UTF-8 路径、相对 URI 和空 OSGB 叶节点修复后的候选 `_3dtile.exe` SHA256 为 `af7384f15059d6c3f6927f1aa754bffcf2036504fce3cb3628eb536c77e8e81e`。
-- 用前一版候选 runtime 生成的 NSIS 安装包已完成临时安装、真实 OSGB 中文路径转换和卸载验收（回归 15/31）；本轮又用包含空 OSGB 叶节点修复的候选 runtime 生成 NSIS 包，安装内 hash 与候选一致，真实 OSGB 转换返回 0 并成功卸载（回归 37）。正式发布仍需带版本号 zip 和固定清单 hash。
+- 在 Visual Studio 18.6.2/MSVC 14.51.36231 和 vcpkg `x64-windows` 依赖树上完成 converter Release 原生构建；加入 OSG UTF-8 路径、相对 URI、空 OSGB 叶节点和嵌套读取错误传播修复后的候选 `_3dtile.exe` SHA256 为 `40015f4d776db5acb187a8537e08905a8a47efd80e3c771d07a9bdb24fa6a32e`（converter commit `a464f0b8e89c13ddfbf0f50af84ea153cdc90b0b`）。
+- 用前一版候选 runtime 生成的 NSIS 安装包已完成临时安装、真实 OSGB 中文路径转换和卸载验收（回归 15/31）；本轮又用最新候选 runtime 生成 NSIS 包，带空格安装目录中的安装内 hash 与候选一致，真实 OSGB 转换返回 0 并成功卸载（回归 43）。正式发布仍需带版本号 zip 和固定清单 hash。
 - 修复 converter 在 `OSG_USE_UTF8_FILENAME=ON` 下错误转入系统代码页的问题；真实 `OSGBny`（78 个 Tile、约 14 MB）放在中文输入根目录时，候选 converter 直接转换和 processor 的 scan→convert→validate→commit 均退出 0，中文/空格输出目录中的 `tileset.json` 和 85 个成果文件可读。
 - 对同一真实成果执行 `rebuild-top` 时，因其布局不是规则网格而明确返回 `GRID_SPATIAL_MISMATCH`，退出码 1 且不提交输出；这是布局约束的预期拒绝，不是崩溃。
 - 在同一真实 `OSGBny` 上连续执行 10 次 `convert-osgb`，10/10 返回 0 并生成完整成果；日志记录耗时 1627–1729 ms、峰值工作集 34,897,920–37,687,296 字节，汇总见 `.cache/repeat-osgbny/summary.json`。
@@ -87,6 +87,9 @@
 - 使用包含空 OSGB 叶节点的香港 8×8 真实数据完成 2 worker 全量 convert→validate→commit；输入 11,124 个 OSGB、约 2.47 GB，耗时 267,409 ms，输出 11,186 个文件、约 3.11 GB，64 个根 URI 全部可解析（回归 35）。converter 对空叶节点记录明确 warning 并跳过，不再让该类节点阻断整批转换。
 - 使用上述 8×8 转换成果执行 `rebuild-top --levels 0 --texture keep`，完成 rebuild→validate→commit；耗时 72,205 ms，输出 11,208 个文件、约 3.15 GB，root children=4、proxy=21、85/85 个 content URI 可解析（回归 36）。
 - 中文 Tile 名称隔离副本继续通过 processor scan→convert→validate→commit；输出 86 个文件，6/6 URI 可解析且含 1 个中文 URI（回归 39）。
+- 最新候选下香港 8×8 全量转换再次通过；耗时 99,842 ms，converter 峰值 161,906,688 bytes，输出 11,186 个文件、约 3.11 GB，64/64 URI 可解析（回归 40）。同一成果顶层重建再次通过，耗时 73,910 ms，输出 11,208 个文件、约 3.15 GB，85/85 URI 可解析（回归 41）。
+- 损坏子 Tile 回归确认 converter 和 processor 都严格失败：具体读取错误进入 stderr tail，返回 `CONVERTER_EXIT_NONZERO`，最终目录和 `tileset.json` 不存在（回归 42）。
+- 运行中强制终止 converter 的回归通过：processor 返回 `CONVERTER_EXIT_NONZERO`，保留 `convert exited -1`、stderr tail 和任务日志，最终目录不存在且无残留进程（回归 44）。
 
 验证命令：
 
@@ -107,7 +110,7 @@ git diff --check                     通过
 
 - converter 源码的 `cargo metadata --no-deps` 和 `git diff --check` 通过；相邻仓库 `cargo fmt --all -- --check` 仍包含已有的 `common.rs`/`shape.rs`/`build.rs` 格式差异，未自动重排。
 - 固定 converter runtime 的 URL/SHA256 尚未更新：本机候选二进制只用于验收，必须先在 converter 仓库发布带版本号的 zip，再更新主仓库清单。
-- 真实中文输入根目录和中文 Tile 目录/文件名已通过；本地 Cesium 页面已加载真实 `OSGBny` 成果并显示 `tilesLoaded`（回归 24）；带空格的安装目录 convert-only、方括号/加号/括号特殊路径已通过（回归 31–32），长路径已得到可诊断拒绝（回归 33），4,585 文件香港成果的重建链和 11,124 OSGB 的 8×8 完整转换/重建也已通过（回归 34–36）。权限/磁盘故障和安装桌面 WebView 仍待端到端回归。
+- 真实中文输入根目录和中文 Tile 目录/文件名已通过；本地 Cesium 页面已加载真实 `OSGBny` 成果并显示 `tilesLoaded`（回归 24）；带空格的安装目录 convert-only、方括号/加号/括号特殊路径已通过（回归 31–32、43），长路径已得到可诊断拒绝（回归 33），4,585 文件香港成果的重建链和 11,124 OSGB 的 8×8 完整转换/重建也已通过（回归 34–36、40–41）。权限/磁盘故障和安装桌面 WebView 仍待端到端回归。
 - 当前真实失败样本尚未由用户提供；8×8 大样本转换已成功，但 50 GB 以上数据、真实权限/磁盘故障和多来源样本仍未覆盖。
 - 单 Tile 容错保持严格失败，未启用部分成果和失败率阈值。
 - 原始诊断文件目前按任务保留，尚未增加自动轮换/配额策略；任务事件日志仍按 tail 规则限长。

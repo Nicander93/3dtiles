@@ -16,8 +16,8 @@
 - [x] 本机候选 converter 对真实 `OSGBny`（中文输入/输出目录）完成 convert-only 与 processor scan→convert→validate→commit，退出码均为 0。
 - [x] 本机候选 converter 对包含中文 Tile 目录/文件名的真实样本完成 convert-only；输出 85 个文件，6/6 个根 URI 可解析（回归 38）。
 - [x] processor 对同一中文 Tile 名称样本完成 scan→convert→validate→commit；输出 86 个文件，6/6 URI 可解析（回归 39）。
-- [x] 本机候选 converter 对香港 8×8 真实 OSGB（11,124 个 OSGB、约 2.47 GB）以 2 worker 完成全量 convert→validate→commit；输出 11,186 个文件，64/64 个根 URI 可解析（回归 35）。
-- [x] 同一香港 8×8 成果完成 `rebuild-top --levels 0 --texture keep`→validate→commit；退出码 0，输出 11,208 个文件，85/85 个 content URI 可解析（回归 36）。
+- [x] 最新本机候选 converter 对香港 8×8 真实 OSGB（11,124 个 OSGB、约 2.47 GB）完成全量 convert→validate→commit；退出码 0，耗时 99,842 ms，输出 11,186 个文件，64/64 个根 URI 可解析（回归 40）。
+- [x] 同一最新候选成果完成 `rebuild-top --levels 0 --texture keep`→validate→commit；退出码 0，耗时 73,910 ms，输出 11,208 个文件，85/85 个 content URI 可解析（回归 41）。
 
 ## Windows 安装验收
 
