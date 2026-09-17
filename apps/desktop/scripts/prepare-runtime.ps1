@@ -59,6 +59,33 @@ foreach ($name in @("processor.exe", "top_rebuild.exe")) {
   Copy-Item -Force $src (Join-Path $ProductBin $name)
 }
 
+# processor.exe and top_rebuild.exe also use the dynamic MSVC CRT. Keep the
+# same release DLLs beside the sidecars; Windows resolves native dependencies
+# from the executable directory, not from the sibling converter directory.
+$crtFiles = @(
+  "concrt140.dll",
+  "msvcp140.dll",
+  "msvcp140_1.dll",
+  "msvcp140_2.dll",
+  "msvcp140_atomic_wait.dll",
+  "msvcp140_codecvt_ids.dll",
+  "vccorlib140.dll",
+  "vcruntime140.dll",
+  "vcruntime140_1.dll",
+  "vcruntime140_threads.dll"
+)
+foreach ($name in $crtFiles) {
+  $src = Join-Path $ConverterOut $name
+  if (Test-Path $src) {
+    Copy-Item -Force $src (Join-Path $ProductBin $name)
+  }
+}
+$missingProductCrt = @("msvcp140.dll", "vcruntime140.dll") |
+  Where-Object { -not (Test-Path (Join-Path $ProductBin $_)) }
+if ($missingProductCrt) {
+  Write-Error "Product runtime missing MSVC DLLs: $($missingProductCrt -join ', ')"
+}
+
 $ManifestPath = Join-Path $OutDir "manifest.json"
 $files = Get-ChildItem -Recurse $OutDir -File |
   Where-Object { $_.FullName -ne $ManifestPath } |

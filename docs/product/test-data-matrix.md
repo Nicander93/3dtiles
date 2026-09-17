@@ -18,7 +18,7 @@
 | 12 | 磁盘空间不足 | 明确错误或预警 | 部分通过：受控抬高 `GEOFORGE_LOW_DISK_BYTES` 后产生 `LOW_DISK_SPACE` warning；真实磁盘写满仍待执行 | HARDENING_REGRESSION 23 |
 | 13 | 中途取消 | cancelled，输入和既有成果不变 | 通过：约 932 MB/4567 Tile 样本取消返回 `CANCELLED`，无最终/临时目录和残留进程；桌面关闭另测 | HARDENING_REGRESSION 21 |
 | 14 | converter 异常退出 | failed，保留 stderr 诊断 | 通过（明确失败）：运行中强制终止 converter 后，processor 返回 `CONVERTER_EXIT_NONZERO`，保留退出码和 stderr tail，未提交最终目录 | HARDENING_REGRESSION 44 |
-| 15 | 强制关闭 GeoForge | 下次启动为 interrupted | 待执行 | — |
+| 15 | 强制关闭 GeoForge | 下次启动为 interrupted | 部分通过：最新 NSIS 安装版实际启动恢复 stale `running` 任务为 `interrupted`（PID/结束字段已清理）；有活动任务时点击窗口关闭的完整 GUI 回归仍待执行 | HARDENING_REGRESSION 47、50、53 |
 | 16 | 50 GB 以上数据 | 在记录的资源范围内完成 | 待执行 | — |
 | 17 | 大量 Tile | 内存和日志可控 | 通过：香港 8×8 真实 OSGB（11,124 个 OSGB、约 2.47 GB）在最新候选下完成全量 convert→validate→commit，耗时 99,842 ms，输出 11,186 个文件、约 3.11 GB；同一成果继续完成 `rebuild-top --levels 0`→validate→commit，耗时 73,910 ms，输出 11,208 个文件；另有 4,585 文件香港 5×4 成果重建和 1/2/4 worker 资源曲线通过 | HARDENING_REGRESSION 21、30、34–36、40–41 |
 | 18 | 超长路径 | 成功或明确拒绝 | 通过（明确拒绝）：约 288 字符输入路径在 scan 后由 converter 返回 `CONVERTER_EXIT_NONZERO`，stderr 指出具体 Tile 文件读取失败；processor 不提交最终目录并保留归属明确的临时目录 | HARDENING_REGRESSION 33 |

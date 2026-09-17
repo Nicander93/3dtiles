@@ -28,11 +28,17 @@ $env:GEOFORGE_3DTILE = "D:\path\to\_3dtile.exe"
 ```text
 resources/runtime/converter/
 ├─ _3dtile.exe
-├─ *.dll
+├─ *.dll                  # native dependencies, including MSVC release CRT
 ├─ osgPlugins-3.6.5/
 ├─ gdal/
 ├─ proj/
 └─ geoids/   # optional
 ```
+
+`prepare-converter.ps1` rejects a zip that omits `msvcp140.dll`,
+`msvcp140_2.dll`, `vcruntime140.dll`, or `vcruntime140_1.dll`. The desktop
+runtime also places the MSVC CRT beside `bin/processor.exe` and
+`bin/top_rebuild.exe`; a developer machine's globally installed VC++ runtime
+must not be required by the installer.
 
 Do not use Docker as a product fallback. Do not pin fanvanzh `v0.4` zip as the runtime.

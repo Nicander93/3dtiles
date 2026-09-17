@@ -54,8 +54,14 @@ $required = @(
   (Join-Path $BundleDir "converter\osgPlugins-3.6.5"),
   (Join-Path $BundleDir "converter\gdal"),
   (Join-Path $BundleDir "converter\proj"),
+  (Join-Path $BundleDir "converter\msvcp140.dll"),
+  (Join-Path $BundleDir "converter\msvcp140_2.dll"),
+  (Join-Path $BundleDir "converter\vcruntime140.dll"),
+  (Join-Path $BundleDir "converter\vcruntime140_1.dll"),
   (Join-Path $BundleDir "bin\processor.exe"),
-  (Join-Path $BundleDir "bin\top_rebuild.exe")
+  (Join-Path $BundleDir "bin\top_rebuild.exe"),
+  (Join-Path $BundleDir "bin\msvcp140.dll"),
+  (Join-Path $BundleDir "bin\vcruntime140.dll")
 )
 $missing = @()
 foreach ($r in $required) {

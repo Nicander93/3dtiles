@@ -88,6 +88,15 @@ if (-not (Test-Path $exe)) {
   Write-Error "Missing _3dtile.exe at $exe"
 }
 
+# The converter is built with the dynamic MSVC CRT. Validate the DLLs before
+# the soft launch so a package that only works on the build machine cannot be
+# staged into the desktop installer.
+$requiredCrt = @("msvcp140.dll", "msvcp140_2.dll", "vcruntime140.dll", "vcruntime140_1.dll")
+$missingCrt = $requiredCrt | Where-Object { -not (Test-Path (Join-Path $src $_)) }
+if ($missingCrt) {
+  Write-Error "Converter runtime missing MSVC DLLs: $($missingCrt -join ', ')"
+}
+
 # Soft launch check
 $p = Start-Process -FilePath $exe -ArgumentList "--help" -PassThru -WindowStyle Hidden -WorkingDirectory $src
 if (-not $p.WaitForExit(8000)) {
