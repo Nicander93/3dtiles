@@ -1,7 +1,7 @@
 # GeoForge 3D 本地验证指南（v0.1 / Phase 4）
 
 面向从 GitHub 克隆后在本机跑通 Tauri 桌面壳与 Processor 流水线（keep / KTX2）。
-Date: 2026-09-10 Asia/Shanghai.
+Date: 2026-09-17 Asia/Shanghai.
 
 ## 1. 克隆
 
@@ -13,7 +13,7 @@ Repo may include `apps/desktop/dist` for the UI.
 - Node 18+ for `apps/desktop`
 - Rust toolchain for `processor` + `geoforge-desktop` (Tauri)
 - Optional Python venv for rebuild baseline / KTX2 (`tools/experiments/rebuild_top_py`, `tools/texture_ktx2`)
-- Converter binary outside repo; set `GEOFORGE_3DTILE` / runtime env. Prefer ktx2+basisu wrapper.
+- Windows release builds stage the pinned converter under `resources/runtime/converter`; for local development, set `GEOFORGE_3DTILE` or `GEOFORGE_RUNTIME_ROOT` when using a converter outside the repository.
 
 ## 3. Sample
 
@@ -45,11 +45,10 @@ Task DB and preview cache live under `.geoforge` (gitignored).
 
 ```powershell
 cd apps/desktop
-npm run prepare:sidecars
-npx tauri build --bundles nsis
+powershell -NoProfile -File scripts/package-windows.ps1 -SkipTextureBundle
 ```
 
-`prepare:sidecars` 会把 `processor.exe` 和 `top_rebuild.exe` 编译并复制成 Tauri sidecar。当前安装包尚未内置 `_3dtile.exe`；转换页会检测本机转换器，找不到时使用正在运行的 Docker Desktop。Cesium 运行时已经随应用打包，可离线加载本地 3D Tiles。
+`package-windows.ps1` 会清理并 staging `processor.exe`、`top_rebuild.exe`、`_3dtile.exe` 及其 OSG/GDAL/PROJ 和 MSVC runtime DLL。`-SkipTextureBundle` 表示首版只验证转换与重建；UI 不应把纹理压缩显示为可用。Cesium 运行时已经随应用打包，可离线加载本地 3D Tiles。
 
 NSIS 产物位于 `src-tauri/target/release/bundle/nsis/`。2026-09-12 的 `0.1.0` 包已通过隔离静默安装和首次启动冒烟。
 
@@ -69,7 +68,7 @@ NSIS 产物位于 `src-tauri/target/release/bundle/nsis/`。2026-09-12 的 `0.1.
 | issue | fix |
 |------|------|
 | missing web dist | `cd apps/desktop && npm run build` |
-| converter missing | set `GEOFORGE_RUNTIME` / `GEOFORGE_3DTILE` |
+| converter missing | 重新运行 `prepare-runtime.ps1`；开发覆盖时设置 `GEOFORGE_RUNTIME_ROOT` / `GEOFORGE_3DTILE` |
 | rebuild script missing | `tools/experiments/rebuild_top_py/rebuild_top.py` or `GEOFORGE_REBUILD_TOP` |
 | ktx2 grayed | check wrapper and basisu (`tools/texture_ktx2`) |
 

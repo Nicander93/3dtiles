@@ -69,6 +69,37 @@ jobs:
         run: |
           pwsh -NoProfile -File apps/desktop/scripts/package-windows.ps1 -SkipTextureBundle
 
+      - name: Verify packaged native runtime
+        shell: pwsh
+        run: |
+          $runtime = (Resolve-Path 'apps/desktop/src-tauri/resources/runtime').Path
+          $converter = Join-Path $runtime 'converter'
+          $bin = Join-Path $runtime 'bin'
+          $required = @(
+            (Join-Path $converter '_3dtile.exe'),
+            (Join-Path $converter 'msvcp140.dll'),
+            (Join-Path $converter 'msvcp140_2.dll'),
+            (Join-Path $converter 'vcruntime140.dll'),
+            (Join-Path $converter 'vcruntime140_1.dll'),
+            (Join-Path $bin 'processor.exe'),
+            (Join-Path $bin 'top_rebuild.exe'),
+            (Join-Path $bin 'msvcp140.dll'),
+            (Join-Path $bin 'vcruntime140.dll')
+          )
+          $missing = $required | Where-Object { -not (Test-Path $_) }
+          if ($missing) {
+            throw "Packaged runtime is missing: $($missing -join ', ')"
+          }
+          Push-Location $converter
+          & (Join-Path $converter '_3dtile.exe') --help | Out-Host
+          if ($LASTEXITCODE -ne 0) { throw "_3dtile.exe --help failed with exit=$LASTEXITCODE" }
+          Pop-Location
+          $capabilities = & (Join-Path $bin 'processor.exe') capabilities --json
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace(($capabilities -join ''))) {
+            throw "processor capabilities smoke failed with exit=$LASTEXITCODE"
+          }
+          Write-Host 'Packaged converter and processor runtime smoke passed.'
+
       - name: Collect installer + SHA256
         shell: pwsh
         run: |
