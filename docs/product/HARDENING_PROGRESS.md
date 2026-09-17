@@ -104,7 +104,7 @@
 - 复核安装包依赖时发现 v2 候选依赖开发机全局 MSVC runtime；converter 的 `_3dtile.exe` 和产品 `processor.exe` 分别会加载 `MSVCP140.dll` / `VCRUNTIME140*.dll`。converter 发布脚本现在把 x64 MSVC release CRT 打进 zip，主仓库 staging 同时复制到 `converter/` 与 `bin/` 并设为硬门槛（converter `8e66070`）。用含 CRT 的候选 zip 重新生成 NSIS：安装版 `--help`、真实 OSGB 转换、processor capabilities 和桌面启动均通过（回归 54）；旧 v2 安装包只代表已有 VC++ runtime 的开发机验证。
 - 继续复核安装版 Unicode 路径时发现 H08 的遗漏：Windows `canonicalize()` 生成的 `\\?\` 前缀会让旧 OSG 插件无法读取中文输入根目录；converter `bbe1426` 对已有绝对路径保持普通 UTF-8，只对相对路径 canonicalize。含 CRT 的新 NSIS 安装版已用中文输入目录、中文/空格输出目录分别完成 converter 85 文件和 processor 86 文件转换，桌面隔离中文数据目录也能启动并创建 `tasks.db`（回归 55）。
 - H11 关闭收尾再加强：Tauri 同时处理 `CloseRequested` 和 `Destroyed`，在同步终止任务子进程后显式 `AppHandle::exit(0)`，避免窗口已销毁但事件循环仍驻留；10 项桌面 Rust library tests 继续通过。当前受限环境的窗口自动化只能触发无 WebView 的窗口销毁，无法把它计为完整 GUI 关闭验收。
-- H11 代码变更后重新生成 NSIS 候选（SHA256=`3e82519973d00abc377d9422a716dcf021579c8a1ee419dc91e32c18e6e91d4f`），全新隔离安装通过 converter/processor/中文数据目录启动检查；真实 WebView 点击关闭仍保持未验收（回归 56）。
+- H11/H13 代码变更后重新生成 NSIS 候选（SHA256=`f40fe1e6506db3cccb83230e34ac1493e14e9abc473b490a9606005ee47a3a55`），全新隔离安装通过 converter、top_rebuild 和中文数据目录启动检查；真实 WebView 点击关闭仍保持未验收（回归 56）。
 - 顶层重建适配器 `b03bf48` 不再把外部 tileset 中非法 `boundingVolume.box`、`transform` 数值静默替换为 0，也不再把超出 `i32` 的 Tile 坐标静默归零；新增 2 个负向单测，`top_rebuild` 全套 38 项测试通过（回归 57）。
 
 验证命令：
