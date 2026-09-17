@@ -24,6 +24,10 @@ jobs:
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Sync version from tag
         shell: pwsh
         run: |
@@ -67,7 +71,12 @@ jobs:
       - name: Package Windows NSIS
         shell: pwsh
         run: |
-          pwsh -NoProfile -File apps/desktop/scripts/package-windows.ps1 -SkipTextureBundle
+          python -m pip install pyinstaller==6.16.0
+          $vcpkgOut = Join-Path $env:RUNNER_TEMP 'geoforge-vcpkg'
+          vcpkg install basisu:x64-windows --x-install-root=$vcpkgOut
+          $basisu = Join-Path $vcpkgOut 'x64-windows\tools\basisu\basisu.exe'
+          pwsh -NoProfile -File apps/desktop/scripts/prepare-texture.ps1 -BasisuPath $basisu
+          pwsh -NoProfile -File apps/desktop/scripts/package-windows.ps1
 
       - name: Verify packaged native runtime
         shell: pwsh
@@ -75,6 +84,7 @@ jobs:
           $runtime = (Resolve-Path 'apps/desktop/src-tauri/resources/runtime').Path
           $converter = Join-Path $runtime 'converter'
           $bin = Join-Path $runtime 'bin'
+          $texture = Join-Path $runtime 'texture'
           $required = @(
             (Join-Path $converter '_3dtile.exe'),
             (Join-Path $converter 'msvcp140.dll'),
@@ -85,6 +95,8 @@ jobs:
             (Join-Path $bin 'top_rebuild.exe'),
             (Join-Path $bin 'msvcp140.dll'),
             (Join-Path $bin 'vcruntime140.dll')
+            (Join-Path $texture 'geoforge-texture.exe')
+            (Join-Path $texture 'basisu.exe')
           )
           $missing = $required | Where-Object { -not (Test-Path $_) }
           if ($missing) {

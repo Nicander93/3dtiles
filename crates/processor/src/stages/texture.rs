@@ -5,7 +5,8 @@ use crate::protocol::{Emitter, Stage};
 use crate::util::{command_available, run_logged, tool_paths, ToolPaths};
 use serde_json::Value;
 use std::path::Path;
-use std::sync::Arc;
+use std::process::{Command, Stdio};
+use std::sync::{Arc, OnceLock};
 
 const KEEP: &[&str] = &["keep", "none", "", "passthrough"];
 const KTX2_MAGIC: &[u8] = b"\xABKTX 20\r\n\x1A\n";
@@ -29,18 +30,25 @@ pub fn is_keep(mode: &str) -> bool {
     normalize_mode(Some(mode)) == "keep"
 }
 
-fn validate_texture_mode_with_tools(mode: &str, tools: &ToolPaths) -> Result<(), String> {
+fn postprocess_available(tools: &ToolPaths) -> bool {
+    (tools.texture_bin.is_file()
+        || (!tools.packaged && tools.texture_py.is_file() && command_available(&tools.python)))
+        && tools.basisu.is_file()
+}
+
+fn validate_texture_mode_with_tools(
+    mode: &str,
+    tools: &ToolPaths,
+    allow_native: bool,
+    native_available: bool,
+) -> Result<(), String> {
     if is_keep(mode) {
         return Ok(());
     }
-    if tools.texture_bin.is_file() && tools.basisu.is_file() {
+    if allow_native && native_available && mode != "ktx2-uastc" {
         return Ok(());
     }
-    if !tools.packaged
-        && tools.texture_py.is_file()
-        && command_available(&tools.python)
-        && tools.basisu.is_file()
-    {
+    if postprocess_available(tools) {
         return Ok(());
     }
     Err(format!(
@@ -50,7 +58,41 @@ fn validate_texture_mode_with_tools(mode: &str, tools: &ToolPaths) -> Result<(),
 
 pub fn validate_texture_mode(mode: &str) -> Result<(), String> {
     let mode = normalize_mode(Some(mode));
-    validate_texture_mode_with_tools(&mode, tool_paths())
+    validate_texture_mode_with_tools(&mode, tool_paths(), true, converter_supports_native_ktx2())
+}
+
+pub fn validate_existing_tiles_texture_mode(mode: &str) -> Result<(), String> {
+    let mode = normalize_mode(Some(mode));
+    validate_texture_mode_with_tools(&mode, tool_paths(), false, false)
+}
+
+pub fn native_texture_mode_available(mode: &str) -> bool {
+    normalize_mode(Some(mode)) == "ktx2-etc1s" && converter_supports_native_ktx2()
+}
+
+pub fn converter_supports_native_ktx2() -> bool {
+    static SUPPORTED: OnceLock<bool> = OnceLock::new();
+    *SUPPORTED.get_or_init(|| {
+        if let Ok(value) = std::env::var("GEOFORGE_NATIVE_KTX2") {
+            return value == "1" || value.eq_ignore_ascii_case("true");
+        }
+        let tools = tool_paths();
+        if !tools.convert_bin.is_file() {
+            return false;
+        }
+        let mut command = Command::new(&tools.convert_bin);
+        command
+            .arg("--help")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        crate::util::hide_console_window(&mut command);
+        command.output().is_ok_and(|output| {
+            output.status.success()
+                && (String::from_utf8_lossy(&output.stdout).contains("--enable-texture-compress")
+                    || String::from_utf8_lossy(&output.stderr)
+                        .contains("--enable-texture-compress"))
+        })
+    })
 }
 
 pub fn finish_texture(
@@ -71,7 +113,16 @@ pub fn finish_texture(
     }
 
     let tools = tool_paths();
-    validate_texture_mode_with_tools(&mode, tools)?;
+    if native_texture_mode_available(&mode) && walk_has_ktx2(out_dir) {
+        emitter.stage_extra(
+            Stage::Texture,
+            &format!("KTX2 applied by converter ({mode})"),
+            serde_json::json!({ "textureMode": mode, "postprocess": false, "native": true }),
+        );
+        emitter.log(&format!("[texture] native KTX2 evidence found mode={mode}"));
+        return Ok(());
+    }
+    validate_texture_mode_with_tools(&mode, tools, false, false)?;
 
     emitter.stage_extra(
         Stage::Texture,
@@ -280,7 +331,8 @@ mod tests {
             packaged: true,
         };
 
-        let error = validate_texture_mode_with_tools("ktx2-etc1s", &tools).unwrap_err();
+        let error =
+            validate_texture_mode_with_tools("ktx2-etc1s", &tools, false, false).unwrap_err();
         assert!(error.contains("texture mode=ktx2-etc1s is unavailable"));
         let _ = fs::remove_dir_all(root);
     }

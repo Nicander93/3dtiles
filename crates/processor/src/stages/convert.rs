@@ -34,6 +34,7 @@ pub fn run_convert(
             osgb_root,
             out_dir,
             &extra,
+            None,
         )
     } else if tools.packaged {
         return Err(format!(
@@ -47,13 +48,43 @@ pub fn run_convert(
         ));
     };
 
-    let result = match result {
+    let mut result = match result {
         Ok(result) => result,
         Err(error) => {
             emitter.metric("converter.elapsedMs", json!(started.elapsed().as_millis()));
             return Err(error);
         }
     };
+
+    if result.exit_code != 0 && configured_threads != Some(1) && retry_single_thread(&result) {
+        emitter
+            .log("[convert] converter returned no tile JSON; retrying once with one worker thread");
+        emitter.metric("converter.retryCount", json!(1));
+        emitter.metric("converter.retryThreads", json!(1));
+        if out_dir.exists() {
+            std::fs::remove_dir_all(out_dir).map_err(|error| {
+                format!(
+                    "failed to clear partial converter output before retry {}: {error}",
+                    out_dir.display()
+                )
+            })?;
+        }
+        std::fs::create_dir_all(out_dir).map_err(|error| {
+            format!(
+                "failed to recreate converter output before retry {}: {error}",
+                out_dir.display()
+            )
+        })?;
+        result = run_native(
+            emitter,
+            cancel,
+            &tools.convert_bin,
+            osgb_root,
+            out_dir,
+            &extra,
+            Some(1),
+        )?;
+    }
 
     emitter.metric("converter.elapsedMs", json!(started.elapsed().as_millis()));
     if let Some(bytes) = result.peak_memory_bytes {
@@ -101,7 +132,7 @@ fn convert_flags(emitter: &Arc<Emitter>, options: &Value, cfg_json: Option<&str>
     let texture = options.get("texture").cloned().unwrap_or(Value::Null);
     let mode = crate::stages::texture::normalize_mode(texture.get("mode").and_then(|v| v.as_str()));
     if mode != "keep" {
-        if std::env::var("GEOFORGE_NATIVE_KTX2").ok().as_deref() == Some("1") {
+        if crate::stages::texture::native_texture_mode_available(&mode) {
             extra.push("--enable-texture-compress".into());
             emitter.log(&format!(
                 "[convert] texture flag: --enable-texture-compress (mode={mode})"
@@ -122,6 +153,7 @@ fn run_native(
     osgb_root: &str,
     out_dir: &Path,
     extra: &[String],
+    thread_override: Option<usize>,
 ) -> Result<CommandResult, String> {
     let mut cmd = vec![
         bin.to_string_lossy().into_owned(),
@@ -150,8 +182,26 @@ fn run_native(
             env.push(("PROJ_LIB", proj));
         }
     }
+    if let Some(threads) = thread_override {
+        env.push((
+            "GEOFORGE_CONVERT_THREADS",
+            PathBuf::from(threads.to_string()),
+        ));
+    }
     let env_refs: Vec<(&str, PathBuf)> = env;
     run_logged_env_result(emitter, cancel, &cmd, cwd, &env_refs)
+}
+
+fn retry_single_thread(result: &CommandResult) -> bool {
+    const STATUS_ACCESS_VIOLATION: i32 = -1_073_741_819;
+    const STATUS_HEAP_CORRUPTION: i32 = -1_073_740_940;
+    result
+        .stderr_tail
+        .contains("converter returned no JSON for tile:")
+        || matches!(
+            result.exit_code,
+            STATUS_ACCESS_VIOLATION | STATUS_HEAP_CORRUPTION
+        )
 }
 
 fn strip_verbatim_str(s: &str) -> String {
@@ -165,4 +215,40 @@ fn strip_verbatim_str(s: &str) -> String {
         }
     }
     s.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::retry_single_thread;
+    use crate::util::CommandResult;
+
+    fn result(exit_code: i32, stderr_tail: &str) -> CommandResult {
+        CommandResult {
+            exit_code,
+            stderr_tail: stderr_tail.into(),
+            peak_memory_bytes: None,
+        }
+    }
+
+    #[test]
+    fn retries_missing_tile_json() {
+        assert!(retry_single_thread(&result(
+            1,
+            "ERROR: converter returned no JSON for tile: D:\\data\\Tile.osgb",
+        )));
+    }
+
+    #[test]
+    fn retries_known_windows_native_crashes() {
+        assert!(retry_single_thread(&result(-1_073_740_940, "")));
+        assert!(retry_single_thread(&result(-1_073_741_819, "")));
+    }
+
+    #[test]
+    fn does_not_retry_unrelated_converter_errors() {
+        assert!(!retry_single_thread(&result(
+            1,
+            "failed to read metadata.xml"
+        )));
+    }
 }

@@ -265,7 +265,7 @@ fn run_process_tileset(
             "process-tileset requires rebuildTop.enabled and/or texture.mode != keep".into(),
         );
     }
-    texture::validate_texture_mode(&tex_mode)?;
+    texture::validate_existing_tiles_texture_mode(&tex_mode)?;
 
     let validated = path_policy::validate_io_paths(
         Path::new(config.input_path()),

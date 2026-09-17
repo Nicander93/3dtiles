@@ -5,6 +5,8 @@
 /.cache/
 /build/
 /dist/
+/tools/texture_ktx2/dist/
+/tools/texture_ktx2/build/
 /.idea/
 .DS_Store
 

@@ -1,5 +1,6 @@
 //! `processor capabilities --json` — single source for tool probe (T06).
 
+use crate::stages::texture::converter_supports_native_ktx2;
 use crate::util::{hide_console_window, tool_paths};
 use serde_json::{json, Value};
 use std::path::Path;
@@ -32,7 +33,7 @@ pub fn capabilities_json() -> Value {
         .get("launchOk")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    let texture_ready = texture
+    let postprocess_ready = texture
         .get("launchOk")
         .and_then(|v| v.as_bool())
         .unwrap_or(false)
@@ -40,6 +41,7 @@ pub fn capabilities_json() -> Value {
             .get("exists")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+    let native_ktx2 = convert_ready && converter_supports_native_ktx2();
 
     json!({
         "ok": true,
@@ -63,30 +65,57 @@ pub fn capabilities_json() -> Value {
                 "找不到转换器；运行 prepare-converter.ps1 或设置 GEOFORGE_3DTILE"
             },
         },
-        "textureModes": texture_modes(texture_ready),
+        "postprocessBasisu": {
+            "available": postprocess_ready,
+            "path": if postprocess_ready {
+                Value::String(tools.basisu.display().to_string())
+            } else {
+                Value::Null
+            },
+        },
+        "textureModes": texture_modes(native_ktx2, postprocess_ready),
     })
 }
 
-fn texture_modes(ok: bool) -> Value {
+fn texture_modes(native_ktx2: bool, postprocess: bool) -> Value {
+    let etc1s = native_ktx2 || postprocess;
     json!([
         { "mode": "keep", "supported": true, "postprocess": false },
         {
             "mode": "ktx2-etc1s",
-            "supported": ok,
-            "postprocess": true,
-            "reason": if ok { Value::Null } else { json!("纹理组件缺失，请修复安装") },
+            "supported": etc1s,
+            "postprocess": !native_ktx2 && postprocess,
+            "native": native_ktx2,
+            "cliFlags": if native_ktx2 { json!(["--enable-texture-compress"]) } else { json!([]) },
+            "processTileset": {
+                "mode": "ktx2-etc1s",
+                "supported": postprocess,
+                "reason": if postprocess { Value::Null } else { json!("KTX2 processing for existing tiles requires the texture component") },
+            },
+            "reason": if etc1s { Value::Null } else { json!("KTX2 encoder unavailable") },
         },
         {
             "mode": "ktx2-uastc",
-            "supported": ok,
+            "supported": postprocess,
             "postprocess": true,
-            "reason": if ok { Value::Null } else { json!("纹理组件缺失，请修复安装") },
+            "processTileset": {
+                "mode": "ktx2-uastc",
+                "supported": postprocess,
+                "reason": if postprocess { Value::Null } else { json!("UASTC requires the texture component") },
+            },
+            "reason": if postprocess { Value::Null } else { json!("UASTC requires the texture component") },
         },
         {
             "mode": "ktx2",
-            "supported": ok,
-            "postprocess": true,
-            "reason": if ok { Value::Null } else { json!("纹理组件缺失，请修复安装") },
+            "supported": etc1s,
+            "postprocess": !native_ktx2 && postprocess,
+            "native": native_ktx2,
+            "processTileset": {
+                "mode": "ktx2-etc1s",
+                "supported": postprocess,
+                "reason": if postprocess { Value::Null } else { json!("KTX2 processing for existing tiles requires the texture component") },
+            },
+            "reason": if etc1s { Value::Null } else { json!("KTX2 encoder unavailable") },
         },
     ])
 }

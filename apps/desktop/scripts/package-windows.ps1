@@ -34,6 +34,10 @@ Copy-Item -Recurse -Force (Join-Path $RuntimeDir "*") $BundleDir
 # 3) Texture tool (optional skip if not built yet)
 $TextureSrc = Join-Path $RepoRoot "tools\texture_ktx2\dist\geoforge-texture"
 $TextureDst = Join-Path $BundleDir "texture"
+if (-not $SkipTextureBundle -and -not (Test-Path (Join-Path $TextureSrc "geoforge-texture.exe"))) {
+  & (Join-Path $PSScriptRoot "prepare-texture.ps1")
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
 if (Test-Path $TextureSrc) {
   New-Item -ItemType Directory -Force -Path $TextureDst | Out-Null
   Copy-Item -Recurse -Force (Join-Path $TextureSrc "*") $TextureDst
@@ -72,6 +76,7 @@ foreach ($r in $required) {
 if (-not $SkipTextureBundle) {
   $tex = Get-ChildItem -Recurse $TextureDst -Filter "geoforge-texture.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
   if (-not $tex) { $missing += "resources/runtime/texture/geoforge-texture.exe" }
+  if (-not (Test-Path (Join-Path $TextureDst "basisu.exe"))) { $missing += "resources/runtime/texture/basisu.exe" }
 }
 if ($missing.Count -gt 0) {
   Write-Error ("Missing required package files:`n - " + ($missing -join "`n - "))
