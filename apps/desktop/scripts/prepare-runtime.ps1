@@ -1,6 +1,6 @@
 # Collect Windows x64 product runtime (converter from Release + product bins).
 # Usage:
-#   powershell -File apps/desktop/scripts/prepare-runtime.ps1 [-OutDir path] [-SkipBuild]
+#   powershell -File apps/desktop/scripts/prepare-runtime.ps1 [-OutDir path] [-SkipBuild] [-ConverterZip path]
 # Output layout:
 #   <OutDir>/converter/_3dtile.exe + DLLs + osgPlugins-3.6.5 / gdal / proj
 #   <OutDir>/bin/processor.exe, top_rebuild.exe

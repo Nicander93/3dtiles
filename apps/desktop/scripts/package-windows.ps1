@@ -1,6 +1,6 @@
 # Single Windows packaging entry (T09).
 # Fails if any required component is missing.
-# Usage: powershell -File apps/desktop/scripts/package-windows.ps1
+# Usage: powershell -File apps/desktop/scripts/package-windows.ps1 [-SkipBuild] [-SkipTextureBundle] [-ConverterZip path]
 
 param(
   [switch]$SkipBuild,
