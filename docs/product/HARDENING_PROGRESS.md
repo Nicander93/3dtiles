@@ -106,6 +106,7 @@
 - H11 关闭收尾再加强：Tauri 同时处理 `CloseRequested` 和 `Destroyed`，在同步终止任务子进程后显式 `AppHandle::exit(0)`，避免窗口已销毁但事件循环仍驻留；10 项桌面 Rust library tests 继续通过。当前受限环境的窗口自动化只能触发无 WebView 的窗口销毁，无法把它计为完整 GUI 关闭验收。
 - H11/H13 代码变更后重新生成 NSIS 候选（SHA256=`f40fe1e6506db3cccb83230e34ac1493e14e9abc473b490a9606005ee47a3a55`），全新隔离安装通过 converter、top_rebuild 和中文数据目录启动检查；真实 WebView 点击关闭仍保持未验收（回归 56）。
 - 顶层重建适配器 `b03bf48` 不再把外部 tileset 中非法 `boundingVolume.box`、`transform` 数值静默替换为 0，也不再把超出 `i32` 的 Tile 坐标静默归零；新增 2 个负向单测，`top_rebuild` 全套 38 项测试通过（回归 57）。
+- processor 重建预检改用检查过的 `i64/usize` 网格尺寸计算，极端合法坐标跨度不会触发整数溢出；新增负向单测，processor library tests 增至 28 项通过（回归 58）。
 
 验证命令：
 

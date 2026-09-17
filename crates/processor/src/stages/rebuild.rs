@@ -131,9 +131,17 @@ fn precheck_rebuild_input(emitter: &Arc<Emitter>, input_dir: &Path) -> Result<()
     let max_x = coords.iter().map(|c| c.0).max().unwrap();
     let min_y = coords.iter().map(|c| c.1).min().unwrap();
     let max_y = coords.iter().map(|c| c.1).max().unwrap();
-    let w = (max_x - min_x + 1) as usize;
-    let h = (max_y - min_y + 1) as usize;
-    let expected = w.saturating_mul(h);
+    let width = i64::from(max_x) - i64::from(min_x) + 1;
+    let height = i64::from(max_y) - i64::from(min_y) + 1;
+    let w = usize::try_from(width).map_err(|_| {
+        format!("rebuild precheck: Tile grid width is outside supported range: {min_x}..{max_x}")
+    })?;
+    let h = usize::try_from(height).map_err(|_| {
+        format!("rebuild precheck: Tile grid height is outside supported range: {min_y}..{max_y}")
+    })?;
+    let expected = w
+        .checked_mul(h)
+        .ok_or_else(|| format!("rebuild precheck: Tile grid area is too large: {w}×{h}"))?;
     if coords.len() != expected {
         return Err(format!(
             "不支持的数据布局：检测到稀疏或不连续的 Tile 网格（有 {} 块，矩形范围期望 {} = {}×{}）。V1 顶层重建仅支持规则块数据。",
@@ -436,6 +444,25 @@ mod tests {
         let emitter = Arc::new(Emitter::new("test-rebuild-range"));
         let error = precheck_rebuild_input(&emitter, &root).expect_err("range must fail");
         assert!(error.contains("i32 range"), "{error}");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_extreme_coordinate_span_without_overflow() {
+        let root = temp_root("extreme-span");
+        for name in ["Tile_-2147483648_0", "Tile_2147483647_0"] {
+            let tile = root.join(name);
+            fs::create_dir_all(&tile).expect("create extreme tile");
+            fs::write(tile.join("tileset.json"), b"{}").expect("write extreme tileset");
+        }
+
+        let emitter = Arc::new(Emitter::new("test-rebuild-extreme-span"));
+        let error = precheck_rebuild_input(&emitter, &root)
+            .expect_err("extreme sparse span must be rejected");
+        assert!(
+            error.contains("稀疏") || error.contains("sparse"),
+            "{error}"
+        );
         let _ = fs::remove_dir_all(root);
     }
 }
