@@ -20,6 +20,7 @@
 - [x] processor 对同一中文 Tile 名称样本完成 scan→convert→validate→commit；输出 86 个文件，6/6 URI 可解析（回归 39）。
 - [x] 最新本机候选 converter 对香港 8×8 真实 OSGB（11,124 个 OSGB、约 2.47 GB）完成全量 convert→validate→commit；退出码 0，耗时 99,842 ms，输出 11,186 个文件，64/64 个根 URI 可解析（回归 40）。
 - [x] 同一最新候选成果完成 `rebuild-top --levels 0 --texture keep`→validate→commit；退出码 0，耗时 73,910 ms，输出 11,208 个文件，85/85 个 content URI 可解析（回归 41）。
+- [x] 最新 converter Rust 候选（commit `219b29b`）完成 Release 构建；发布脚本用本地候选 zip 完成 converter/runtime staging，`--help` 返回 0，manifest 不包含自身，真实 OSGB 转换返回 0，损坏输入返回 1（回归 48）。
 
 ## Windows 安装验收
 
@@ -43,4 +44,4 @@
 
 ## 当前状态
 
-本仓库已完成 CI 可验证的加固和诊断链，并在本机完成候选 converter、真实 OSGB（含中文输入/输出路径）、10 次重复、香港 8×8 大数据和 NSIS 临时安装验收。processor CLI 的大样本取消和 Windows Job Object kill-on-close 单元测试也已通过；桌面关闭/多级进程树、安装桌面 WebView、当前用户失败样本、权限/磁盘故障仍是安装版待执行项。正式发布还需把候选 converter 以带版本号的 zip 发布到固定 URL、更新 `third_party/3dtiles-converter.json` 的 SHA256；在此之前固定 runtime 清单不得改成候选 hash。
+本仓库已完成 CI 可验证的加固和诊断链，并在本机完成候选 converter、真实 OSGB（含中文输入/输出路径）、10 次重复、香港 8×8 大数据和 NSIS 临时安装验收。processor CLI 的大样本取消和 Windows Job Object kill-on-close 单元测试也已通过；桌面关闭/多级进程树、安装桌面 WebView、当前用户失败样本、权限/磁盘故障仍是安装版待执行项。最新 converter 候选还完成了错误返回和发布脚本 staging 负向验证（回归 48）。正式发布还需把候选 converter 以带版本号的 zip 发布到固定 URL、更新 `third_party/3dtiles-converter.json` 的 SHA256；在此之前固定 runtime 清单不得改成候选 hash。

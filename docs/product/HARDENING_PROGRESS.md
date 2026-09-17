@@ -1,6 +1,6 @@
 ﻿# V1 Hardening 实施进度
 
-更新：2026-09-16
+更新：2026-09-17
 
 ## 任务卡状态
 
@@ -12,10 +12,10 @@
 | H04 | 已完成 | 临时目录归属、task marker、独占创建和 no-overwrite 单测通过 |
 | H05 | 已完成 | 两个转换页面和错误解析已构建验证 |
 | H06 | 已完成 | stderr/stdout sidecar、受控非零 converter fixture、退出码和任务详情链路已验证 |
-| H07 | 已完成（本机候选构建） | converter Rust/C++ 修改已用 MSVC 18.6.2 + vcpkg x64-windows 构建；真实 OSGB 与中文输入路径已通过本机候选回归 |
+| H07 | 已完成（本机候选构建） | converter Rust/C++ 修改已用 MSVC 18.6.2 + vcpkg x64-windows 构建；最新 Rust 输入错误处理候选已通过 `cargo check`、Release 构建、真实 OSGB 和损坏输入负向回归 |
 | H08 | 已完成（本机候选构建） | OSG `OSG_USE_UTF8_FILENAME` 路径修复、URI/JSON 修改已进入候选 runtime；真实中文输入/输出目录和中文 Tile 目录/文件名转换均通过 |
 | H09 | 未触发 | 尚未取得同一新 binary 的原生崩溃证据 |
-| H10 | 本机候选已验证，正式发布待更新 | 本机候选 runtime 已通过 `--help`、负向输入、真实 OSGB 和 NSIS 临时安装；固定清单仍保留已发布 SHA256，待发布新 converter 后再更新 |
+| H10 | 本机候选已验证，正式发布待更新 | 最新本机候选 runtime 已通过 `--help`、负向输入、真实 OSGB 和发布脚本 staging；固定清单仍保留已发布 SHA256，待发布新 converter 后再更新 |
 | H11 | 关闭清理代码完成，安装版场景待验收 | Tauri 关闭窗口会标记 queued/running/cancelling 任务为 `interrupted`、终止活动 processor 并停止调度；Windows unit test 验证 Job Object 与 shutdown 子进程均在 3 秒内结束；完整安装 GUI/多级子进程仍待验收 |
 | H12 | 已完成 | 文件 tail 有界并处理 UTF-8 边界 |
 | H13 | 已完成 | scanner/layout/capabilities 单测和 smoke 通过 |
@@ -93,6 +93,9 @@
 - 运行中强制终止 converter 的回归通过：processor 返回 `CONVERTER_EXIT_NONZERO`，保留 `convert exited -1`、stderr tail 和任务日志，最终目录不存在且无残留进程（回归 44）。
 - 发布脚本新增可选 `-ConverterZip` 参数并完成回归：弱 Agent 可用本地候选 zip 重复生成 runtime 和 SHA256 manifest，默认正式 URL/SHA256 流程不变（回归 45）。
 - 发布脚本将 `-ConverterZip` 和 `-OutDir` 规范化为绝对路径，排除旧 `manifest.json` 自引用，并在 manifest 中标记本地候选来源；从 `apps/desktop` 工作目录使用相对参数的 staging 回归通过（回归 46）。
+- converter 仓库提交 `219b29b` 已完成输入路径、元数据和 Tile 结果的错误返回收敛：异常 CString、非法数值、文件/JSON/目录读取失败均返回明确失败，不再因 `unwrap` 触发进程 panic；MSVC Release 构建和自带完整 DLL 的临时 runtime `--help` 均通过。
+- 用该最新 converter 生成临时候选 zip 并执行 `prepare-converter.ps1`、`prepare-runtime.ps1 -SkipBuild -ConverterZip`：staging 通过，manifest 文件数 362，未包含自身；候选 `_3dtile.exe` SHA256 为 `c54c49f00063c3fda473c182dfe98a5000d63d7fd244db7823fdf81f1fc8d648`（回归 48）。
+- 同一候选 runtime 对真实 `OSGBny` 完成 85 文件的 convert-only；隔离副本中破坏一个 `.osgb` 文件时返回退出码 1，未生成最终 `tileset.json`（回归 48）。
 
 验证命令：
 
@@ -126,5 +129,6 @@ Hardening follow-up:
 - Full converter validation now has a local MSVC/vcpkg candidate build; real OSGB conversion and CJK input/output paths pass locally, while release publication remains pending.
 - Desktop Windows-specific Job Object code has passed `cargo check --target x86_64-pc-windows-msvc`; Job Object kill-on-close and shutdown child termination have Windows unit coverage, while an installed GUI close/restart run remains manual.
 - 旧固定 runtime 的无效输入负向测试仍返回退出码 0；本机候选 runtime 已返回非零并完成临时 NSIS 安装验收，不能把旧固定 runtime 当作本轮修复证据。
+- 最新 converter 候选只存在于 `.cache` 临时 zip，尚未发布到固定 URL；因此不能更新 `third_party/3dtiles-converter.json`，也不能把本机候选 hash 当作正式发布 hash。
 
 
