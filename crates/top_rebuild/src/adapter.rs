@@ -26,29 +26,58 @@ fn normalize_uri(uri: &str) -> String {
     u
 }
 
-fn parse_box(bv: &Value) -> Option<BoundingVolume> {
-    let arr = bv.get("box")?.as_array()?;
-    if arr.len() < 12 {
-        return None;
+fn parse_box(bv: &Value) -> Result<Option<BoundingVolume>> {
+    let Some(value) = bv.get("box") else {
+        return Ok(None);
+    };
+    let arr = value.as_array().ok_or_else(|| {
+        TopRebuildError::InvalidTileset("boundingVolume.box must be an array".into())
+    })?;
+    if arr.len() != 12 {
+        return Err(TopRebuildError::InvalidTileset(format!(
+            "boundingVolume.box must contain 12 values (got {})",
+            arr.len()
+        )));
     }
     let mut vals = [0.0; 12];
     for (i, v) in arr.iter().take(12).enumerate() {
-        vals[i] = v.as_f64().unwrap_or(0.0);
-    }
-    Some(BoundingVolume::from_box(vals))
-}
-
-fn parse_transform(node: &Value) -> Mat4d {
-    if let Some(arr) = node.get("transform").and_then(|t| t.as_array()) {
-        if arr.len() == 16 {
-            let mut vals = [0.0; 16];
-            for (i, v) in arr.iter().enumerate() {
-                vals[i] = v.as_f64().unwrap_or(0.0);
-            }
-            return Mat4d(vals);
+        vals[i] = v.as_f64().ok_or_else(|| {
+            TopRebuildError::InvalidTileset(format!("boundingVolume.box[{i}] must be a number"))
+        })?;
+        if !vals[i].is_finite() {
+            return Err(TopRebuildError::InvalidTileset(format!(
+                "boundingVolume.box[{i}] must be finite"
+            )));
         }
     }
-    Mat4d::identity()
+    Ok(Some(BoundingVolume::from_box(vals)))
+}
+
+fn parse_transform(node: &Value) -> Result<Mat4d> {
+    let Some(value) = node.get("transform") else {
+        return Ok(Mat4d::identity());
+    };
+    let arr = value
+        .as_array()
+        .ok_or_else(|| TopRebuildError::InvalidTileset("transform must be an array".into()))?;
+    if arr.len() != 16 {
+        return Err(TopRebuildError::InvalidTileset(format!(
+            "transform must contain 16 values (got {})",
+            arr.len()
+        )));
+    }
+    let mut vals = [0.0; 16];
+    for (i, v) in arr.iter().enumerate() {
+        vals[i] = v.as_f64().ok_or_else(|| {
+            TopRebuildError::InvalidTileset(format!("transform[{i}] must be a number"))
+        })?;
+        if !vals[i].is_finite() {
+            return Err(TopRebuildError::InvalidTileset(format!(
+                "transform[{i}] must be finite"
+            )));
+        }
+    }
+    Ok(Mat4d(vals))
 }
 
 fn mul_transform(parent: &Mat4d, local: &Mat4d) -> Mat4d {
@@ -64,17 +93,17 @@ fn collect_representations(
     block_id: &str,
     out: &mut Vec<Representation>,
     counter: &mut usize,
-) {
-    let local = parse_transform(node);
+) -> Result<()> {
+    let local = parse_transform(node)?;
     let world = mul_transform(parent_world, &local);
     let ge = node
         .get("geometricError")
         .and_then(|v| v.as_f64())
         .unwrap_or(0.0);
-    let bounds = node
-        .get("boundingVolume")
-        .and_then(parse_box)
-        .unwrap_or_else(BoundingVolume::empty);
+    let bounds = match node.get("boundingVolume") {
+        Some(value) => parse_box(value)?.unwrap_or_else(BoundingVolume::empty),
+        None => BoundingVolume::empty(),
+    };
 
     if let Some(uri) = node
         .get("content")
@@ -98,9 +127,10 @@ fn collect_representations(
 
     if let Some(children) = node.get("children").and_then(|c| c.as_array()) {
         for child in children {
-            collect_representations(child, block_dir, &world, block_id, out, counter);
+            collect_representations(child, block_dir, &world, block_id, out, counter)?;
         }
     }
+    Ok(())
 }
 
 fn load_json(path: &Path) -> Result<Value> {
@@ -235,7 +265,7 @@ pub fn load_source_blocks(tileset_path: &Path) -> Result<Vec<SourceBlock>> {
     let root = root_doc
         .get("root")
         .ok_or_else(|| TopRebuildError::InvalidTileset("missing root".into()))?;
-    let root_world = parse_transform(root);
+    let root_world = parse_transform(root)?;
     let re = tile_re();
 
     let mut blocks = Vec::new();
@@ -257,8 +287,22 @@ pub fn load_source_blocks(tileset_path: &Path) -> Result<Vec<SourceBlock>> {
         let Some(caps) = re.captures(&rel) else {
             continue;
         };
-        let grid_x: i32 = caps[1].parse().unwrap_or(0);
-        let grid_y: i32 = caps[2].parse().unwrap_or(0);
+        let grid_x: i32 = caps
+            .get(1)
+            .ok_or_else(|| TopRebuildError::InvalidTileset("missing Tile X coordinate".into()))?
+            .as_str()
+            .parse()
+            .map_err(|_| {
+                TopRebuildError::InvalidTileset(format!("Tile X coordinate is outside i32: {rel}"))
+            })?;
+        let grid_y: i32 = caps
+            .get(2)
+            .ok_or_else(|| TopRebuildError::InvalidTileset("missing Tile Y coordinate".into()))?
+            .as_str()
+            .parse()
+            .map_err(|_| {
+                TopRebuildError::InvalidTileset(format!("Tile Y coordinate is outside i32: {rel}"))
+            })?;
 
         let ext_path = input_dir.join(&rel);
         if !ext_path.exists() {
@@ -273,12 +317,12 @@ pub fn load_source_blocks(tileset_path: &Path) -> Result<Vec<SourceBlock>> {
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| format!("Tile_+{grid_x}_+{grid_y}"));
 
-        let child_local = parse_transform(child);
+        let child_local = parse_transform(child)?;
         let child_world = mul_transform(&root_world, &child_local);
-        let child_bounds = child
-            .get("boundingVolume")
-            .and_then(parse_box)
-            .unwrap_or_else(BoundingVolume::empty);
+        let child_bounds = match child.get("boundingVolume") {
+            Some(value) => parse_box(value)?.unwrap_or_else(BoundingVolume::empty),
+            None => BoundingVolume::empty(),
+        };
 
         let ext_doc = load_json(&ext_path)?;
         let ext_root = ext_doc
@@ -294,7 +338,7 @@ pub fn load_source_blocks(tileset_path: &Path) -> Result<Vec<SourceBlock>> {
             &block_id,
             &mut representations,
             &mut counter,
-        );
+        )?;
         if representations.is_empty() {
             return Err(TopRebuildError::NoRepresentations(block_id));
         }
@@ -328,6 +372,7 @@ pub fn load_source_blocks(tileset_path: &Path) -> Result<Vec<SourceBlock>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn normalize_uri_strips_dot_slash() {
@@ -336,6 +381,24 @@ mod tests {
             "Data/Tile_+000_+000/tileset.json"
         );
         assert_eq!(normalize_uri(".//Data/x"), "Data/x");
+    }
+
+    #[test]
+    fn rejects_non_numeric_bounding_box_values() {
+        let value = json!({
+            "box": [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, "broken", 1]
+        });
+        let error = parse_box(&value).expect_err("invalid box must be rejected");
+        assert!(error.to_string().contains("boundingVolume.box[10]"));
+    }
+
+    #[test]
+    fn rejects_malformed_transform_shape() {
+        let value = json!({ "transform": [1, 0, 0] });
+        let error = parse_transform(&value).expect_err("short transform must be rejected");
+        assert!(error
+            .to_string()
+            .contains("transform must contain 16 values"));
     }
 
     #[test]
