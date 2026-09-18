@@ -39,3 +39,6 @@ apps/desktop/src-tauri/binaries/
 # Staged converter runtime (copied by package-windows.ps1)
 apps/desktop/src-tauri/resources/runtime/**
 !apps/desktop/src-tauri/resources/runtime/.gitkeep
+
+acceptance-results/
+scripts/acceptance/node_modules/

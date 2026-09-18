@@ -1,0 +1,10 @@
+{
+  "name": "geoforge-acceptance",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "GeoForge acceptance helpers (Phase 17 Cesium A/B)",
+  "dependencies": {
+    "puppeteer-core": "^24.43.1"
+  }
+}
