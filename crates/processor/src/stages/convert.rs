@@ -21,11 +21,25 @@ pub fn run_convert(
 
     emitter.stage(Stage::Convert, "OSGB → 3D Tiles");
     let started = std::time::Instant::now();
-    let configured_threads = std::env::var("GEOFORGE_CONVERT_THREADS")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .filter(|value| *value > 0);
+    
+    let configured_threads = options
+        .get("convert")
+        .and_then(|v| v.get("threads"))
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize)
+        .filter(|v| *v <= 16)
+        .or_else(|| {
+            std::env::var("GEOFORGE_CONVERT_THREADS")
+                .ok()
+                .and_then(|value| value.parse::<usize>().ok())
+                .filter(|value| *value > 0)
+        });
+    
     emitter.metric("converter.threads.configured", json!(configured_threads));
+    emitter.log(&format!(
+        "[convert] configured threads: {}",
+        configured_threads.map_or("default".to_string(), |t| t.to_string())
+    ));
     let result = if tools.convert_bin.is_file() {
         run_native(
             emitter,
@@ -57,8 +71,13 @@ pub fn run_convert(
     };
 
     if result.exit_code != 0 && configured_threads != Some(1) && retry_single_thread(&result) {
-        emitter
-            .log("[convert] converter returned no tile JSON; retrying once with one worker thread");
+        emitter.log(&format!(
+            "[convert] multi-threaded converter failed (exit_code={}, configured_threads={:?}); stderr tail:\n{}",
+            result.exit_code,
+            configured_threads,
+            if result.stderr_tail.is_empty() { "(empty)" } else { &result.stderr_tail }
+        ));
+        emitter.log("[convert] retrying once with one worker thread");
         emitter.metric("converter.retryCount", json!(1));
         emitter.metric("converter.retryThreads", json!(1));
         if out_dir.exists() {
@@ -84,6 +103,14 @@ pub fn run_convert(
             &extra,
             Some(1),
         )?;
+        if result.exit_code == 0 {
+            emitter.log("[convert] single-threaded retry succeeded");
+        } else {
+            emitter.log(&format!(
+                "[convert] single-threaded retry also failed (exit_code={})",
+                result.exit_code
+            ));
+        }
     }
 
     emitter.metric("converter.elapsedMs", json!(started.elapsed().as_millis()));
@@ -183,6 +210,7 @@ fn run_native(
         }
     }
     if let Some(threads) = thread_override {
+        emitter.log(&format!("[convert] forcing thread count to {}", threads));
         env.push((
             "GEOFORGE_CONVERT_THREADS",
             PathBuf::from(threads.to_string()),

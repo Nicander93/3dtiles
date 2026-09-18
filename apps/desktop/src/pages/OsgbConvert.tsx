@@ -35,6 +35,7 @@ type FormState = {
   originY: string;
   originZ: string;
   geographicExport: boolean;
+  convertThreads: number;
 };
 
 const defaults: FormState = {
@@ -50,6 +51,7 @@ const defaults: FormState = {
   originY: '',
   originZ: '',
   geographicExport: false,
+  convertThreads: 1,
 };
 
 function loadConfig(): FormState {
@@ -121,7 +123,12 @@ export function OsgbConvert() {
 
   useEffect(() => {
     void api.capabilities().then(setCaps).catch(() => setCaps(null));
-    void api.getSettings().then((s) => setDefaultOutputRoot(s.defaultOutputRoot || '')).catch(() => {});
+    void api.getSettings().then((s) => {
+      setDefaultOutputRoot(s.defaultOutputRoot || '');
+      if (s.defaultConvertThreads !== undefined) {
+        setForm((f) => ({ ...f, convertThreads: s.defaultConvertThreads ?? 1 }));
+      }
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -312,6 +319,9 @@ export function OsgbConvert() {
             l2MaxTriangles: preset.l2MaxTriangles,
           },
           texture: { mode: form.textureMode },
+          convert: {
+            threads: form.convertThreads,
+          },
           geo,
           geographicExport: form.geographicExport,
         },
@@ -442,13 +452,13 @@ export function OsgbConvert() {
             >
               <option value="keep">保留原纹理</option>
               <option value="ktx2-etc1s" disabled={!ktx2Etc1sEnabled(caps)}>
-                KTX2 ETC1S{ktx2Etc1sEnabled(caps) ? '' : '（不可用）'}
+                KTX2 ETC1S{ktx2Etc1sEnabled(caps) ? '（实验）' : '（不可用）'}
               </option>
               <option value="ktx2" disabled={!ktx2Etc1sEnabled(caps)}>
-                KTX2{ktx2Etc1sEnabled(caps) ? '' : '（不可用）'}
+                KTX2{ktx2Etc1sEnabled(caps) ? '（实验）' : '（不可用）'}
               </option>
               <option value="ktx2-uastc" disabled={!ktx2UastcEnabled(caps)}>
-                KTX2 UASTC{ktx2UastcEnabled(caps) ? '' : '（不可用）'}
+                KTX2 UASTC{ktx2UastcEnabled(caps) ? '（实验）' : '（不可用）'}
               </option>
             </select>
             <div className="field-hint">
@@ -500,6 +510,22 @@ export function OsgbConvert() {
               </select>
               <div className="field-hint">
                 {form.rebuildTop ? rebuildLevelsLabel(form.rebuildLevels) : '未启用顶层重建'}
+              </div>
+            </div>
+            <div className="field">
+              <label>转换并发数</label>
+              <select
+                className="select"
+                value={form.convertThreads}
+                onChange={(e) => update('convertThreads', Number(e.target.value))}
+              >
+                <option value={1}>1（推荐 M1 试用版）</option>
+                <option value={2}>2</option>
+                <option value={4}>4</option>
+                <option value={0}>自动（CPU 核心数一半）</option>
+              </select>
+              <div className="field-hint">
+                M1 试用版建议使用 1 worker 以确保稳定性
               </div>
             </div>
             <div className="field">
