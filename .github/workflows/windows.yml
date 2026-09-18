@@ -35,6 +35,9 @@ jobs:
           npm ci
           npm test
           npm run build
+      - name: Prepare desktop sidecars
+        working-directory: apps/desktop
+        run: npm run prepare:sidecars
       - name: Test desktop Tauri library
         run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib --locked
       - name: Check desktop Tauri Windows target

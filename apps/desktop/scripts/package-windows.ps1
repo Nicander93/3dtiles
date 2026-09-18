@@ -41,6 +41,35 @@ if (-not $SkipTextureBundle -and -not (Test-Path (Join-Path $TextureSrc "geoforg
 if (Test-Path $TextureSrc) {
   New-Item -ItemType Directory -Force -Path $TextureDst | Out-Null
   Copy-Item -Recurse -Force (Join-Path $TextureSrc "*") $TextureDst
+  # Ensure MSVC CRT and zstd.dll sit beside basisu.exe (direct launch / 0xc0000135 packaging fix).
+  $crtNames = @(
+    "concrt140.dll",
+    "msvcp140.dll",
+    "msvcp140_1.dll",
+    "msvcp140_2.dll",
+    "msvcp140_atomic_wait.dll",
+    "msvcp140_codecvt_ids.dll",
+    "vccorlib140.dll",
+    "vcruntime140.dll",
+    "vcruntime140_1.dll",
+    "vcruntime140_threads.dll",
+    "zstd.dll"
+  )
+  $crtSrcDirs = @(
+    (Join-Path $BundleDir "bin"),
+    (Join-Path $BundleDir "converter")
+  )
+  foreach ($name in $crtNames) {
+    $dest = Join-Path $TextureDst $name
+    if (Test-Path -LiteralPath $dest -PathType Leaf) { continue }
+    foreach ($srcDir in $crtSrcDirs) {
+      $src = Join-Path $srcDir $name
+      if (Test-Path -LiteralPath $src -PathType Leaf) {
+        Copy-Item -LiteralPath $src -Destination $dest -Force
+        break
+      }
+    }
+  }
 } elseif (-not $SkipTextureBundle) {
   Write-Warning "geoforge-texture bundle missing at $TextureSrc - packaging will fail checklist"
 }
@@ -77,6 +106,11 @@ if (-not $SkipTextureBundle) {
   $tex = Get-ChildItem -Recurse $TextureDst -Filter "geoforge-texture.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
   if (-not $tex) { $missing += "resources/runtime/texture/geoforge-texture.exe" }
   if (-not (Test-Path (Join-Path $TextureDst "basisu.exe"))) { $missing += "resources/runtime/texture/basisu.exe" }
+  foreach ($dll in @("msvcp140.dll", "msvcp140_2.dll", "vcruntime140.dll", "vcruntime140_1.dll", "zstd.dll")) {
+    if (-not (Test-Path (Join-Path $TextureDst $dll))) {
+      $missing += ("resources/runtime/texture/" + $dll)
+    }
+  }
 }
 if ($missing.Count -gt 0) {
   Write-Error ("Missing required package files:`n - " + ($missing -join "`n - "))
