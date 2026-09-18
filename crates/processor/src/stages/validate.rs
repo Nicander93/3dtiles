@@ -229,14 +229,14 @@ fn resolve_and_check_content(
         base_dir.join(uri)
     };
     let resolved = normalize_join(&joined);
-    if !is_under_root(data_root, &resolved) {
-        return Err(
-            ValidateError::new("PATH_ESCAPE", &resolved, "content URI escapes data root").display(),
-        );
-    }
     if !resolved.is_file() {
         return Err(
             ValidateError::new("MISSING_CONTENT", &resolved, "referenced file missing").display(),
+        );
+    }
+    if !is_under_root(data_root, &resolved) {
+        return Err(
+            ValidateError::new("PATH_ESCAPE", &resolved, "content URI escapes data root").display(),
         );
     }
 

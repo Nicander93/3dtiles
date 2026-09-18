@@ -284,7 +284,7 @@ pub fn rename_no_replace(src: &Path, dst: &Path) -> Result<(), String> {
     }
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, target_os = "linux"))]
 fn rename_noreplace_unix(src: &Path, dst: &Path) -> Result<(), String> {
     use std::ffi::CString;
     use std::os::raw::c_char;
@@ -330,6 +330,11 @@ fn rename_noreplace_unix(src: &Path, dst: &Path) -> Result<(), String> {
         return Ok(());
     }
     Err(format!("commit rename failed: {err}"))
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn rename_noreplace_unix(src: &Path, dst: &Path) -> Result<(), String> {
+    fs::rename(src, dst).map_err(|e| format!("commit rename failed: {e}"))
 }
 
 #[cfg(test)]
