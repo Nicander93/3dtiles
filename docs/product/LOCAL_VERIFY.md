@@ -12,7 +12,7 @@ Repo may include `apps/desktop/dist` for the UI.
 
 - Node 18+ for `apps/desktop`
 - Rust toolchain for `processor` + `geoforge-desktop` (Tauri)
-- Optional Python venv for rebuild baseline / KTX2 (`tools/experiments/rebuild_top_py`, `tools/texture_ktx2`)
+- Optional Python venv **only** for experiments (`GEOFORGE_REBUILD_ENGINE=python` / `GEOFORGE_TEXTURE_ENGINE=python`). Release path: Rust `top_rebuild` + Rust KTX2 walker + `basisu` sidecar.
 - Windows release builds stage the pinned converter under `resources/runtime/converter`; for local development, set `GEOFORGE_3DTILE` or `GEOFORGE_RUNTIME_ROOT` when using a converter outside the repository.
 
 ## 3. Sample
@@ -69,8 +69,10 @@ NSIS 产物位于 `src-tauri/target/release/bundle/nsis/`。2026-09-12 的 `0.1.
 |------|------|
 | missing web dist | `cd apps/desktop && npm run build` |
 | converter missing | 重新运行 `prepare-runtime.ps1`；开发覆盖时设置 `GEOFORGE_RUNTIME_ROOT` / `GEOFORGE_3DTILE` |
-| rebuild script missing | `tools/experiments/rebuild_top_py/rebuild_top.py` or `GEOFORGE_REBUILD_TOP` |
-| ktx2 grayed | check wrapper and basisu (`tools/texture_ktx2`) |
+| top_rebuild missing | `cargo build -p top_rebuild --bin top_rebuild` or `GEOFORGE_TOP_REBUILD` / sidecar |
+| rebuild script missing | `tools/experiments/rebuild_top_py/rebuild_top.py` or `GEOFORGE_REBUILD_TOP` (experiments only) |
+| ktx2 grayed | check `basisu` sidecar (`GEOFORGE_BASISU` / `scripts/release/stage_sidecars.sh`) |
+
 
 ## Related
 

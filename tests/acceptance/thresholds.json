@@ -2,15 +2,15 @@
   "schema": "geoforge.acceptance.thresholds.v1",
   "spatial": {
     "horizontalCenterDeviationMaxM": 1.0,
-    "parentCoversChildToleranceM": 0.10,
+    "parentCoversChildToleranceM": 0.1,
     "worldTransformDriftMaxM": 0.001,
     "glbLocalRoundtripP99MaxM": 0.05,
-    "glbLocalRoundtripMaxM": 0.10
+    "glbLocalRoundtripMaxM": 0.1
   },
   "seam": {
-    "lockBorderDisplacementMaxM": 1e-4,
-    "addedGapP95MaxM": 0.10,
-    "addedGapMaxM": 0.50
+    "lockBorderDisplacementMaxM": 0.0001,
+    "addedGapP95MaxM": 0.1,
+    "addedGapMaxM": 0.5
   },
   "validator": {
     "layerBNumErrorsMax": 0

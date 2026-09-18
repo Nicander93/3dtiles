@@ -1,7 +1,9 @@
-//! processor CLI — `run --task`, `convert-osgb`, `process-tileset`, `scan-osgb`.
+//! processor CLI — `run --task`, `convert-osgb`, `process-tileset`, `scan-osgb`, `validate-tileset`.
 
 use clap::{Parser, Subcommand};
-use processor::{capabilities_json, run_task, scan_osgb, CancelFlag, TaskConfig, EXIT_FAILED};
+use processor::{
+    run_task, scan_osgb, validate_and_write_report, CancelFlag, TaskConfig, EXIT_FAILED,
+};
 use serde_json::json;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -54,10 +56,11 @@ enum Commands {
         #[arg(long)]
         path: PathBuf,
     },
-    /// Probe bundled tools (JSON). Same source as desktop capabilities.
-    Capabilities {
-        #[arg(long, default_value_t = true)]
-        json: bool,
+    /// Layer A recursive tileset validation (Phase 12). Writes validation_internal.json.
+    ValidateTileset {
+        /// Directory containing tileset.json (or path to tileset.json itself).
+        #[arg(long)]
+        path: PathBuf,
     },
 }
 
@@ -137,30 +140,38 @@ fn main() -> ExitCode {
         }
         Commands::ScanOsgb { path } => {
             let result = scan_osgb(&path.to_string_lossy());
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&result).unwrap_or_default()
-            );
-            if result
-                .get("valid")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false)
-            {
+            println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+            if result.get("valid").and_then(|v| v.as_bool()).unwrap_or(false) {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::from(EXIT_FAILED as u8)
             }
         }
-        Commands::Capabilities { json: _ } => {
-            let caps = capabilities_json();
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&caps).unwrap_or_default()
-            );
-            if caps.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
-                ExitCode::SUCCESS
+        Commands::ValidateTileset { path } => {
+            let dir = if path.is_file() {
+                path.parent().unwrap_or(path.as_path()).to_path_buf()
             } else {
-                ExitCode::from(EXIT_FAILED as u8)
+                path
+            };
+            match validate_and_write_report(&dir) {
+                Ok(report) => {
+                    println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
+                    if report.ok {
+                        ExitCode::SUCCESS
+                    } else {
+                        eprintln!(
+                            "VALIDATION_FAILED: {}",
+                            report
+                                .first_error_summary()
+                                .unwrap_or_else(|| "see issues".into())
+                        );
+                        ExitCode::from(EXIT_FAILED as u8)
+                    }
+                }
+                Err(e) => {
+                    eprintln!("VALIDATION_FAILED: {e}");
+                    ExitCode::from(EXIT_FAILED as u8)
+                }
             }
         }
     }

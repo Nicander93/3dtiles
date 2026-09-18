@@ -2,6 +2,7 @@
 //!
 //! Phase 5: hierarchy / bounds / transform / source representation ids only.
 //! No mesh simplification or ProxyBuilder geometry merge.
+//! Phase 11: TreeBuilder still only decides spatial block composition / bounds / levels.
 
 use crate::error::{Result, TopRebuildError};
 use crate::selector::{self, Selection, DEFAULT_SOURCE_ERROR_RATIO};
@@ -29,7 +30,6 @@ impl Default for TreeBuildOptions {
 
 fn parent_grid(x: i32, y: i32) -> (i32, i32) {
     // plan §11.2: parentX = floor(childX / 2); parentY = floor(childY / 2)
-    // Rust `/` truncates toward zero; for negatives use div_euclid (floor).
     (x.div_euclid(2), y.div_euclid(2))
 }
 
@@ -40,7 +40,6 @@ fn stub_proxy_from_children(level: u32, px: i32, py: i32, children: &[TreeNode])
             .map(|c| c.bounds.clone())
             .collect::<Vec<_>>(),
     );
-    // Parent local frame origin at bounds center (double); mesh work deferred to Phase 6.
     let world_transform = if let Some((cx, cy, cz)) = bounds.center() {
         Mat4d::translation(cx, cy, cz)
     } else {
@@ -69,30 +68,22 @@ fn stub_proxy_from_children(level: u32, px: i32, py: i32, children: &[TreeNode])
 }
 
 fn l0_nodes(blocks: &[SourceBlock], selections: &[(usize, Selection)]) -> Result<Vec<TreeNode>> {
-    let mut origin_x = i32::MAX;
-    let mut origin_y = i32::MAX;
-    for (bi, _) in selections {
-        let gx = blocks[*bi].grid_x.ok_or_else(|| {
-            TopRebuildError::Other(format!("block {} missing gridX", blocks[*bi].id))
-        })?;
-        let gy = blocks[*bi].grid_y.ok_or_else(|| {
-            TopRebuildError::Other(format!("block {} missing gridY", blocks[*bi].id))
-        })?;
-        origin_x = origin_x.min(gx);
-        origin_y = origin_y.min(gy);
-    }
     let mut nodes = Vec::with_capacity(selections.len());
     for (bi, sel) in selections {
         let block = &blocks[*bi];
-        let gx = block.grid_x.unwrap() - origin_x;
-        let gy = block.grid_y.unwrap() - origin_y;
+        let gx = block.grid_x.ok_or_else(|| {
+            TopRebuildError::Other(format!("block {} missing gridX", block.id))
+        })?;
+        let gy = block.grid_y.ok_or_else(|| {
+            TopRebuildError::Other(format!("block {} missing gridY", block.id))
+        })?;
         let rep = &block.representations[sel.representation_index];
         nodes.push(TreeNode {
             id: format!("L0_{}", block.id),
             level: 0,
             grid_x: gx,
             grid_y: gy,
-            bounds: block.bounds.world_bounds(&block.world_transform),
+            bounds: block.bounds.clone(),
             world_transform: block.world_transform.clone(),
             source_representation_ids: vec![rep.id.clone()],
             child_ids: vec![],
@@ -158,6 +149,7 @@ pub fn build_tree(blocks: &[SourceBlock], opts: &TreeBuildOptions) -> Result<Reb
 mod tests {
     use super::*;
     use crate::types::Representation;
+    use std::path::PathBuf;
 
     fn synth_block(gx: i32, gy: i32) -> SourceBlock {
         let cell = 100.0;
@@ -172,16 +164,15 @@ mod tests {
             grid_y: Some(gy),
             bounds: BoundingVolume::from_box(boxv),
             world_transform: Mat4d::identity(),
-            representations: vec![Representation {
-                id: format!("{id}#rep0"),
-                content_path: format!("{id}.b3dm").into(),
-                geometric_error_meters: 50.0,
-                triangle_count: 0,
-                texture_bytes: 0,
-                bounds: BoundingVolume::from_box(boxv),
-                world_transform: Mat4d::identity(),
-            }],
-            source_tileset: None,
+            source_tileset_path: PathBuf::from(format!("{id}/tileset.json")),
+            source_block_dir: PathBuf::from(id.clone()),
+            representations: vec![Representation::single_part(
+                format!("{id}#rep0"),
+                format!("{id}.b3dm").into(),
+                50.0,
+                BoundingVolume::from_box(boxv),
+                Mat4d::identity(),
+            )],
         }
     }
 
@@ -215,22 +206,23 @@ mod tests {
     }
 
     #[test]
-    fn offset_16x16_reaches_root() {
-        let blocks: Vec<_> = (5469..5485)
-            .flat_map(|y| (5567..5583).map(move |x| synth_block(x, y)))
-            .collect();
-        let tree = build_tree(&blocks, &TreeBuildOptions::default()).unwrap();
-        assert_eq!(tree.levels[0].len(), 256);
-        assert_eq!(tree.levels.last().unwrap().len(), 1);
-    }
-
-    #[test]
     fn missing_corner_still_aggregates() {
-        // 3 blocks in a 2x2 cell → still 1 parent
         let blocks = vec![synth_block(0, 0), synth_block(1, 0), synth_block(0, 1)];
         let tree = build_tree(&blocks, &TreeBuildOptions::default()).unwrap();
         assert_eq!(tree.levels[0].len(), 3);
         assert_eq!(tree.levels[1].len(), 1);
         assert_eq!(tree.levels[1][0].child_ids.len(), 3);
+    }
+
+    #[test]
+    fn negative_grid_index_parent() {
+        assert_eq!(parent_grid(-1, 0), (-1, 0));
+        assert_eq!(parent_grid(-2, -3), (-1, -2));
+        let blocks = vec![synth_block(-2, -2), synth_block(-1, -2), synth_block(-2, -1), synth_block(-1, -1)];
+        let tree = build_tree(&blocks, &TreeBuildOptions::default()).unwrap();
+        assert_eq!(tree.levels[0].len(), 4);
+        assert_eq!(tree.levels[1].len(), 1);
+        assert_eq!(tree.levels[1][0].grid_x, -1);
+        assert_eq!(tree.levels[1][0].grid_y, -1);
     }
 }

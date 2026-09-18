@@ -56,7 +56,17 @@ fn extract_b3dm_bytes(data: &[u8]) -> Result<LoadedContent> {
         offset = found
             .ok_or_else(|| TopRebuildError::Other("glb magic not found in b3dm payload".into()))?;
     }
-    let glb = if byte_length > 0 && byte_length <= data.len() && byte_length > offset {
+    // Prefer GLB header length so trailing b3dm padding is not returned (Phase 12 Layer B).
+    let glb = if offset + 12 <= data.len() && &data[offset..offset + 4] == b"glTF" {
+        let glb_len = u32::from_le_bytes(data[offset + 8..offset + 12].try_into().unwrap()) as usize;
+        if glb_len >= 12 && offset + glb_len <= data.len() {
+            data[offset..offset + glb_len].to_vec()
+        } else if byte_length > 0 && byte_length <= data.len() && byte_length > offset {
+            data[offset..byte_length].to_vec()
+        } else {
+            data[offset..].to_vec()
+        }
+    } else if byte_length > 0 && byte_length <= data.len() && byte_length > offset {
         data[offset..byte_length].to_vec()
     } else {
         data[offset..].to_vec()

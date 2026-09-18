@@ -1,18 +1,29 @@
-# texture_ktx2
+# texture_ktx2 (experiments / regression)
 
-产品路径的 3D Tiles 纹理 KTX2 后处理（BasisU / `KHR_texture_basisu`）。
+**Release path (Phase 14):** Processor uses a **Rust** tileset walker that calls the
+bundled `basisu` CLI. No Python is required for `texture.mode=ktx2-*`.
+
+Windows packaging may still ship a PyInstaller `geoforge-texture.exe` beside BasisU
+under `resources/runtime/texture/` for older installers; prefer the Rust walker +
+`basisu` sidecar for new builds.
+
+This directory keeps the Python wrapper for regression only:
 
 ```bash
-python tools/texture_ktx2/run.py -i TILESET_DIR --mode ktx2-etc1s --basisu /path/to/basisu
+# Release / default
+GEOFORGE_TEXTURE_ENGINE=rust   # default
+# processor process-tileset -i DIR -o OUT --texture ktx2-etc1s
+
+# Experiments fallback only
+GEOFORGE_TEXTURE_ENGINE=python python tools/texture_ktx2/run.py -i TILESET_DIR --mode ktx2-etc1s --basisu /path/to/basisu
 python tools/texture_ktx2/run.py -i TILESET_DIR -o OUT --mode ktx2-uastc --report report.json
 ```
 
-打包：用 PyInstaller onedir 生成 `geoforge-texture.exe`，与 BasisU 一并放入 `resources/runtime/texture/`。
-
 ```powershell
-# 构建机示例（需已安装 pyinstaller）
+# Optional Windows onedir package (legacy)
 cd tools/texture_ktx2
 pyinstaller --onedir --name geoforge-texture run.py
 ```
 
-环境变量：`GEOFORGE_BASISU`、`GEOFORGE_TEXTURE`（正式包指向 geoforge-texture.exe）。
+Env: `GEOFORGE_BASISU` overrides basisu path (sidecar preferred);
+`GEOFORGE_TEXTURE` may point at geoforge-texture.exe on older packages.

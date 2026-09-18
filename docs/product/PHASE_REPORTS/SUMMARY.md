@@ -1,4 +1,4 @@
-# Architecture rebuild — Phase 0–10 SUMMARY
+# Architecture rebuild — Phase 0–12 SUMMARY
 
 Date: **2026-09-12** Asia/Shanghai  
 Authority: [`../03-v1-architecture-rebuild-plan.md`](../03-v1-architecture-rebuild-plan.md)  
@@ -40,6 +40,13 @@ Real 5×4: [`../REAL_DATA_VALIDATION.md`](../REAL_DATA_VALIDATION.md).
 | **F** | 质量参数 | **Partial** — UI 三档；数值未按城区标定 |
 | **G** | Desktop 打包 | **Usable candidate** — NSIS 隔离安装与启动通过；Processor + TopRebuild + 离线 Cesium 已内置；转换仍依赖 Docker 或外置 `_3dtile.exe` |
 | **H** | GE 标定 / 离线预览 | **Done** — 真实 5×4 中景 20 原始块，远景 6×L1，超远景 2×L2；Cesium 本地打包 |
+| **11** | TopRebuild correctness P0-1..P0-4 | Done — no synthetic release; subtree preserve; coverage frontier; world BV |
+| **12** | Validator layers A/B | Done — processor Layer A pre-commit; CesiumGS Layer B acceptance `numErrors=0` |
+| **13** | Sibling staging / safe commit | Done — see phase-13.md (merged from feat/v0-scaffold) |
+| **14** | Zero-Python runtime path | Done — see phase-14.md; Rust KTX2 walker + basisu sidecar |
+| **15** | Public data acceptance framework | Done — scripts/acceptance/* restored via merge |
+| **17** | Cesium A/B harness | Partial — harness on branch; full A/B in phase-17.md |
+
 
 ## Phase 10 numbers (record)
 
@@ -80,4 +87,9 @@ cargo build -p top_rebuild --bin top_rebuild -p processor
 ```
 
 ## Reports index
-- [phase-0.md](./phase-0.md) … [phase-10.md](./phase-10.md), [phase-a.md](./phase-a.md) … [phase-g.md](./phase-g.md)
+- [phase-0.md](./phase-0.md) … [phase-10.md](./phase-10.md), [phase-a.md](./phase-a.md) … [phase-h.md](./phase-h.md)
+- [phase-11.md](./phase-11.md) … [phase-15.md](./phase-15.md), [phase-17.md](./phase-17.md), [branch-merge-status.md](./branch-merge-status.md)
+
+## Phase 11 (production readiness)
+Correctness hardening P0-1..P0-4 in `top_rebuild`: no synthetic release path; original Block subtree preservation + `subtree_preservation.json`; coverage frontiers; oriented/world BV. See [phase-11.md](./phase-11.md). Authority: [`../04-v1-production-readiness-plan.md`](../04-v1-production-readiness-plan.md).
+

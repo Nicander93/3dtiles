@@ -1,11 +1,11 @@
-//! Invoke prebuilt `_3dtile` / `GEOFORGE_3DTILE` (no Docker fallback).
+//! Invoke existing _3dtile / GEOFORGE_3DTILE wrapper.
 
 use crate::cancel::CancelFlag;
 use crate::protocol::{Emitter, Stage};
-use crate::util::{run_logged_env_result, tool_paths, CommandResult};
-use serde_json::{json, Value};
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use crate::util::{run_logged, tool_paths};
+use serde_json::Value;
+use std::path::Path;
 
 pub fn run_convert(
     emitter: &Arc<Emitter>,
@@ -15,240 +15,130 @@ pub fn run_convert(
     options: &Value,
     cfg_json: Option<&str>,
 ) -> Result<(), String> {
-    std::fs::create_dir_all(out_dir).map_err(|e| e.to_string())?;
-    let extra = convert_flags(emitter, options, cfg_json);
     let tools = tool_paths();
+    if !tools.convert_bin.is_file() {
+        return Err(format!("Converter not found: {}", tools.convert_bin.display()));
+    }
+    std::fs::create_dir_all(out_dir).map_err(|e| e.to_string())?;
+
+    let mut cmd: Vec<String> = vec![
+        tools.convert_bin.to_string_lossy().into_owned(),
+        "-f".into(),
+        "osgb".into(),
+        "-i".into(),
+        osgb_root.into(),
+        "-o".into(),
+        out_dir.to_string_lossy().into_owned(),
+    ];
+
+    let conv = options.get("convert").cloned().unwrap_or(Value::Null);
+    if conv.get("verbose").and_then(|v| v.as_bool()).unwrap_or(false) {
+        cmd.push("-v".into());
+    }
+    if let Some(cfg) = conv.get("config").and_then(|v| v.as_str()) {
+        cmd.push("-c".into());
+        cmd.push(cfg.into());
+        emitter.log("[convert] using options.convert.config");
+    } else if let Some(cfg) = cfg_json {
+        cmd.push("-c".into());
+        cmd.push(cfg.into());
+        emitter.log(&format!("[convert] -c {cfg}"));
+    }
+
+    // Native KTX2 only when explicitly requested. Default release path uses Rust+basisu
+    // texture stage (Phase 14); Python is experiments-only.
+    let texture = options.get("texture").cloned().unwrap_or(Value::Null);
+    let mode = crate::stages::texture::normalize_mode(
+        texture.get("mode").and_then(|v| v.as_str()),
+    );
+    if mode != "keep" {
+        // Prefer Rust postprocess (basisu sidecar) — native flag only with GEOFORGE_NATIVE_KTX2=1
+        if std::env::var("GEOFORGE_NATIVE_KTX2").ok().as_deref() == Some("1") {
+            cmd.push("--enable-texture-compress".into());
+            emitter.log(&format!("[convert] texture flag: --enable-texture-compress (mode={mode})"));
+        } else {
+            emitter.log(&format!(
+                "[convert] mode={mode}: convert without native KTX2; texture stage may post-process (rust+basisu)"
+            ));
+        }
+    }
 
     emitter.stage(Stage::Convert, "OSGB → 3D Tiles");
-    let started = std::time::Instant::now();
-    let configured_threads = std::env::var("GEOFORGE_CONVERT_THREADS")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .filter(|value| *value > 0);
-    emitter.metric("converter.threads.configured", json!(configured_threads));
-    let result = if tools.convert_bin.is_file() {
-        run_native(
-            emitter,
-            cancel,
-            &tools.convert_bin,
-            osgb_root,
-            out_dir,
-            &extra,
-            None,
-        )
-    } else if tools.packaged {
-        return Err(format!(
-            "组件缺失，请修复安装（转换器 _3dtile 未找到：{}）",
-            tools.convert_bin.display()
-        ));
-    } else {
-        return Err(format!(
-            "找不到转换器 _3dtile（查过 {}）。请运行 apps/desktop/scripts/prepare-converter.ps1，或设置 GEOFORGE_3DTILE。",
-            tools.convert_bin.display()
-        ));
-    };
-
-    let mut result = match result {
-        Ok(result) => result,
-        Err(error) => {
-            emitter.metric("converter.elapsedMs", json!(started.elapsed().as_millis()));
-            return Err(error);
-        }
-    };
-
-    if result.exit_code != 0 && configured_threads != Some(1) && retry_single_thread(&result) {
-        emitter
-            .log("[convert] converter returned no tile JSON; retrying once with one worker thread");
-        emitter.metric("converter.retryCount", json!(1));
-        emitter.metric("converter.retryThreads", json!(1));
-        if out_dir.exists() {
-            std::fs::remove_dir_all(out_dir).map_err(|error| {
-                format!(
-                    "failed to clear partial converter output before retry {}: {error}",
-                    out_dir.display()
-                )
-            })?;
-        }
-        std::fs::create_dir_all(out_dir).map_err(|error| {
-            format!(
-                "failed to recreate converter output before retry {}: {error}",
-                out_dir.display()
-            )
-        })?;
-        result = run_native(
-            emitter,
-            cancel,
-            &tools.convert_bin,
-            osgb_root,
-            out_dir,
-            &extra,
-            Some(1),
-        )?;
-    }
-
-    emitter.metric("converter.elapsedMs", json!(started.elapsed().as_millis()));
-    if let Some(bytes) = result.peak_memory_bytes {
-        emitter.metric("converter.peakMemoryBytes", json!(bytes));
-    }
-
+    let rc = run_logged(emitter, cancel, &cmd, None)?;
     if cancel.is_cancelled() {
         return Err("cancelled".into());
     }
-    if result.exit_code != 0 {
-        let detail = if result.stderr_tail.is_empty() {
-            "converter did not provide stderr output".to_string()
-        } else {
-            format!("last converter output:\n{}", result.stderr_tail)
-        };
-        return Err(format!("convert exited {}: {detail}", result.exit_code));
+    if rc != 0 {
+        return Err(format!("convert exited {rc}"));
     }
     let tileset = out_dir.join("tileset.json");
     if !tileset.is_file() {
         return Err(format!("tileset.json missing under {}", out_dir.display()));
     }
+    // Native _3dtile often omits root `refine`; 3D Tiles requires it when children exist
+    // (CesiumGS validator: TILE_REFINE_MISSING_IN_ROOT). Default REPLACE for OSGB mesh trees.
+    match ensure_tileset_refine(out_dir) {
+        Ok(n) if n > 0 => emitter.log(&format!(
+            "[convert] set missing refine=REPLACE on {n} tileset root(s) with children"
+        )),
+        Ok(_) => {}
+        Err(e) => emitter.log(&format!("[convert] refine normalize warning: {e}")),
+    }
     Ok(())
 }
 
-fn convert_flags(emitter: &Arc<Emitter>, options: &Value, cfg_json: Option<&str>) -> Vec<String> {
-    let mut extra = Vec::new();
-    let conv = options.get("convert").cloned().unwrap_or(Value::Null);
-    if conv
-        .get("verbose")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
-    {
-        extra.push("-v".into());
-    }
-    if let Some(cfg) = conv.get("config").and_then(|v| v.as_str()) {
-        extra.push("-c".into());
-        extra.push(cfg.into());
-        emitter.log("[convert] using options.convert.config");
-    } else if let Some(cfg) = cfg_json {
-        extra.push("-c".into());
-        extra.push(cfg.into());
-        emitter.log(&format!("[convert] -c {cfg}"));
-    }
-
-    let texture = options.get("texture").cloned().unwrap_or(Value::Null);
-    let mode = crate::stages::texture::normalize_mode(texture.get("mode").and_then(|v| v.as_str()));
-    if mode != "keep" {
-        if crate::stages::texture::native_texture_mode_available(&mode) {
-            extra.push("--enable-texture-compress".into());
-            emitter.log(&format!(
-                "[convert] texture flag: --enable-texture-compress (mode={mode})"
-            ));
-        } else {
-            emitter.log(&format!(
-                "[convert] mode={mode}: convert without native KTX2; texture stage may post-process"
-            ));
+/// Walk tileset.json tree under `out_dir` and set `root.refine = "REPLACE"` when missing
+/// and the root has children (external or inline). Does not invent geometry.
+fn ensure_tileset_refine(out_dir: &Path) -> Result<usize, String> {
+    use serde_json::{json, Value};
+    use std::fs;
+    let mut fixed = 0usize;
+    let mut stack = vec![out_dir.join("tileset.json")];
+    let mut seen = std::collections::HashSet::new();
+    while let Some(path) = stack.pop() {
+        let canon = path.canonicalize().unwrap_or(path.clone());
+        if !seen.insert(canon.clone()) {
+            continue;
+        }
+        if !path.is_file() {
+            continue;
+        }
+        let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        let mut doc: Value = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+        let Some(root) = doc.get_mut("root") else {
+            continue;
+        };
+        let has_children = root
+            .get("children")
+            .and_then(|c| c.as_array())
+            .map(|a| !a.is_empty())
+            .unwrap_or(false);
+        if has_children && root.get("refine").and_then(|v| v.as_str()).is_none() {
+            root.as_object_mut()
+                .ok_or_else(|| format!("root not object in {}", path.display()))?
+                .insert("refine".into(), json!("REPLACE"));
+            fs::write(&path, serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())? + "
+")
+                .map_err(|e| e.to_string())?;
+            fixed += 1;
+        }
+        // queue external tilesets referenced by content.uri
+        let root_ref = doc.get("root").cloned().unwrap_or(Value::Null);
+        let mut nodes = vec![root_ref];
+        while let Some(node) = nodes.pop() {
+            if let Some(uri) = node.pointer("/content/uri").and_then(|v| v.as_str()) {
+                if uri.ends_with("tileset.json") || uri.contains("tileset.json?") {
+                    let base = path.parent().unwrap_or(out_dir);
+                    let child = base.join(uri.split('?').next().unwrap_or(uri));
+                    if child.is_file() {
+                        stack.push(child);
+                    }
+                }
+            }
+            if let Some(chs) = node.get("children").and_then(|c| c.as_array()) {
+                nodes.extend(chs.iter().cloned());
+            }
         }
     }
-    extra
-}
-
-fn run_native(
-    emitter: &Arc<Emitter>,
-    cancel: &CancelFlag,
-    bin: &Path,
-    osgb_root: &str,
-    out_dir: &Path,
-    extra: &[String],
-    thread_override: Option<usize>,
-) -> Result<CommandResult, String> {
-    let mut cmd = vec![
-        bin.to_string_lossy().into_owned(),
-        "-f".into(),
-        "osgb".into(),
-        "-i".into(),
-        strip_verbatim_str(osgb_root),
-        "-o".into(),
-        strip_verbatim_str(&out_dir.to_string_lossy()),
-    ];
-    cmd.extend(extra.iter().cloned());
-    let cwd = bin.parent();
-    let mut env = Vec::new();
-    if let Some(dir) = cwd {
-        let plugins = dir.join("osgPlugins-3.6.5");
-        if plugins.is_dir() {
-            env.push(("OSG_LIBRARY_PATH", plugins));
-        }
-        let gdal = dir.join("gdal");
-        if gdal.is_dir() {
-            env.push(("GDAL_DATA", gdal));
-        }
-        let proj = dir.join("proj");
-        if proj.is_dir() {
-            env.push(("PROJ_DATA", proj.clone()));
-            env.push(("PROJ_LIB", proj));
-        }
-    }
-    if let Some(threads) = thread_override {
-        env.push((
-            "GEOFORGE_CONVERT_THREADS",
-            PathBuf::from(threads.to_string()),
-        ));
-    }
-    let env_refs: Vec<(&str, PathBuf)> = env;
-    run_logged_env_result(emitter, cancel, &cmd, cwd, &env_refs)
-}
-
-fn retry_single_thread(result: &CommandResult) -> bool {
-    const STATUS_ACCESS_VIOLATION: i32 = -1_073_741_819;
-    const STATUS_HEAP_CORRUPTION: i32 = -1_073_740_940;
-    result
-        .stderr_tail
-        .contains("converter returned no JSON for tile:")
-        || matches!(
-            result.exit_code,
-            STATUS_ACCESS_VIOLATION | STATUS_HEAP_CORRUPTION
-        )
-}
-
-fn strip_verbatim_str(s: &str) -> String {
-    #[cfg(windows)]
-    {
-        if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
-            return format!(r"\\{rest}");
-        }
-        if let Some(rest) = s.strip_prefix(r"\\?\") {
-            return rest.to_string();
-        }
-    }
-    s.to_string()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::retry_single_thread;
-    use crate::util::CommandResult;
-
-    fn result(exit_code: i32, stderr_tail: &str) -> CommandResult {
-        CommandResult {
-            exit_code,
-            stderr_tail: stderr_tail.into(),
-            peak_memory_bytes: None,
-        }
-    }
-
-    #[test]
-    fn retries_missing_tile_json() {
-        assert!(retry_single_thread(&result(
-            1,
-            "ERROR: converter returned no JSON for tile: D:\\data\\Tile.osgb",
-        )));
-    }
-
-    #[test]
-    fn retries_known_windows_native_crashes() {
-        assert!(retry_single_thread(&result(-1_073_740_940, "")));
-        assert!(retry_single_thread(&result(-1_073_741_819, "")));
-    }
-
-    #[test]
-    fn does_not_retry_unrelated_converter_errors() {
-        assert!(!retry_single_thread(&result(
-            1,
-            "failed to read metadata.xml"
-        )));
-    }
+    Ok(fixed)
 }

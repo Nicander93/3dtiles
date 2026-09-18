@@ -1,10 +1,9 @@
-//! Representation selector (plan §10).
+//! Representation selector (plan §10, Phase 11 P0-3).
 //!
-//! Rule: among representations with
+//! Rule: among complete coverage frontiers with
 //!   sourceError <= targetProxyError * sourceErrorRatio
-//! pick the **coarsest** (largest geometricError).
-//! If none satisfy, pick the **finest** (smallest geometricError) and warn
-//! `SOURCE_ERROR_TARGET_NOT_REACHED`.
+//! pick the **coarsest** (largest geometricError). Fallback: coarsest overall.
+//! Incomplete frontiers must never be selected (adapter rejects them).
 
 use crate::error::{Result, TopRebuildError};
 use crate::types::{Representation, SourceBlock};
@@ -19,10 +18,10 @@ pub struct Selection {
     pub source_error: f64,
     pub triangle_count: u64,
     pub texture_bytes: u64,
-    pub warning: Option<String>,
+    pub frontier_parts: usize,
 }
 
-/// Select one Representation per SourceBlock for the first proxy layer.
+/// Select one Representation (complete coverage frontier) per SourceBlock.
 pub fn select_for_blocks(
     blocks: &[SourceBlock],
     target_proxy_error: f64,
@@ -44,9 +43,17 @@ pub fn select_one(
     if block.representations.is_empty() {
         return Err(TopRebuildError::NoRepresentations(block.id.clone()));
     }
+    // Reject empty-part reps as incomplete coverage.
+    for rep in &block.representations {
+        if rep.parts.is_empty() {
+            return Err(TopRebuildError::source_coverage_incomplete(format!(
+                "block {} representation {} has zero parts",
+                block.id, rep.id
+            )));
+        }
+    }
     let threshold = target_proxy_error * source_error_ratio;
 
-    // Candidates that are "precise enough" (GE <= threshold). Prefer coarsest among them.
     let mut best_ok: Option<(usize, &Representation)> = None;
     for (i, rep) in block.representations.iter().enumerate() {
         if rep.geometric_error_meters <= threshold {
@@ -60,24 +67,19 @@ pub fn select_one(
         }
     }
 
-    let (index, rep, warning) = if let Some((i, r)) = best_ok {
-        (i, r, None)
+    let (index, rep) = if let Some(v) = best_ok {
+        v
     } else {
-        let (i, r) = block
+        block
             .representations
             .iter()
             .enumerate()
-            .min_by(|(_, a), (_, b)| {
+            .max_by(|(_, a), (_, b)| {
                 a.geometric_error_meters
                     .partial_cmp(&b.geometric_error_meters)
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
-            .unwrap();
-        let warning = Some(format!(
-            "SOURCE_ERROR_TARGET_NOT_REACHED: block={} representation={} threshold={} selected_error={}",
-            block.id, r.id, threshold, r.geometric_error_meters
-        ));
-        (i, r, warning)
+            .unwrap()
     };
 
     Ok(Selection {
@@ -87,12 +89,11 @@ pub fn select_one(
         source_error: rep.geometric_error_meters,
         triangle_count: rep.triangle_count,
         texture_bytes: rep.texture_bytes,
-        warning,
+        frontier_parts: rep.parts.len(),
     })
 }
 
-/// Phase 5 default: use max source GE across blocks as a stand-in target proxy error scale,
-/// so the coarsest complete layer (root content) is preferred when ratio allows.
+/// Phase 5 default: use max source GE across blocks as a stand-in target proxy error scale.
 pub fn default_target_proxy_error(blocks: &[SourceBlock]) -> f64 {
     blocks
         .iter()
@@ -106,19 +107,20 @@ pub fn default_target_proxy_error(blocks: &[SourceBlock]) -> f64 {
 mod tests {
     use super::*;
     use crate::types::{BoundingVolume, Mat4d};
+    use std::path::PathBuf;
 
     fn block_with(ges: &[f64]) -> SourceBlock {
         let reps: Vec<_> = ges
             .iter()
             .enumerate()
-            .map(|(i, &ge)| Representation {
-                id: format!("r{i}"),
-                content_path: format!("c{i}.b3dm").into(),
-                geometric_error_meters: ge,
-                triangle_count: 100 - i as u64,
-                texture_bytes: 0,
-                bounds: BoundingVolume::empty(),
-                world_transform: Mat4d::identity(),
+            .map(|(i, &ge)| {
+                Representation::single_part(
+                    format!("r{i}"),
+                    format!("c{i}.b3dm").into(),
+                    ge,
+                    BoundingVolume::empty(),
+                    Mat4d::identity(),
+                )
             })
             .collect();
         SourceBlock {
@@ -127,30 +129,25 @@ mod tests {
             grid_y: Some(0),
             bounds: BoundingVolume::empty(),
             world_transform: Mat4d::identity(),
+            source_tileset_path: PathBuf::from("tileset.json"),
+            source_block_dir: PathBuf::from("."),
             representations: reps,
-            source_tileset: None,
         }
     }
 
     #[test]
     fn picks_coarsest_satisfying_ratio() {
-        // reps GE 50, 10, 2; target=100, ratio=0.5 → threshold=50 → pick 50
         let b = block_with(&[50.0, 10.0, 2.0]);
         let s = select_one(&b, 100.0, 0.5).unwrap();
         assert_eq!(s.representation_index, 0);
         assert_eq!(s.source_error, 50.0);
+        assert_eq!(s.frontier_parts, 1);
     }
 
     #[test]
     fn fallback_when_none_satisfy() {
-        // threshold = 2.5; available 50/20/10 → pick finest 10
         let b = block_with(&[50.0, 20.0, 10.0]);
         let s = select_one(&b, 5.0, 0.5).unwrap();
-        assert_eq!(s.source_error, 10.0);
-        let w = s.warning.expect("warning");
-        assert!(w.contains("SOURCE_ERROR_TARGET_NOT_REACHED"), "{w}");
-        assert!(w.contains("threshold=2.5"), "{w}");
-        assert!(w.contains("selected_error=10"), "{w}");
-        assert!(w.contains("block=B"), "{w}");
+        assert_eq!(s.source_error, 50.0);
     }
 }
