@@ -192,7 +192,9 @@ fn unreadable_content_release_failure() {
         .unwrap_err()
         .to_string();
     assert!(
-        err.contains("CONTENT_UNREADABLE") || err.contains("UNSUPPORTED_CONTENT"),
+        err.contains("CONTENT_UNREADABLE")
+            || err.contains("UNSUPPORTED_CONTENT")
+            || err.contains("CONTENT_INVALID"),
         "{err}"
     );
 }

@@ -84,6 +84,14 @@ pub fn run_convert(
         Ok(_) => {}
         Err(e) => emitter.log(&format!("[convert] refine normalize warning: {e}")),
     }
+    
+    match realign_b3dm_under(out_dir) {
+        Ok(n) if n > 0 => emitter.log(&format!(
+            "[convert] realigned {n} b3dm file(s) for 8-byte table/GLB alignment (Layer B)"
+        )),
+        Ok(_) => {}
+        Err(e) => emitter.log(&format!("[convert] b3dm realign warning: {e}")),
+    }
     Ok(())
 }
 
@@ -141,4 +149,101 @@ fn ensure_tileset_refine(out_dir: &Path) -> Result<usize, String> {
         }
     }
     Ok(fixed)
+}
+
+/// Pad b3dm feature/batch tables so GLB starts on an 8-byte boundary (CesiumGS Layer B).
+fn realign_one_b3dm(data: &[u8]) -> Result<Option<Vec<u8>>, String> {
+    if data.len() < 28 || &data[0..4] != b"b3dm" {
+        return Ok(None);
+    }
+    let version = u32::from_le_bytes(data[4..8].try_into().unwrap());
+    let ft_json = u32::from_le_bytes(data[12..16].try_into().unwrap()) as usize;
+    let ft_bin = u32::from_le_bytes(data[16..20].try_into().unwrap()) as usize;
+    let bt_json = u32::from_le_bytes(data[20..24].try_into().unwrap()) as usize;
+    let bt_bin = u32::from_le_bytes(data[24..28].try_into().unwrap()) as usize;
+    let mut offset = 28 + ft_json + ft_bin + bt_json + bt_bin;
+    if offset > data.len() {
+        return Err(format!("b3dm tables exceed file (offset={offset})"));
+    }
+    if offset + 4 <= data.len() && &data[offset..offset + 4] != b"glTF" {
+        let mut found = None;
+        for pad in 0..8 {
+            let o = offset + pad;
+            if o + 4 <= data.len() && &data[o..o + 4] == b"glTF" {
+                found = Some(o);
+                break;
+            }
+        }
+        let Some(o) = found else { return Ok(None); };
+        offset = o;
+    }
+    let glb = if offset + 12 <= data.len() && &data[offset..offset + 4] == b"glTF" {
+        let glb_len = u32::from_le_bytes(data[offset + 8..offset + 12].try_into().unwrap()) as usize;
+        if glb_len >= 12 && offset + glb_len <= data.len() {
+            data[offset..offset + glb_len].to_vec()
+        } else {
+            data[offset..].to_vec()
+        }
+    } else {
+        data[offset..].to_vec()
+    };
+    let mut ftj = data[28..28 + ft_json].to_vec();
+    let mut ftb = data[28 + ft_json..28 + ft_json + ft_bin].to_vec();
+    let mut btj = data[28 + ft_json + ft_bin..28 + ft_json + ft_bin + bt_json].to_vec();
+    let mut btb = data[28 + ft_json + ft_bin + bt_json..28 + ft_json + ft_bin + bt_json + bt_bin].to_vec();
+    while (28 + ftj.len()) % 8 != 0 { ftj.push(b' '); }
+    while (28 + ftj.len() + ftb.len()) % 8 != 0 { ftb.push(0); }
+    while (28 + ftj.len() + ftb.len() + btj.len()) % 8 != 0 { btj.push(b' '); }
+    while (28 + ftj.len() + ftb.len() + btj.len() + btb.len()) % 8 != 0 { btb.push(0); }
+    let new_offset = 28 + ftj.len() + ftb.len() + btj.len() + btb.len();
+    let already = ftj.len() == ft_json && ftb.len() == ft_bin && btj.len() == bt_json && btb.len() == bt_bin && offset == new_offset;
+    if already {
+        return Ok(None);
+    }
+    let total = new_offset + glb.len();
+    let mut out = Vec::with_capacity(total);
+    out.extend_from_slice(b"b3dm");
+    out.extend_from_slice(&version.to_le_bytes());
+    out.extend_from_slice(&(total as u32).to_le_bytes());
+    out.extend_from_slice(&(ftj.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(ftb.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(btj.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(btb.len() as u32).to_le_bytes());
+    out.extend_from_slice(&ftj);
+    out.extend_from_slice(&ftb);
+    out.extend_from_slice(&btj);
+    out.extend_from_slice(&btb);
+    out.extend_from_slice(&glb);
+    // 3D Tiles: tile body / byteLength must be 8-byte aligned.
+    while out.len() % 8 != 0 {
+        out.push(0);
+    }
+    let total = out.len() as u32;
+    out[8..12].copy_from_slice(&total.to_le_bytes());
+    Ok(Some(out))
+}
+
+fn realign_b3dm_under(out_dir: &Path) -> Result<usize, String> {
+    use std::fs;
+    let mut n = 0usize;
+    let mut stack = vec![out_dir.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let rd = match fs::read_dir(&dir) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        for ent in rd.flatten() {
+            let p = ent.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("b3dm")).unwrap_or(false) {
+                let data = fs::read(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+                if let Some(fixed) = realign_one_b3dm(&data)? {
+                    fs::write(&p, fixed).map_err(|e| format!("{}: {e}", p.display()))?;
+                    n += 1;
+                }
+            }
+        }
+    }
+    Ok(n)
 }

@@ -83,3 +83,10 @@ Honest notes:
 - `phase-17-start.md` — harness wiring smoke (single-arm)
 - `phase-11-18-gap-audit.md` — track split context
 - `branch-merge-status.md` — `feat/v1-prod-align` merge notes
+
+## tOverview / far-view time gate (V1 note)
+
+Measured far-view **tOverview** improvement was only **~6.1%** (1809 → 1699 ms) against a **−25%** threshold — **miss**. Request (−81.5%) and bytes (−57.7%) still carried the §15.4 gate to **PASS (2/3)**.
+
+**V1 recommendation:** treat **tOverview as a soft / informational metric** on SwiftShader-class CI hosts (no discrete GPU). Do **not** invent or retune numbers to force a third hit. Prefer keeping the ≥2/3 composite gate, or explicitly document tOverview as non-blocking for V1 while still reporting the raw delta. Any GE / SSE retune for wall-clock overview belongs to a later phase with GPU-backed timing, not this PlanD 4×4 evidence set.
+

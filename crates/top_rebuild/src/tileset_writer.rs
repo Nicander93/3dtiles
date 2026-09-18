@@ -494,6 +494,15 @@ fn preserve_block_subtree(
     if src_tileset.exists() && src_dir.exists() {
         // Full subtree copy with relative URIs preserved.
         copy_dir_recursive(src_dir, out_block_dir)?;
+        // Upstream _3dtile may emit misaligned batch-table JSON (Layer B BINARY_INVALID_ALIGNMENT).
+        // Padding is semantics-preserving; do it on the preserved copy only.
+        let n = crate::b3dm::realign_b3dm_tree(out_block_dir)?;
+        if n > 0 {
+            eprintln!(
+                "[top_rebuild] realigned {n} b3dm file(s) under {}",
+                out_block_dir.display()
+            );
+        }
     } else if opts.synthesize_if_empty {
         // Debug/fixture: synthesize content files; keep a minimal tileset if none.
         synthesize_missing_content_in_dir(block, out_block_dir, opts)?;

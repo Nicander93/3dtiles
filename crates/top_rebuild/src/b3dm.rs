@@ -122,7 +122,154 @@ fn write_unbatched_b3dm(glb: &[u8], rtc: Option<[f64; 3]>) -> Result<Vec<u8>> {
     out.write_u32::<LittleEndian>(0)?;
     out.extend_from_slice(&ftj);
     out.extend_from_slice(glb);
+    while out.len() % 8 != 0 {
+        out.push(0);
+    }
+    let total = out.len() as u32;
+    out[8..12].copy_from_slice(&total.to_le_bytes());
     Ok(out)
+}
+
+/// Pad feature/batch table sections so each boundary (and GLB start) is 8-byte aligned.
+/// CesiumGS 3d-tiles-validator: BINARY_INVALID_ALIGNMENT.
+/// Returns `Ok(None)` when already aligned or input is not a b3dm.
+pub fn realign_b3dm_byte_alignment(data: &[u8]) -> Result<Option<Vec<u8>>> {
+    if data.len() < 28 || &data[0..4] != b"b3dm" {
+        return Ok(None);
+    }
+    let version = u32::from_le_bytes(data[4..8].try_into().unwrap());
+    let ft_json = u32::from_le_bytes(data[12..16].try_into().unwrap()) as usize;
+    let ft_bin = u32::from_le_bytes(data[16..20].try_into().unwrap()) as usize;
+    let bt_json = u32::from_le_bytes(data[20..24].try_into().unwrap()) as usize;
+    let bt_bin = u32::from_le_bytes(data[24..28].try_into().unwrap()) as usize;
+    let mut offset = 28 + ft_json + ft_bin + bt_json + bt_bin;
+    if offset > data.len() {
+        return Err(TopRebuildError::Other(format!(
+            "b3dm table sizes exceed file (offset={offset}, len={})",
+            data.len()
+        )));
+    }
+    // Tolerate legacy converters that left 1..7 pad bytes before GLB.
+    if offset + 4 <= data.len() && &data[offset..offset + 4] != b"glTF" {
+        let mut found = None;
+        for pad in 0..8 {
+            let o = offset + pad;
+            if o + 4 <= data.len() && &data[o..o + 4] == b"glTF" {
+                found = Some(o);
+                break;
+            }
+        }
+        // Corrupt/incomplete payloads: leave untouched; Layer A/release checks own the fail.
+        let Some(o) = found else {
+            return Ok(None);
+        };
+        offset = o;
+    }
+    let glb = if offset + 12 <= data.len() && &data[offset..offset + 4] == b"glTF" {
+        let glb_len = u32::from_le_bytes(data[offset + 8..offset + 12].try_into().unwrap()) as usize;
+        if glb_len >= 12 && offset + glb_len <= data.len() {
+            &data[offset..offset + glb_len]
+        } else {
+            &data[offset..]
+        }
+    } else {
+        &data[offset..]
+    };
+
+    let mut ftj = data[28..28 + ft_json].to_vec();
+    let mut ftb = data[28 + ft_json..28 + ft_json + ft_bin].to_vec();
+    let mut btj = data[28 + ft_json + ft_bin..28 + ft_json + ft_bin + bt_json].to_vec();
+    let mut btb = data[28 + ft_json + ft_bin + bt_json..28 + ft_json + ft_bin + bt_json + bt_bin]
+        .to_vec();
+
+    // Spec: each table body is padded so the *next* section starts on an 8-byte boundary.
+    while (28 + ftj.len()) % 8 != 0 {
+        ftj.push(b' ');
+    }
+    while (28 + ftj.len() + ftb.len()) % 8 != 0 {
+        ftb.push(0);
+    }
+    while (28 + ftj.len() + ftb.len() + btj.len()) % 8 != 0 {
+        btj.push(b' ');
+    }
+    while (28 + ftj.len() + ftb.len() + btj.len() + btb.len()) % 8 != 0 {
+        btb.push(0);
+    }
+
+    let new_offset = 28 + ftj.len() + ftb.len() + btj.len() + btb.len();
+    debug_assert_eq!(new_offset % 8, 0);
+
+    let already = ftj.len() == ft_json
+        && ftb.len() == ft_bin
+        && btj.len() == bt_json
+        && btb.len() == bt_bin
+        && offset == new_offset;
+    if already {
+        return Ok(None);
+    }
+
+    let total = new_offset + glb.len();
+    let mut out = Vec::with_capacity(total);
+    out.extend_from_slice(b"b3dm");
+    out.write_u32::<LittleEndian>(version)?;
+    out.write_u32::<LittleEndian>(total as u32)?;
+    out.write_u32::<LittleEndian>(ftj.len() as u32)?;
+    out.write_u32::<LittleEndian>(ftb.len() as u32)?;
+    out.write_u32::<LittleEndian>(btj.len() as u32)?;
+    out.write_u32::<LittleEndian>(btb.len() as u32)?;
+    out.extend_from_slice(&ftj);
+    out.extend_from_slice(&ftb);
+    out.extend_from_slice(&btj);
+    out.extend_from_slice(&btb);
+    out.extend_from_slice(glb);
+    // 3D Tiles: tile body / byteLength must be 8-byte aligned.
+    while out.len() % 8 != 0 {
+        out.push(0);
+    }
+    let total = out.len() as u32;
+    out[8..12].copy_from_slice(&total.to_le_bytes());
+    Ok(Some(out))
+}
+
+/// Rewrite a `.b3dm` file in place when table/GLB alignment is wrong. Returns true if rewritten.
+pub fn realign_b3dm_file(path: &Path) -> Result<bool> {
+    let data = std::fs::read(path)?;
+    match realign_b3dm_byte_alignment(&data)? {
+        Some(fixed) => {
+            std::fs::write(path, fixed)?;
+            Ok(true)
+        }
+        None => Ok(false),
+    }
+}
+
+/// Walk `root` and realign every `.b3dm`. Returns count of files rewritten.
+pub fn realign_b3dm_tree(root: &Path) -> Result<usize> {
+    let mut n = 0usize;
+    fn walk(dir: &Path, n: &mut usize) -> Result<()> {
+        if !dir.is_dir() {
+            return Ok(());
+        }
+        for ent in std::fs::read_dir(dir)? {
+            let ent = ent?;
+            let p = ent.path();
+            if p.is_dir() {
+                walk(&p, n)?;
+            } else if p
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.eq_ignore_ascii_case("b3dm"))
+                .unwrap_or(false)
+            {
+                if realign_b3dm_file(&p)? {
+                    *n += 1;
+                }
+            }
+        }
+        Ok(())
+    }
+    walk(root, &mut n)?;
+    Ok(n)
 }
 
 pub fn pack_glb_as_b3dm(glb: &[u8]) -> Result<Vec<u8>> {
@@ -198,6 +345,39 @@ mod tests {
         assert_unbatched_layout(&b3dm);
         let extracted = extract_glb_from_b3dm_bytes(&b3dm).unwrap();
         assert_eq!(extracted, glb);
+    }
+
+    #[test]
+    fn realign_pads_batch_table_json_to_8() {
+        // Mimic upstream _3dtile: ftj=20 (ok), btj=36 (ends at offset 84, not 8-aligned).
+        let mut glb = Vec::new();
+        glb.extend_from_slice(b"glTF");
+        glb.extend_from_slice(&2u32.to_le_bytes());
+        glb.extend_from_slice(&12u32.to_le_bytes());
+        let ftj = b"{\"BATCH_LENGTH\":1}  "; // 20
+        let btj = b"{\"batchId\":[0],\"name\":[\"mesh_0\"]}   "; // 36
+        assert_eq!(ftj.len(), 20);
+        assert_eq!(btj.len(), 36);
+        assert_eq!((28 + 20 + 36) % 8, 4);
+        let total = 28 + ftj.len() + btj.len() + glb.len();
+        let mut raw = Vec::new();
+        raw.extend_from_slice(b"b3dm");
+        raw.extend_from_slice(&1u32.to_le_bytes());
+        raw.extend_from_slice(&(total as u32).to_le_bytes());
+        raw.extend_from_slice(&(ftj.len() as u32).to_le_bytes());
+        raw.extend_from_slice(&0u32.to_le_bytes());
+        raw.extend_from_slice(&(btj.len() as u32).to_le_bytes());
+        raw.extend_from_slice(&0u32.to_le_bytes());
+        raw.extend_from_slice(ftj);
+        raw.extend_from_slice(btj);
+        raw.extend_from_slice(&glb);
+        let fixed = realign_b3dm_byte_alignment(&raw).unwrap().expect("needs realign");
+        let bt_json = u32::from_le_bytes(fixed[20..24].try_into().unwrap()) as usize;
+        let ft_json = u32::from_le_bytes(fixed[12..16].try_into().unwrap()) as usize;
+        let glb_off = 28 + ft_json + bt_json;
+        assert_eq!(glb_off % 8, 0);
+        assert_eq!(&fixed[glb_off..glb_off + 4], b"glTF");
+        assert!(realign_b3dm_byte_alignment(&fixed).unwrap().is_none());
     }
 
     #[test]

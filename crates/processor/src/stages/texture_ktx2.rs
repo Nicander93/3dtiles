@@ -82,10 +82,78 @@ fn write_b3dm_preserving_header(path: &Path, header: &[u8], glb: &[u8]) -> Resul
     out.extend_from_slice(glb);
     let len = out.len() as u32;
     out[8..12].copy_from_slice(&len.to_le_bytes());
+    out = realign_b3dm_bytes_local(&out)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     fs::write(path, out).map_err(|e| e.to_string())
+}
+
+fn realign_b3dm_bytes_local(data: &[u8]) -> Result<Vec<u8>, String> {
+    // Minimal 8-byte table pad; keep original bytes if already aligned.
+    if data.len() < 28 || &data[0..4] != b"b3dm" {
+        return Ok(data.to_vec());
+    }
+    let version = u32::from_le_bytes(data[4..8].try_into().unwrap());
+    let ft_json = u32::from_le_bytes(data[12..16].try_into().unwrap()) as usize;
+    let ft_bin = u32::from_le_bytes(data[16..20].try_into().unwrap()) as usize;
+    let bt_json = u32::from_le_bytes(data[20..24].try_into().unwrap()) as usize;
+    let bt_bin = u32::from_le_bytes(data[24..28].try_into().unwrap()) as usize;
+    let mut offset = 28 + ft_json + ft_bin + bt_json + bt_bin;
+    if offset > data.len() {
+        return Ok(data.to_vec());
+    }
+    if offset + 4 <= data.len() && &data[offset..offset + 4] != b"glTF" {
+        for pad in 0..8 {
+            let o = offset + pad;
+            if o + 4 <= data.len() && &data[o..o + 4] == b"glTF" {
+                offset = o;
+                break;
+            }
+        }
+    }
+    let glb = if offset + 12 <= data.len() && &data[offset..offset + 4] == b"glTF" {
+        let glb_len = u32::from_le_bytes(data[offset + 8..offset + 12].try_into().unwrap()) as usize;
+        if glb_len >= 12 && offset + glb_len <= data.len() {
+            data[offset..offset + glb_len].to_vec()
+        } else {
+            data[offset..].to_vec()
+        }
+    } else {
+        data[offset..].to_vec()
+    };
+    let mut ftj = data[28..28 + ft_json].to_vec();
+    let mut ftb = data[28 + ft_json..28 + ft_json + ft_bin].to_vec();
+    let mut btj = data[28 + ft_json + ft_bin..28 + ft_json + ft_bin + bt_json].to_vec();
+    let mut btb = data[28 + ft_json + ft_bin + bt_json..28 + ft_json + ft_bin + bt_json + bt_bin].to_vec();
+    while (28 + ftj.len()) % 8 != 0 { ftj.push(b' '); }
+    while (28 + ftj.len() + ftb.len()) % 8 != 0 { ftb.push(0); }
+    while (28 + ftj.len() + ftb.len() + btj.len()) % 8 != 0 { btj.push(b' '); }
+    while (28 + ftj.len() + ftb.len() + btj.len() + btb.len()) % 8 != 0 { btb.push(0); }
+    let new_offset = 28 + ftj.len() + ftb.len() + btj.len() + btb.len();
+    if ftj.len() == ft_json && ftb.len() == ft_bin && btj.len() == bt_json && btb.len() == bt_bin && offset == new_offset {
+        return Ok(data.to_vec());
+    }
+    let total = new_offset + glb.len();
+    let mut out = Vec::with_capacity(total);
+    out.extend_from_slice(b"b3dm");
+    out.extend_from_slice(&version.to_le_bytes());
+    out.extend_from_slice(&(total as u32).to_le_bytes());
+    out.extend_from_slice(&(ftj.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(ftb.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(btj.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(btb.len() as u32).to_le_bytes());
+    out.extend_from_slice(&ftj);
+    out.extend_from_slice(&ftb);
+    out.extend_from_slice(&btj);
+    out.extend_from_slice(&btb);
+    out.extend_from_slice(&glb);
+    while out.len() % 8 != 0 {
+        out.push(0);
+    }
+    let total = out.len() as u32;
+    out[8..12].copy_from_slice(&total.to_le_bytes());
+    Ok(out)
 }
 
 fn parse_glb(glb: &[u8]) -> Result<(Value, Vec<u8>), String> {
