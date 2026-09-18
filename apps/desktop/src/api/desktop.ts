@@ -46,6 +46,7 @@ export interface DesktopSettings {
   defaultRebuildTop: boolean;
   defaultRebuildLevels: number;
   defaultTextureCompress: boolean;
+  defaultConvertThreads?: number;
   pythonServerUrl: string;
   resourceServerPort: number;
 }

@@ -11,6 +11,7 @@ const defaults: DesktopSettings = {
   defaultRebuildTop: true,
   defaultRebuildLevels: 0,
   defaultTextureCompress: true,
+  defaultConvertThreads: 1,
   pythonServerUrl: "http://127.0.0.1:8787",
   resourceServerPort: 0,
 };
@@ -138,8 +139,27 @@ export function Settings() {
               checked={form.defaultTextureCompress}
               onChange={(v) => setForm({ ...form, defaultTextureCompress: v })}
             >
-              默认开启纹理压缩（KTX2）
+              默认开启纹理压缩（KTX2）（实验）
             </Switch>
+          </div>
+          <div className="field">
+            <label>默认转换并发数</label>
+            <select
+              className="select"
+              value={form.defaultConvertThreads ?? 1}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  defaultConvertThreads: Number(e.target.value),
+                })
+              }
+            >
+              <option value={1}>1（推荐 M1 试用版）</option>
+              <option value={2}>2</option>
+              <option value={4}>4</option>
+              <option value={0}>自动（CPU 核心数一半）</option>
+            </select>
+            <div className="field-hint">M1 试用版建议使用 1 worker 以确保稳定性</div>
           </div>
           <div className="actions">
             <button type="button" className="btn btn-primary" onClick={() => void save()}>

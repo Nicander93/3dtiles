@@ -27,6 +27,23 @@ export function Workspace() {
         </div>
       </div>
 
+      <div
+        style={{
+          padding: '12px 16px',
+          marginBottom: 16,
+          backgroundColor: 'var(--color-bg-secondary)',
+          borderRadius: 6,
+          border: '1px solid var(--color-border)',
+        }}
+      >
+        <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>M1 试用版</div>
+        <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
+          当前版本：Windows · 连续规则网格 ≤16×16 · keep 纹理推荐 · 建议并发 1 worker
+          <br />
+          不支持：稀疏数据、任意城区、生产规模部署
+        </div>
+      </div>
+
       {groups.length === 0 ? (
         <p className="muted">未找到工具</p>
       ) : (

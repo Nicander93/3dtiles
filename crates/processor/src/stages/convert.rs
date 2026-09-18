@@ -21,10 +21,20 @@ pub fn run_convert(
 
     emitter.stage(Stage::Convert, "OSGB → 3D Tiles");
     let started = std::time::Instant::now();
-    let configured_threads = std::env::var("GEOFORGE_CONVERT_THREADS")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .filter(|value| *value > 0);
+    
+    let configured_threads = options
+        .get("convert")
+        .and_then(|v| v.get("threads"))
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize)
+        .filter(|v| *v <= 16)
+        .or_else(|| {
+            std::env::var("GEOFORGE_CONVERT_THREADS")
+                .ok()
+                .and_then(|value| value.parse::<usize>().ok())
+                .filter(|value| *value > 0)
+        });
+    
     emitter.metric("converter.threads.configured", json!(configured_threads));
     emitter.log(&format!(
         "[convert] configured threads: {}",
