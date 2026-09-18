@@ -492,10 +492,12 @@ impl ProcessManager {
       }
       #[cfg(unix)]
       {
+        #[allow(unused_unsafe)]
         unsafe {
           libc_kill(-(pid as i32), 15);
         }
         thread::sleep(Duration::from_secs(2));
+        #[allow(unused_unsafe)]
         unsafe {
           libc_kill(-(pid as i32), 9);
         }
