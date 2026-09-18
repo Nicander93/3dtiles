@@ -345,13 +345,13 @@ export function ProcessTiles() {
             >
               <option value="keep">保留原纹理</option>
               <option value="ktx2-etc1s" disabled={!ktxOk}>
-                KTX2 ETC1S{ktxOk ? '' : '（不可用）'}
+                KTX2 ETC1S{ktxOk ? '（实验）' : '（不可用）'}
               </option>
               <option value="ktx2" disabled={!ktxOk}>
-                KTX2{ktxOk ? '' : '（不可用）'}
+                KTX2{ktxOk ? '（实验）' : '（不可用）'}
               </option>
               <option value="ktx2-uastc" disabled={!ktx2UastcEnabled(caps, true)}>
-                KTX2 UASTC{ktx2UastcEnabled(caps, true) ? '' : '（不可用）'}
+                KTX2 UASTC{ktx2UastcEnabled(caps, true) ? '（实验）' : '（不可用）'}
               </option>
             </select>
           </div>

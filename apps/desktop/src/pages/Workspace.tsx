@@ -36,9 +36,9 @@ export function Workspace() {
           border: '1px solid var(--color-border)',
         }}
       >
-        <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>M1 试用版</div>
+        <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>规则格网试用版</div>
         <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
-          当前版本：Windows · 连续规则网格 ≤16×16 · keep 纹理推荐 · 建议并发 1 worker
+          当前版本：Windows · 连续规则网格 ≤16×16 · 保留原纹理 · 建议并发 1
           <br />
           不支持：稀疏数据、任意城区、生产规模部署
         </div>

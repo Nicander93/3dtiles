@@ -452,13 +452,13 @@ export function OsgbConvert() {
             >
               <option value="keep">保留原纹理</option>
               <option value="ktx2-etc1s" disabled={!ktx2Etc1sEnabled(caps)}>
-                KTX2 ETC1S{ktx2Etc1sEnabled(caps) ? '' : '（不可用）'}
+                KTX2 ETC1S{ktx2Etc1sEnabled(caps) ? '（实验）' : '（不可用）'}
               </option>
               <option value="ktx2" disabled={!ktx2Etc1sEnabled(caps)}>
-                KTX2{ktx2Etc1sEnabled(caps) ? '' : '（不可用）'}
+                KTX2{ktx2Etc1sEnabled(caps) ? '（实验）' : '（不可用）'}
               </option>
               <option value="ktx2-uastc" disabled={!ktx2UastcEnabled(caps)}>
-                KTX2 UASTC{ktx2UastcEnabled(caps) ? '' : '（不可用）'}
+                KTX2 UASTC{ktx2UastcEnabled(caps) ? '（实验）' : '（不可用）'}
               </option>
             </select>
             <div className="field-hint">
