@@ -88,13 +88,58 @@ if (-not (Test-Path $exe)) {
   Write-Error "Missing _3dtile.exe at $exe"
 }
 
-# The converter is built with the dynamic MSVC CRT. Validate the DLLs before
-# the soft launch so a package that only works on the build machine cannot be
-# staged into the desktop installer.
+# The converter is built with the dynamic MSVC CRT. If the upstream zip does not
+# include CRT DLLs, copy them from a reliable source available on the CI runner.
 $requiredCrt = @("msvcp140.dll", "msvcp140_2.dll", "vcruntime140.dll", "vcruntime140_1.dll")
 $missingCrt = $requiredCrt | Where-Object { -not (Test-Path (Join-Path $src $_)) }
 if ($missingCrt) {
-  Write-Error "Converter runtime missing MSVC DLLs: $($missingCrt -join ', ')"
+  Write-Host "Converter runtime missing MSVC DLLs: $($missingCrt -join ', ') - attempting to bundle from system"
+  
+  $crtSearchRoots = @()
+  if ($env:RUNNER_TEMP) {
+    $crtSearchRoots += (Join-Path $env:RUNNER_TEMP 'geoforge-vcpkg\x64-windows\bin')
+    $crtSearchRoots += (Join-Path $env:RUNNER_TEMP 'geoforge-vcpkg\x64-windows\tools\basisu')
+  }
+  $crtSearchRoots += "$env:SystemRoot\System32"
+  if (Test-Path "$env:SystemRoot\SysWOW64") {
+    $crtSearchRoots += "$env:SystemRoot\SysWOW64"
+  }
+  if ($env:VCToolsRedistDir) {
+    $crtSearchRoots += (Join-Path $env:VCToolsRedistDir 'x64\Microsoft.VC143.CRT')
+  }
+  if ($env:VCINSTALLDIR) {
+    $crtSearchRoots += (Join-Path $env:VCINSTALLDIR 'Redist\MSVC\*\x64\Microsoft.VC143.CRT')
+  }
+  
+  foreach ($name in $missingCrt) {
+    $found = $false
+    foreach ($root in $crtSearchRoots) {
+      $candidates = @()
+      if ($root -like '*\*') {
+        $candidates = Get-ChildItem -Path $root -Filter $name -File -ErrorAction SilentlyContinue
+      } else {
+        $cand = Join-Path $root $name
+        if (Test-Path -LiteralPath $cand -PathType Leaf) {
+          $candidates = @(Get-Item -LiteralPath $cand)
+        }
+      }
+      if ($candidates) {
+        $srcFile = $candidates | Select-Object -First 1
+        Copy-Item -LiteralPath $srcFile.FullName -Destination (Join-Path $src $name) -Force
+        Write-Host "Bundled $name from $($srcFile.DirectoryName)"
+        $found = $true
+        break
+      }
+    }
+    if (-not $found) {
+      Write-Error "Cannot find $name in any known system location to bundle with converter"
+    }
+  }
+  
+  $stillMissing = $requiredCrt | Where-Object { -not (Test-Path (Join-Path $src $_)) }
+  if ($stillMissing) {
+    Write-Error "Converter runtime still missing MSVC DLLs after bundling attempt: $($stillMissing -join ', ')"
+  }
 }
 
 # Soft launch check
