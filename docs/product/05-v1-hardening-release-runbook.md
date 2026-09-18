@@ -1,5 +1,8 @@
 # V1 加固与发布执行清单
 
+> Phase 18 inventory / pin checklist / Linux→Windows recipe: [`PHASE_REPORTS/phase-18.md`](./PHASE_REPORTS/phase-18.md).
+
+
 这份清单用于把剩余工作交给能力较弱的执行 Agent。已完成的代码和本机候选验证不要重复修改；每一步都要保留命令、退出码、日志路径和产物 hash。
 
 ## 当前基线

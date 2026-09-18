@@ -38,6 +38,7 @@ apps/desktop/src-tauri/target/
 # Staged converter runtime (copied by package-windows.ps1)
 apps/desktop/src-tauri/resources/runtime/**
 !apps/desktop/src-tauri/resources/runtime/.gitkeep
+!apps/desktop/src-tauri/resources/runtime/README.md
 
 # Phase 12–15 acceptance / tooling
 acceptance-results/

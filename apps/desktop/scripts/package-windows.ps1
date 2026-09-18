@@ -16,6 +16,26 @@ $BundleDir = Join-Path $AppDir "src-tauri\resources\runtime"
 
 Write-Host "=== GeoForge Windows package ==="
 
+# This script requires Windows (MSVC, NSIS via Tauri, pwsh). On Linux/macOS abort early
+# with the CI/dev-machine recipe — do not fake a clean-machine or NSIS pass here.
+if ($IsLinux -or $IsMacOS -or ($env:OS -notmatch 'Windows')) {
+  Write-Host @"
+ERROR: package-windows.ps1 must run on Windows (dev machine or GitHub Actions windows-latest).
+
+Build on Windows CI / dev machine:
+  1. pwsh -NoProfile -File apps/desktop/scripts/package-windows.ps1
+     # or: npm run package:windows  (from apps/desktop)
+  2. Optional local converter: -ConverterZip path\to\geoforge-converter-*.zip
+  3. Or dispatch .github/workflows/release-windows.yml (workflow_dispatch / tag v*.*.*)
+
+Pin checklist + clean-machine gaps: docs/product/PHASE_REPORTS/phase-18.md
+Official converter pin: third_party/3dtiles-converter.json (do NOT overwrite with candidate hash)
+"@
+  exit 2
+}
+
+
+
 # 1) Converter Release + product runtime
 $prepArgs = @("-File", (Join-Path $PSScriptRoot "prepare-runtime.ps1"), "-OutDir", $RuntimeDir)
 if ($SkipBuild) { $prepArgs += "-SkipBuild" }

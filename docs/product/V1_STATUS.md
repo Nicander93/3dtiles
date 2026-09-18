@@ -1,3 +1,9 @@
+> **CURRENT (2026-09-19 Asia/Shanghai) — Limited V1 status (authoritative short form)**  
+> See [`PHASE_REPORTS/phase-11-18-status.md`](./PHASE_REPORTS/phase-11-18-status.md) + [`phase-18.md`](./PHASE_REPORTS/phase-18.md).  
+> **Limited V1 only:** continuous regular grids; HK LandsD **4×4–16×16** convert/rebuild with caveats; PlanD Layer B **not** fully green; Cesium A/B far-view **2/3**; Windows **installer candidate** but clean-machine WebView E2E **open**.  
+> **Explicit:** **NOT** full production-ready · **no** 百平方公里 claim.  
+> Packaging: H10/H15 candidate evidence in `RELEASE_ACCEPTANCE.md` / `HARDENING_REGRESSION.md`; published converter pin still `third_party/3dtiles-converter.json` v0.1.0.
+
 > **Architecture rebuild Phases 0–10 (2026-09-10 Asia/Shanghai):** see [`PHASE_REPORTS/SUMMARY.md`](./PHASE_REPORTS/SUMMARY.md) + [`phase-10.md`](./PHASE_REPORTS/phase-10.md).  
 > TopRebuild Rust formal path; scale ladder **4×4 + 16×16 synthetic PASS**; OSGBny sparse → `GRID_SPATIAL_MISMATCH`.  
 > **Do NOT claim** `支持大范围倾斜摄影顶层重建` / 百平方公里. Honest line: *V1 algorithm complete for continuous regular grids (≤16×16 synthetic); large-scale / urban validation pending.*

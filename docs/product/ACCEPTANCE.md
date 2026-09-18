@@ -1,9 +1,10 @@
-> **Architecture rebuild acceptance (Phases 0–10, 2026-09-10 Asia/Shanghai):**  
-> Algorithm / Processor / Tauri path: see [`PHASE_REPORTS/SUMMARY.md`](./PHASE_REPORTS/SUMMARY.md).  
-> Top rebuild scale: **4×4 + 16×16 synthetic demonstrated**; sparse OSGBny **rejected** (`GRID_SPATIAL_MISMATCH`); **城区 / 百平方公里 NOT demonstrated** — do not treat historical “Top rebuild | pass” row as large-area production acceptance.  
-> Status line: *V1 algorithm complete for continuous regular grids (≤16×16 synthetic); large-scale validation pending.*
+> **Architecture rebuild acceptance (Phases 0–18, 2026-09-19 Asia/Shanghai):**  
+> Algorithm / Processor / Tauri path: see [`PHASE_REPORTS/SUMMARY.md`](./PHASE_REPORTS/SUMMARY.md) + [`phase-11-18-status.md`](./PHASE_REPORTS/phase-11-18-status.md).  
+> Top rebuild scale: **4×4 + 16×16 synthetic** and **HK LandsD 5×4 / 8×8 / 16×16** demonstrated with caveats; sparse OSGBny **rejected** (`GRID_SPATIAL_MISMATCH`); PlanD 4×4 Layer B **not fully green**; Cesium A/B far-view **2/3**; **城区 / 百平方公里 NOT demonstrated**.  
+> Windows: NSIS **installer candidate** (H10/H15 isolate CLI evidence); **clean-machine WebView2 GUI E2E open**; converter **published pin** still v0.1.0 — see [`phase-18.md`](./PHASE_REPORTS/phase-18.md).  
+> Status line: *Limited V1 for continuous regular grids — **NOT** full production-ready.*
 
-> **2026-09-12 current evidence:** real contiguous HK OSGB has passed at 5×4, 8×8 and 16×16. The 5×4 Processor path was rerun end-to-end on Windows: Docker convert → validate/commit → Rust rebuild → validate/commit → local Cesium load. GE calibration now selects 20 original blocks at medium range, 6 L1 proxies at far range and 2 L2 proxies at very far range. Cesium is bundled locally. A 12,509,605-byte NSIS installer passed isolated silent installation and first-start/database initialization; it includes the desktop app, Processor and TopRebuild. Native `_3dtile` packaging remains open, so OSGB conversion currently requires Docker Desktop or `GEOFORGE_3DTILE`; see `PHASE_REPORTS/phase-g.md` and `phase-h.md`.
+> **2026-09-12 historical evidence (still valid as LandsD/GE notes):** HK 5×4/8×8/16×16 real PASS; Phase H GE scheduling; early NSIS isolate install. **Superseded for package closure by Phase 18:** native converter can be bundled in candidate NSIS (CRT+Unicode line), but clean-machine WebView E2E and published pin remain open — see `phase-18.md`.
 
 > **CANCELLED FOR V1 — HISTORICAL ONLY.**  
 > Prior acceptance table included OSGB native / Qt shell as partial. Those rows are cancelled for new V1; do not use this file as final V1 acceptance.  
@@ -50,7 +51,7 @@ P4 closed via basisu. Later push list: `PUSH_CANDIDATES.md` (no push this batch)
 
 ## Non-claims
 
-- Windows NSIS exists and passes isolated install/start smoke; native `_3dtile` is not bundled
+- Windows NSIS **candidate** exists (isolate install/CLI smokes); clean-machine WebView E2E **not** claimed; published converter pin may lag candidate (see Phase 18)
 - No full / linked Qt WebEngine shell (`geoforge_shell` = browser fallback + OSGB embed)
 - Optional Qt osgb_viewer + geoforge_shell (DISPLAY often :2)
 - Native in-binary `--enable-texture-compress` still absent on Aug-2023 `_3dtile`;

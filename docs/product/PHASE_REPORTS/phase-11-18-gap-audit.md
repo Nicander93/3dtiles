@@ -78,3 +78,12 @@ Do **not** claim “limited V1 production-ready” by mixing Track A docs with T
 - `acceptance-results/phase16_hk_4x4/*`
 - Git: `c41609f`…`cbed0f1` vs `671145d` ancestry check (`cbed0f1` **not** ancestor of HEAD)
 
+
+---
+
+## Phase 18 follow-up (2026-09-19 Asia/Shanghai)
+
+See **[phase-18.md](./phase-18.md)** for Windows package inventory, proven vs missing, pin checklist, and Linux→Windows build recipe.  
+Aggregated limited-V1 claim: **[phase-11-18-status.md](./phase-11-18-status.md)**.
+
+Phase 18 status remains **PARTIAL** — no clean-machine WebView E2E claimed; converter pin still published `v0.1.0`.

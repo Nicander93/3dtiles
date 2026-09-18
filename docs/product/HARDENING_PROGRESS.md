@@ -1,6 +1,7 @@
 ﻿# V1 Hardening 实施进度
 
-更新：2026-09-17
+更新：2026-09-19（Phase 18 诚实盘点见 `PHASE_REPORTS/phase-18.md`；H10/H15 结论未改：候选通过、干净机 WebView/正式 pin 仍开）
+
 
 ## 任务卡状态
 
