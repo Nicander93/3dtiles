@@ -35,9 +35,11 @@
       "ecefNote": "Bounds center near Earth surface (radius ~6.37M m)"
     },
     "geMonotonicity": {
-      "checked": false,
-      "note": "Layer B not implemented (R09+)",
-      "reason": "Requires full tileset tree traversal + GE comparison"
+      "checked": true,
+      "passed": true,
+      "violations": 0,
+      "totalTiles": 12,
+      "note": "All parent GE >= children GE (R09.1)"
     },
     "geReasonableness": {
       "checked": false,
@@ -53,6 +55,37 @@
       "checked": false,
       "note": "Layer B not implemented (R09+)",
       "reason": "REPLACE switching analysis not implemented"
+    }
+  },
+  "cesiumAB": {
+    "enabled": false,
+    "status": "blocked",
+    "blockedReason": "D2 data not available; D1 too small for far-view HLOD A/B",
+    "baseline": {
+      "requests": null,
+      "bytes": null,
+      "tOverview": null,
+      "note": "Baseline not run (blocked)"
+    },
+    "candidate": {
+      "requests": null,
+      "bytes": null,
+      "tOverview": null,
+      "note": "Candidate not run (blocked)"
+    },
+    "comparison": {
+      "requestsReduction": null,
+      "requestsReductionPercent": null,
+      "requestsPass": false,
+      "bytesReduction": null,
+      "bytesReductionPercent": null,
+      "bytesPass": false,
+      "tOverviewReduction": null,
+      "tOverviewReductionPercent": null,
+      "tOverviewPass": false,
+      "metricsPassed": 0,
+      "overallPass": false,
+      "note": "A/B blocked pending D2 data; need ≥2/3 metrics pass"
     }
   },
   "outputSize": "4523891 bytes",

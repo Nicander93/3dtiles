@@ -59,6 +59,11 @@ enum Commands {
         #[arg(long, default_value_t = true)]
         json: bool,
     },
+    /// Check GE monotonicity (Layer B). Prints JSON to stdout.
+    CheckGe {
+        #[arg(long)]
+        tileset: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -161,6 +166,22 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::from(EXIT_FAILED as u8)
+            }
+        }
+        Commands::CheckGe { tileset } => {
+            match processor::check_ge_monotonicity(&tileset) {
+                Ok(result) => {
+                    println!("{}", serde_json::to_string_pretty(&result).unwrap());
+                    if result.passed {
+                        ExitCode::SUCCESS
+                    } else {
+                        ExitCode::from(EXIT_FAILED as u8)
+                    }
+                }
+                Err(e) => {
+                    eprintln!("GE check failed: {}", e);
+                    ExitCode::from(EXIT_FAILED as u8)
+                }
             }
         }
     }

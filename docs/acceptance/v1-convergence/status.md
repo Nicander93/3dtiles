@@ -138,6 +138,68 @@
 - ⚠️ D2 run-acceptance.sh 支持（外部数据路径）
 - ⚠️ 真实 D2 数据运行
 
+## R09 Cesium A/B + Layer B Real-Number - 进行中
+
+### R09 Gate 要求
+
+**Same-tip Far-view A/B Harness:**
+1. Same-tip (相同输入 + 相同 SHA)
+2. Far-view 场景 (top-level only)
+3. Cesium convert-flat vs GeoForge rebuild HLOD
+4. Pass thresholds: requests −50%, bytes −40%, tOverview −25% (需要 ≥2/3)
+5. Evidence 非继承 (不可继承旧 A/B 报告)
+6. Blocked 状态如果缺少真实数据 (不虚造 pass)
+
+### R09.1 - Cesium A/B Harness + GE Monotonicity
+
+**状态:** 进行中 (cursor/r09-1-ab-harness-ge-7ab0)
+
+**实施内容:**
+- ✅ Cesium A/B harness 定义文档
+  - 对比方法 (convert-flat vs rebuild HLOD)
+  - Far-view 场景定义
+  - Metric 定义 (requests, bytes, tOverview)
+  - Pass threshold 验证逻辑 (≥2/3)
+- ✅ Schema 扩展
+  - `run-info.json` 添加 `cesiumAB` 字段
+  - `status.json` 添加 A/B metrics placeholders
+  - Blocked 状态支持
+- ✅ GE 单调性实数检查实现
+  - `crates/processor/src/validation/ge_monotonicity.rs`
+  - `processor check-ge --tileset <path>` 命令
+  - 集成到 `run-acceptance.sh` (D0/D1)
+  - 测试通过 (D0: 2 tiles, D1: 5 tiles, all pass)
+- ✅ Blocked 状态明确
+  - D0/D1 太小不适合 far-view HLOD A/B
+  - D2 (LandsD/PlanD) 数据依赖文档化
+  - 不虚造 A/B 结果
+
+**测试结果:**
+- ✅ GE 单调性 unit tests 通过 (2 tests)
+- ✅ D0 fixture: checked=true, passed=true, violations=0, totalTiles=2
+- ✅ D1 fixture: checked=true, passed=true, violations=0, totalTiles=5
+- ✅ Processor tests: 94 passed (包括新的 2 个 GE 测试)
+- ✅ D0 acceptance: PASS with GE check
+- ✅ D1 acceptance: PASS with GE check
+
+**完成总结:**
+- ✅ R09 gate 合规:
+  - Same-tip A/B 定义文档
+  - Pass threshold 明确 (≥2/3)
+  - Evidence 非继承原则
+  - Blocked 标记（不虚造）
+- ✅ GE 单调性 (Layer B) 实现并集成
+- ✅ Cesium A/B harness 定义 (实际运行推迟到 R09.2+)
+- ⚠️ A/B blocked 待 D2 数据可用
+
+**剩余工作推迟到 R09.2+:**
+- ⚠️ Cesium A/B 实际运行脚本 (需要 Cesium viewer 集成)
+- ⚠️ Baseline (3d-tiles-tools) 自动化
+- ⚠️ Metric 自动收集 (需要 browser automation)
+- ⚠️ 真实 D2 数据 A/B 运行
+- ⚠️ 其他 Layer B 检查 (BV tightness, frontier, subtree)
+
+
 根据 R03-classification.md,还有以下项未移植:
 
 1. **Validator consolidation** → 归入 R04
@@ -221,6 +283,9 @@
 - [R08-4-ci-d2-inventory.md](./R08-4-ci-d2-inventory.md) - R08.4 CI 集成 + D2 inventory
 - [test-plan.md](./test-plan.md) - R08 完整测试计划
 - [schemas/](./schemas/) - run-info.json 和 status.json 示例
+
+### R09 文档
+- [R09-1-ab-harness-ge.md](./R09-1-ab-harness-ge.md) - R09.1 Cesium A/B harness + GE monotonicity
 
 ### 基础文档
 - [R01-summary.md](./R01-summary.md) - R01 实现总结
