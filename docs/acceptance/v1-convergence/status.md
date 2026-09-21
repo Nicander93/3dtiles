@@ -1,8 +1,8 @@
 # GeoForge V1 Convergence Status
 
-**最后更新:** 2026-09-21 22:30:00 CST  
-**工作分支:** cursor/r06-3-crash-recovery-7ab0  
-**当前阶段:** R06.3 代码完成，等待 CI
+**最后更新:** 2026-09-21 23:00:00 CST  
+**工作分支:** cursor/r07-1-texture-matrix-7ab0  
+**当前阶段:** R07.1 代码完成，等待 CI
 
 ## 任务状态表
 
@@ -25,11 +25,12 @@
 | R05.4 | boundingVolume + transform + geometricError + refine 验证 | 验收通过 | Agent | 已合入 master@5ab6491 (#17) |
 | R05.5 | content size + B3DM/GLB/i3dm/pnts header 验证 | 验收通过 | Agent | 已合入 master@3142a8a (#18) |
 | R05.6 | 作为正式 processor 入口集成 | 验收通过 | Agent | 已合入 master@e0b14ae (#19) |
-| **R06** | **Processor 修复 (output commit/cancel/recovery)** | 进行中 | Agent | Phase 13, R06.3 Crash recovery |
+| **R06** | **Processor 修复 (output commit/cancel/recovery)** | **代码通过** | Agent | **Phase 13 完成, 3个子任务** |
 | R06.1 | TempGuard late-cancel 语义澄清 | 验收通过 | Agent | 已合入 master@629bd95 (#20) |
 | R06.2 | Ownership 验证增强 + 错误消息改进 | 验收通过 | Agent | 已合入 master@213db8f (#21) |
-| R06.3 | Crash recovery checkpoints | 代码完成 | Agent | **本 PR: 管道检查点诊断** |
-| R07 | 零 Python 运行时 | 未开始 | - | Phase 14 发布流程改进 |
+| R06.3 | Crash recovery checkpoints | 验收通过 | Agent | 已合入 master@8ddd0b8 (#22) |
+| **R07** | **零 Python 运行时** | 进行中 | Agent | Phase 14, R07.1 Matrix + 断言 |
+| R07.1 | Texture gap matrix + runtime 断言改进 | 代码完成 | Agent | **本 PR: 明确能力矩阵** |
 | R08 | 验收测试框架 | 未开始 | - | Phase 15 公开数据测试 |
 | R09 | Cesium A/B 对比工具 | 未开始 | - | 验收测试工具 |
 | R10 | B3DM 对齐和 transform 补充测试 | 未开始 | - | Phase 11 补充 (可选) |
@@ -140,6 +141,9 @@
 - [R06-1-summary.md](./R06-1-summary.md) - R06.1 TempGuard late-cancel 语义
 - [R06-2-summary.md](./R06-2-summary.md) - R06.2 Ownership 验证增强
 - [R06-3-summary.md](./R06-3-summary.md) - R06.3 Crash recovery checkpoints
+
+### R07 文档
+- [R07-1-matrix.md](./R07-1-matrix.md) - R07.1 Texture 能力矩阵与 gap 分析
 
 ### 基础文档
 - [R01-summary.md](./R01-summary.md) - R01 实现总结
