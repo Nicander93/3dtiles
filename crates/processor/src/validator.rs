@@ -387,6 +387,7 @@ fn validate_content(
         validate_tileset_file(output_root, &resolved, visited, report);
     } else {
         report.content_count += 1;
+        validate_content_bytes(&resolved, &resolved.display().to_string(), report);
     }
 }
 
@@ -492,6 +493,216 @@ fn transform_ok(tf: &Value) -> bool {
         return false;
     };
     arr.len() == 16 && arr.iter().all(|x| x.as_f64().map(|n| n.is_finite()).unwrap_or(false))
+}
+
+fn validate_content_bytes(path: &Path, path_s: &str, report: &mut ValidationReport) {
+    let meta = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) => {
+            report.add_error(
+                ValidationCode::ContentMissing,
+                path_s,
+                format!("cannot stat content: {e}"),
+            );
+            return;
+        }
+    };
+
+    if meta.len() < 12 {
+        report.add_error(
+            ValidationCode::ContentTooSmall,
+            path_s,
+            format!("content too small ({} bytes)", meta.len()),
+        );
+        return;
+    }
+
+    let data = match fs::read(path) {
+        Ok(d) => d,
+        Err(e) => {
+            report.add_error(
+                ValidationCode::ContentInvalid,
+                path_s,
+                format!("cannot read content: {e}"),
+            );
+            return;
+        }
+    };
+
+    if data.len() >= 4 && &data[0..4] == b"b3dm" {
+        validate_b3dm_header(&data, path_s, report);
+    } else if data.len() >= 4 && &data[0..4] == b"glTF" {
+        validate_glb_header(&data, path_s, report);
+    } else if data.len() >= 4 && &data[0..4] == b"i3dm" {
+        if data.len() < 32 {
+            report.add_error(
+                ValidationCode::ContentTooSmall,
+                path_s,
+                "i3dm header truncated",
+            );
+        }
+    } else if data.len() >= 4 && (&data[0..4] == b"pnts" || &data[0..4] == b"cmpt") {
+        // Allowed formats; no deep check in Layer A.
+    } else {
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if ext == "glb" || ext == "b3dm" {
+            report.add_error(
+                ValidationCode::ContentInvalid,
+                path_s,
+                format!("expected {ext} magic, got {:?}", &data.get(0..4)),
+            );
+        } else {
+            report.add_warning(
+                ValidationCode::ContentInvalid,
+                path_s,
+                format!("unrecognized content magic {:?}; extension={ext}", &data.get(0..4)),
+            );
+        }
+    }
+}
+
+fn validate_b3dm_header(data: &[u8], path_s: &str, report: &mut ValidationReport) {
+    if data.len() < 28 {
+        report.add_error(
+            ValidationCode::ContentInvalid,
+            path_s,
+            "b3dm header truncated (<28 bytes)",
+        );
+        return;
+    }
+
+    let version = u32::from_le_bytes(data[4..8].try_into().unwrap());
+    if version != 1 {
+        report.add_warning(
+            ValidationCode::ContentInvalid,
+            path_s,
+            format!("unexpected b3dm version {version} (expected 1)"),
+        );
+    }
+
+    let byte_length = u32::from_le_bytes(data[8..12].try_into().unwrap()) as usize;
+    if byte_length > 0 && byte_length > data.len() {
+        report.add_error(
+            ValidationCode::ContentInvalid,
+            path_s,
+            format!("b3dm byteLength {byte_length} > file length {}", data.len()),
+        );
+        return;
+    }
+
+    let ft_json = u32::from_le_bytes(data[12..16].try_into().unwrap()) as usize;
+    let ft_bin = u32::from_le_bytes(data[16..20].try_into().unwrap()) as usize;
+    let bt_json = u32::from_le_bytes(data[20..24].try_into().unwrap()) as usize;
+    let bt_bin = u32::from_le_bytes(data[24..28].try_into().unwrap()) as usize;
+    
+    let offset = 28usize
+        .saturating_add(ft_json)
+        .saturating_add(ft_bin)
+        .saturating_add(bt_json)
+        .saturating_add(bt_bin);
+
+    if offset > data.len() {
+        report.add_error(
+            ValidationCode::ContentInvalid,
+            path_s,
+            format!("b3dm feature/batch tables exceed file (offset={offset}, len={})", data.len()),
+        );
+        return;
+    }
+
+    if offset + 12 <= data.len() && &data[offset..offset + 4] == b"glTF" {
+        validate_glb_header(&data[offset..], path_s, report);
+    } else if offset < data.len() {
+        let mut found = None;
+        for pad in 0..8 {
+            let o = offset + pad;
+            if o + 4 <= data.len() && &data[o..o + 4] == b"glTF" {
+                found = Some(o);
+                break;
+            }
+        }
+        if let Some(o) = found {
+            validate_glb_header(&data[o..], path_s, report);
+        } else {
+            report.add_error(
+                ValidationCode::ContentInvalid,
+                path_s,
+                "b3dm payload missing glTF magic",
+            );
+        }
+    }
+}
+
+fn validate_glb_header(data: &[u8], path_s: &str, report: &mut ValidationReport) {
+    if data.len() < 12 {
+        report.add_error(
+            ValidationCode::ContentInvalid,
+            path_s,
+            "glb header truncated (<12 bytes)",
+        );
+        return;
+    }
+
+    if &data[0..4] != b"glTF" {
+        report.add_error(
+            ValidationCode::ContentInvalid,
+            path_s,
+            "glb magic missing",
+        );
+        return;
+    }
+
+    let version = u32::from_le_bytes(data[4..8].try_into().unwrap());
+    if version != 2 {
+        report.add_error(
+            ValidationCode::ContentInvalid,
+            path_s,
+            format!("glb version {version} (expected 2)"),
+        );
+        return;
+    }
+
+    let length = u32::from_le_bytes(data[8..12].try_into().unwrap()) as usize;
+    if length > data.len() {
+        report.add_error(
+            ValidationCode::ContentInvalid,
+            path_s,
+            format!("glb length {length} > available {}", data.len()),
+        );
+        return;
+    }
+
+    if length < 12 {
+        report.add_error(
+            ValidationCode::ContentInvalid,
+            path_s,
+            "glb length field too small",
+        );
+        return;
+    }
+
+    if data.len() >= 20 {
+        let chunk_len = u32::from_le_bytes(data[12..16].try_into().unwrap()) as usize;
+        let chunk_type = &data[16..20];
+        if chunk_type != b"JSON" {
+            report.add_warning(
+                ValidationCode::ContentInvalid,
+                path_s,
+                format!("glb first chunk type {:?} (expected JSON)", chunk_type),
+            );
+        }
+        if 20 + chunk_len > data.len() && 20 + chunk_len > length {
+            report.add_error(
+                ValidationCode::ContentInvalid,
+                path_s,
+                format!("glb JSON chunk length {chunk_len} exceeds file"),
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -754,10 +965,22 @@ mod tests {
         )
         .unwrap();
 
-        fs::write(tmp.path().join("tile.b3dm"), b"dummy").unwrap();
+        let mut b3dm = vec![];
+        b3dm.extend_from_slice(b"b3dm");
+        b3dm.extend_from_slice(&1u32.to_le_bytes());
+        b3dm.extend_from_slice(&50u32.to_le_bytes());
+        b3dm.extend_from_slice(&0u32.to_le_bytes());
+        b3dm.extend_from_slice(&0u32.to_le_bytes());
+        b3dm.extend_from_slice(&0u32.to_le_bytes());
+        b3dm.extend_from_slice(&0u32.to_le_bytes());
+        b3dm.extend_from_slice(b"glTF");
+        b3dm.extend_from_slice(&2u32.to_le_bytes());
+        b3dm.extend_from_slice(&20u32.to_le_bytes());
+        b3dm.resize(50, 0);
+        fs::write(tmp.path().join("tile.b3dm"), &b3dm).unwrap();
 
         let report = validate_tileset_tree(tmp.path());
-        assert!(report.ok);
+        assert!(report.ok, "errors: {:?}", report.issues);
         assert_eq!(report.content_count, 1);
     }
 
@@ -940,5 +1163,212 @@ mod tests {
         let report = validate_tileset_tree(tmp.path());
         assert!(!report.ok);
         assert!(report.issues.iter().any(|i| i.code == "REFINE_INVALID"));
+    }
+
+    #[test]
+    fn validate_content_too_small() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        
+        fs::write(
+            tmp.path().join("tileset.json"),
+            r#"{
+                "asset": {"version": "1.0"},
+                "root": {
+                    "boundingVolume": {"box": [0,0,0,1,0,0,0,1,0,0,0,1]},
+                    "geometricError": 100.0,
+                    "content": {"uri": "tile.b3dm"}
+                }
+            }"#,
+        )
+        .unwrap();
+
+        fs::write(tmp.path().join("tile.b3dm"), b"tiny").unwrap();
+
+        let report = validate_tileset_tree(tmp.path());
+        assert!(!report.ok);
+        assert!(report.issues.iter().any(|i| i.code == "CONTENT_TOO_SMALL"));
+    }
+
+    #[test]
+    fn validate_b3dm_valid() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        
+        fs::write(
+            tmp.path().join("tileset.json"),
+            r#"{
+                "asset": {"version": "1.0"},
+                "root": {
+                    "boundingVolume": {"box": [0,0,0,1,0,0,0,1,0,0,0,1]},
+                    "geometricError": 100.0,
+                    "content": {"uri": "tile.b3dm"}
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let mut b3dm = vec![];
+        b3dm.extend_from_slice(b"b3dm");
+        b3dm.extend_from_slice(&1u32.to_le_bytes());
+        b3dm.extend_from_slice(&100u32.to_le_bytes());
+        b3dm.extend_from_slice(&0u32.to_le_bytes());
+        b3dm.extend_from_slice(&0u32.to_le_bytes());
+        b3dm.extend_from_slice(&0u32.to_le_bytes());
+        b3dm.extend_from_slice(&0u32.to_le_bytes());
+        b3dm.extend_from_slice(b"glTF");
+        b3dm.extend_from_slice(&2u32.to_le_bytes());
+        b3dm.extend_from_slice(&40u32.to_le_bytes());
+        b3dm.resize(100, 0);
+
+        fs::write(tmp.path().join("tile.b3dm"), &b3dm).unwrap();
+
+        let report = validate_tileset_tree(tmp.path());
+        assert!(report.ok, "errors: {:?}", report.issues);
+        assert_eq!(report.content_count, 1);
+    }
+
+    #[test]
+    fn validate_b3dm_invalid_magic() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        
+        fs::write(
+            tmp.path().join("tileset.json"),
+            r#"{
+                "asset": {"version": "1.0"},
+                "root": {
+                    "boundingVolume": {"box": [0,0,0,1,0,0,0,1,0,0,0,1]},
+                    "geometricError": 100.0,
+                    "content": {"uri": "tile.b3dm"}
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let mut data = vec![0u8; 50];
+        data[0..4].copy_from_slice(b"XXXX");
+        fs::write(tmp.path().join("tile.b3dm"), &data).unwrap();
+
+        let report = validate_tileset_tree(tmp.path());
+        assert!(!report.ok);
+        assert!(report.issues.iter().any(|i| i.code == "CONTENT_INVALID"));
+    }
+
+    #[test]
+    fn validate_glb_valid() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        
+        fs::write(
+            tmp.path().join("tileset.json"),
+            r#"{
+                "asset": {"version": "1.0"},
+                "root": {
+                    "boundingVolume": {"box": [0,0,0,1,0,0,0,1,0,0,0,1]},
+                    "geometricError": 100.0,
+                    "content": {"uri": "model.glb"}
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let mut glb = vec![];
+        glb.extend_from_slice(b"glTF");
+        glb.extend_from_slice(&2u32.to_le_bytes());
+        glb.extend_from_slice(&40u32.to_le_bytes());
+        glb.extend_from_slice(&8u32.to_le_bytes());
+        glb.extend_from_slice(b"JSON");
+        glb.extend_from_slice(b"{\"a\":1}");
+        glb.resize(40, 0);
+
+        fs::write(tmp.path().join("model.glb"), &glb).unwrap();
+
+        let report = validate_tileset_tree(tmp.path());
+        assert!(report.ok, "errors: {:?}", report.issues);
+        assert_eq!(report.content_count, 1);
+    }
+
+    #[test]
+    fn validate_glb_invalid_version() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        
+        fs::write(
+            tmp.path().join("tileset.json"),
+            r#"{
+                "asset": {"version": "1.0"},
+                "root": {
+                    "boundingVolume": {"box": [0,0,0,1,0,0,0,1,0,0,0,1]},
+                    "geometricError": 100.0,
+                    "content": {"uri": "model.glb"}
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let mut glb = vec![];
+        glb.extend_from_slice(b"glTF");
+        glb.extend_from_slice(&999u32.to_le_bytes());
+        glb.extend_from_slice(&20u32.to_le_bytes());
+        glb.resize(20, 0);
+
+        fs::write(tmp.path().join("model.glb"), &glb).unwrap();
+
+        let report = validate_tileset_tree(tmp.path());
+        assert!(!report.ok);
+        assert!(report.issues.iter().any(|i| i.code == "CONTENT_INVALID"));
+    }
+
+    #[test]
+    fn validate_i3dm_basic() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        
+        fs::write(
+            tmp.path().join("tileset.json"),
+            r#"{
+                "asset": {"version": "1.0"},
+                "root": {
+                    "boundingVolume": {"box": [0,0,0,1,0,0,0,1,0,0,0,1]},
+                    "geometricError": 100.0,
+                    "content": {"uri": "tile.i3dm"}
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let mut i3dm = vec![0u8; 40];
+        i3dm[0..4].copy_from_slice(b"i3dm");
+        fs::write(tmp.path().join("tile.i3dm"), &i3dm).unwrap();
+
+        let report = validate_tileset_tree(tmp.path());
+        assert!(report.ok, "errors: {:?}", report.issues);
+    }
+
+    #[test]
+    fn validate_pnts_basic() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        
+        fs::write(
+            tmp.path().join("tileset.json"),
+            r#"{
+                "asset": {"version": "1.0"},
+                "root": {
+                    "boundingVolume": {"box": [0,0,0,1,0,0,0,1,0,0,0,1]},
+                    "geometricError": 100.0,
+                    "content": {"uri": "tile.pnts"}
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let mut pnts = vec![0u8; 40];
+        pnts[0..4].copy_from_slice(b"pnts");
+        fs::write(tmp.path().join("tile.pnts"), &pnts).unwrap();
+
+        let report = validate_tileset_tree(tmp.path());
+        assert!(report.ok, "errors: {:?}", report.issues);
     }
 }
