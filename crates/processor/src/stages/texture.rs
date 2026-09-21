@@ -465,5 +465,169 @@ mod tests {
         assert_eq!(normalize_mode(Some("")), "keep");
         assert_eq!(normalize_mode(None), "keep");
     }
+
+    #[test]
+    fn keep_mode_skips_validation() {
+        let n = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("geoforge-texture-keep-{n}"));
+        
+        // Tools completely missing
+        let tools = ToolPaths {
+            repo_root: root.clone(),
+            runtime_root: root.clone(),
+            convert_bin: PathBuf::from("missing"),
+            top_rebuild: PathBuf::from("missing"),
+            rebuild_py: PathBuf::from("missing"),
+            texture_py: PathBuf::from("missing"),
+            texture_bin: PathBuf::from("missing"),
+            basisu: PathBuf::from("missing"),
+            python: PathBuf::from("missing"),
+            packaged: false,
+        };
+
+        // Should succeed because keep mode doesn't need any tools
+        assert!(validate_texture_mode_with_tools("keep", &tools, false, false).is_ok());
+        assert!(validate_texture_mode_with_tools("none", &tools, false, false).is_ok());
+        assert!(validate_texture_mode_with_tools("", &tools, false, false).is_ok());
+    }
+
+    #[test]
+    fn uastc_rejects_native_path() {
+        let n = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("geoforge-texture-uastc-{n}"));
+        
+        // Even with native available, UASTC should fail without postprocess tools
+        let tools = ToolPaths {
+            repo_root: root.clone(),
+            runtime_root: root.clone(),
+            convert_bin: PathBuf::from("converter"),
+            top_rebuild: PathBuf::from("rebuild"),
+            rebuild_py: PathBuf::from("rebuild.py"),
+            texture_py: PathBuf::from("missing"),
+            texture_bin: PathBuf::from("missing"),
+            basisu: PathBuf::from("missing"),
+            python: PathBuf::from("missing"),
+            packaged: false,
+        };
+
+        // UASTC cannot use native path (converter doesn't support it)
+        let error = validate_texture_mode_with_tools("ktx2-uastc", &tools, true, true).unwrap_err();
+        assert!(error.contains("ktx2-uastc"), "Error should mention mode: {}", error);
+        assert!(error.contains("unavailable"), "Error should say unavailable: {}", error);
+    }
+
+    #[test]
+    fn postprocess_requires_all_components() {
+        let n = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("geoforge-texture-partial-{n}"));
+        fs::create_dir_all(&root).unwrap();
+
+        // Only basisu, missing script and python
+        let basisu_only = root.join("basisu");
+        fs::write(&basisu_only, b"fake").unwrap();
+        
+        let tools = ToolPaths {
+            repo_root: root.clone(),
+            runtime_root: root.clone(),
+            convert_bin: PathBuf::from("converter"),
+            top_rebuild: PathBuf::from("rebuild"),
+            rebuild_py: PathBuf::from("rebuild.py"),
+            texture_py: root.join("missing-script.py"),
+            texture_bin: PathBuf::from("missing"),
+            basisu: basisu_only,
+            python: root.join("missing-python"),
+            packaged: false,
+        };
+
+        let error = validate_texture_mode_with_tools("ktx2-etc1s", &tools, false, false).unwrap_err();
+        assert!(error.contains("texture script") || error.contains("Python"), 
+                "Should mention missing script or Python: {}", error);
+        
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn walk_has_ktx2_detects_standalone_file() {
+        let n = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("ktx2-standalone-{n}"));
+        fs::create_dir_all(&dir).unwrap();
+        
+        // Create a .ktx2 file (content doesn't matter for this test)
+        fs::write(dir.join("texture.ktx2"), b"fake ktx2 content").unwrap();
+        
+        assert!(walk_has_ktx2(&dir), "Should detect .ktx2 file");
+        
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn walk_has_ktx2_detects_glb_embedded() {
+        let n = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("ktx2-glb-{n}"));
+        fs::create_dir_all(&dir).unwrap();
+        
+        // Create a GLB with KTX2 magic (simplified test)
+        let mut glb_content = vec![0x67, 0x6C, 0x54, 0x46]; // "glTF" magic
+        glb_content.extend_from_slice(KTX2_MAGIC);
+        fs::write(dir.join("model.glb"), &glb_content).unwrap();
+        
+        assert!(walk_has_ktx2(&dir), "Should detect KTX2 in GLB");
+        
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn walk_has_ktx2_false_without_evidence() {
+        let n = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("ktx2-none-{n}"));
+        fs::create_dir_all(&dir).unwrap();
+        
+        // Only PNG files
+        fs::write(dir.join("texture.png"), b"fake png").unwrap();
+        
+        assert!(!walk_has_ktx2(&dir), "Should not detect KTX2 when only PNG exists");
+        
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn walk_has_ktx2_respects_depth_limit() {
+        let n = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let mut dir = std::env::temp_dir().join(format!("ktx2-deep-{n}"));
+        
+        // Create 15 levels deep (exceeds limit of 12)
+        for i in 0..15 {
+            dir = dir.join(format!("level{}", i));
+        }
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("deep.ktx2"), b"fake").unwrap();
+        
+        let root = std::env::temp_dir().join(format!("ktx2-deep-{n}"));
+        assert!(!walk_has_ktx2(&root), "Should respect depth limit and not find deep KTX2");
+        
+        let _ = fs::remove_dir_all(&root);
+    }
 }
+
 
