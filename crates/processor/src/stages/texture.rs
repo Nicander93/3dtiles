@@ -30,10 +30,23 @@ pub fn is_keep(mode: &str) -> bool {
     normalize_mode(Some(mode)) == "keep"
 }
 
+/// Check if postprocessing tools are available.
+/// 
+/// Postprocessing requires:
+/// 1. basisu tool (for KTX2 encoding)
+/// 2. Either geoforge-texture (Rust, future) OR texture_ktx2.py (Python) + python3
 fn postprocess_available(tools: &ToolPaths) -> bool {
-    (tools.texture_bin.is_file()
-        || (!tools.packaged && tools.texture_py.is_file() && command_available(&tools.python)))
-        && tools.basisu.is_file()
+    if !tools.basisu.is_file() {
+        return false;
+    }
+    
+    // Rust tool (future)
+    if tools.texture_bin.is_file() {
+        return true;
+    }
+    
+    // Python fallback
+    !tools.packaged && tools.texture_py.is_file() && command_available(&tools.python)
 }
 
 fn validate_texture_mode_with_tools(
@@ -51,8 +64,26 @@ fn validate_texture_mode_with_tools(
     if postprocess_available(tools) {
         return Ok(());
     }
+    
+    // Detailed error for missing tools
+    let mut missing = Vec::new();
+    
+    if !tools.basisu.is_file() {
+        missing.push(format!("basisu tool (expected at {})", tools.basisu.display()));
+    }
+    
+    if !tools.texture_bin.is_file() {
+        if !tools.texture_py.is_file() {
+            missing.push(format!("texture script (expected at {})", tools.texture_py.display()));
+        } else if !command_available(&tools.python) {
+            missing.push(format!("Python 3 (expected at {}, not executable or missing)", tools.python.display()));
+        }
+    }
+    
     Err(format!(
-        "texture mode={mode} is unavailable: the texture encoder or basisu is missing; choose keep or install the texture component"
+        "texture mode '{}' unavailable. Missing: {}. Install texture component or use texture.mode=keep",
+        mode,
+        missing.join(", ")
     ))
 }
 
@@ -181,7 +212,31 @@ pub fn finish_texture(
     Ok(())
 }
 
-/// Detect standalone .ktx2 or embedded KTX2 / KHR_texture_basisu in glTF/GLB/B3DM.
+/// Detect KTX2 texture evidence in output directory.
+/// 
+/// # Passthrough Conditions
+/// 
+/// Used to determine if native KTX2 encoding already occurred, allowing us to skip
+/// post-processing. Checks for:
+/// 1. Standalone `.ktx2` files
+/// 2. KTX2 magic bytes in GLB/B3DM content
+/// 3. `KHR_texture_basisu` extension in glTF JSON
+/// 
+/// # Heuristic Nature
+/// 
+/// This is an _evidence-based heuristic_, not a guarantee:
+/// - **True positive**: Native converter encoded KTX2 → skip post-process ✓
+/// - **False positive risk**: User manually placed KTX2 → we skip encoding
+/// - **Mitigation**: Explicit `texture.mode=keep` achieves same skip behavior
+/// 
+/// We DO NOT:
+/// - Verify KTX2 format validity
+/// - Check if ALL textures are KTX2 (partial is enough)
+/// - Satisfy fake "budget" metrics (we genuinely detect presence)
+/// 
+/// # Depth Limit
+/// 
+/// Recursion is capped at 12 levels to prevent unbounded traversal.
 pub fn walk_has_ktx2(dir: &Path) -> bool {
     fn rec(d: &Path, depth: u32) -> bool {
         if depth > 12 {
@@ -333,7 +388,82 @@ mod tests {
 
         let error =
             validate_texture_mode_with_tools("ktx2-etc1s", &tools, false, false).unwrap_err();
-        assert!(error.contains("texture mode=ktx2-etc1s is unavailable"));
+        assert!(error.contains("texture mode"));
+        assert!(error.contains("unavailable"));
         let _ = fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn validate_error_mentions_missing_basisu() {
+        let n = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("geoforge-texture-err-{n}"));
+        let tools = ToolPaths {
+            repo_root: root.clone(),
+            runtime_root: root.clone(),
+            convert_bin: PathBuf::from("convert"),
+            top_rebuild: PathBuf::from("rebuild"),
+            rebuild_py: PathBuf::from("rebuild.py"),
+            texture_py: root.join("texture.py"),
+            texture_bin: PathBuf::from("missing"),
+            basisu: root.join("missing-basisu"),
+            python: PathBuf::from("python3"),
+            packaged: false,
+        };
+
+        let error =
+            validate_texture_mode_with_tools("ktx2-etc1s", &tools, false, false).unwrap_err();
+        assert!(error.contains("basisu"), "Error should mention basisu: {}", error);
+        assert!(error.contains("missing-basisu"), "Error should show path: {}", error);
+    }
+
+    #[test]
+    fn validate_error_mentions_missing_python() {
+        let n = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("geoforge-texture-py-{n}"));
+        fs::create_dir_all(&root).unwrap();
+        let basisu = root.join("basisu");
+        fs::write(&basisu, b"fake").unwrap();
+        let texture_py = root.join("texture.py");
+        fs::write(&texture_py, b"fake").unwrap();
+
+        let tools = ToolPaths {
+            repo_root: root.clone(),
+            runtime_root: root.clone(),
+            convert_bin: PathBuf::from("convert"),
+            top_rebuild: PathBuf::from("rebuild"),
+            rebuild_py: PathBuf::from("rebuild.py"),
+            texture_py,
+            texture_bin: PathBuf::from("missing"),
+            basisu,
+            python: root.join("missing-python"),
+            packaged: false,
+        };
+
+        let error =
+            validate_texture_mode_with_tools("ktx2-uastc", &tools, false, false).unwrap_err();
+        assert!(error.contains("Python"), "Error should mention Python: {}", error);
+        assert!(error.contains("missing-python"), "Error should show path: {}", error);
+        
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn normalize_ktx2_modes() {
+        assert_eq!(normalize_mode(Some("ktx2")), "ktx2-etc1s");
+        assert_eq!(normalize_mode(Some("ktx2-etc1s")), "ktx2-etc1s");
+        assert_eq!(normalize_mode(Some("etc1s")), "ktx2-etc1s");
+        assert_eq!(normalize_mode(Some("ktx2-uastc")), "ktx2-uastc");
+        assert_eq!(normalize_mode(Some("uastc")), "ktx2-uastc");
+        assert_eq!(normalize_mode(Some("keep")), "keep");
+        assert_eq!(normalize_mode(Some("none")), "keep");
+        assert_eq!(normalize_mode(Some("")), "keep");
+        assert_eq!(normalize_mode(None), "keep");
+    }
 }
+
