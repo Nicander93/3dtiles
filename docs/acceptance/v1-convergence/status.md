@@ -1,8 +1,8 @@
 # GeoForge V1 Convergence Status
 
-**最后更新:** 2026-09-21 23:20:00 CST  
-**工作分支:** cursor/r07-2-negative-tests-7ab0  
-**当前阶段:** R07.2 代码完成，等待 CI
+**最后更新:** 2026-09-21 23:40:00 CST  
+**工作分支:** cursor/r07-3-packaging-asserts-7ab0  
+**当前阶段:** R07.3 文档完成，R07 代码通过
 
 ## 任务状态表
 
@@ -29,10 +29,11 @@
 | R06.1 | TempGuard late-cancel 语义澄清 | 验收通过 | Agent | 已合入 master@629bd95 (#20) |
 | R06.2 | Ownership 验证增强 + 错误消息改进 | 验收通过 | Agent | 已合入 master@213db8f (#21) |
 | R06.3 | Crash recovery checkpoints | 验收通过 | Agent | 已合入 master@8ddd0b8 (#22) |
-| **R07** | **零 Python 运行时** | 进行中 | Agent | Phase 14, R07.2 Negative tests |
+| **R07** | **零 Python 运行时** | **代码通过** | Agent | **Phase 14 完成, 3个子任务** |
 | R07.1 | Texture gap matrix + runtime 断言改进 | 验收通过 | Agent | 已合入 master@20129e8 (#23) |
-| R07.2 | Negative path tests (cancel/missing-DLL) | 代码完成 | Agent | **本 PR: 7 个新负面测试** |
-| R08 | 验收测试框架 | 未开始 | - | Phase 15 公开数据测试 |
+| R07.2 | Negative path tests | 验收通过 | Agent | 已合入 master@70a24d1 (#24) |
+| R07.3 | Packaging/runtime asserts 文档 | 完成 | Agent | **本 PR: 明确 install 保证** |
+| **R08** | **验收测试框架** | 未开始 | Agent | Phase 15, 数据梯度脚手架 |
 | R09 | Cesium A/B 对比工具 | 未开始 | - | 验收测试工具 |
 | R10 | B3DM 对齐和 transform 补充测试 | 未开始 | - | Phase 11 补充 (可选) |
 | R11 | 同步 master 独有修复 | 未开始 | - | 处理双向差异 |
@@ -73,6 +74,27 @@
 - GE/REPLACE 验证: 推迟到 R08 Cesium A/B 对比
 - 无需补充 PR
 - 直接启动 R05
+
+## R07 零 Python 运行时 - 完成总结
+
+**实施内容:**
+- ✅ R07.1: Texture gap matrix + 增强错误消息
+- ✅ R07.2: 7 个负面路径测试（工具缺失、UASTC、证据检测）
+- ✅ R07.3: 文档化 install 模式保证（basisu + CRT/zstd）
+
+**Gap 分析:** 详见 [R07-1-matrix.md](./R07-1-matrix.md)
+
+**剩余 Gap（推迟到 R08/R11）:**
+- ⚠️ Rebuild → KTX2 实际编码测试（需要完整管道）
+- ⚠️ 实际工具失败场景（crash, DLL 缺失）
+- ⚠️ Cancel flag 集成测试（需要真实 basisu）
+- ❌ Rust geoforge-texture 工具（未实现，保留 Python）
+
+**决策:**
+- R07 状态: **代码通过**
+- 保留实验性 KTX2 标签
+- Python 依赖短期保留（UASTC 需要）
+- 集成/实际工具测试推迟到 R08 acceptance 框架
 
 根据 R03-classification.md,还有以下项未移植:
 
@@ -146,6 +168,7 @@
 ### R07 文档
 - [R07-1-matrix.md](./R07-1-matrix.md) - R07.1 Texture 能力矩阵与 gap 分析
 - [R07-2-summary.md](./R07-2-summary.md) - R07.2 Negative path tests
+- [R07-3-summary.md](./R07-3-summary.md) - R07.3 Packaging/runtime asserts 文档
 
 ### 基础文档
 - [R01-summary.md](./R01-summary.md) - R01 实现总结
