@@ -257,7 +257,7 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
 }
 
 fn content_rel(block: &SourceBlock, content_path: &Path) -> PathBuf {
-    if let Some(ts) = &block.source_tileset {
+    if let Some(ts) = &block.source_tileset() {
         if let Some(dir) = ts.parent() {
             if let Ok(rel) = content_path.strip_prefix(dir) {
                 return rel.to_path_buf();
@@ -369,7 +369,7 @@ fn ensure_leaf_content(
     out_block_dir: &Path,
     opts: &WriteOptions,
 ) -> Result<(PathBuf, f64)> {
-    if let Some(ts) = &block.source_tileset {
+    if let Some(ts) = &block.source_tileset() {
         let src_dir = ts.parent().ok_or_else(|| {
             TopRebuildError::InvalidTileset(format!(
                 "block tileset has no parent: {}",
@@ -392,14 +392,14 @@ fn ensure_leaf_content(
     }
 
     for (i, r) in block.representations.iter().enumerate() {
-        let dest = out_block_dir.join(content_rel(block, &r.content_path));
-        match probe_mesh_content(&r.content_path) {
+        let dest = out_block_dir.join(content_rel(block, r.content_path()));
+        match probe_mesh_content(r.content_path()) {
             Ok(()) => {
                 if !dest.is_file() {
                     if let Some(parent) = dest.parent() {
                         fs::create_dir_all(parent)?;
                     }
-                    fs::copy(&r.content_path, &dest)?;
+                    fs::copy(r.content_path(), &dest)?;
                 }
             }
             Err(_) if opts.synthesize_if_empty => {
@@ -410,7 +410,7 @@ fn ensure_leaf_content(
     }
 
     let sel_rep = &block.representations[sel.representation_index];
-    let sel_path = out_block_dir.join(content_rel(block, &sel_rep.content_path));
+    let sel_path = out_block_dir.join(content_rel(block, sel_rep.content_path()));
     Ok((
         sel_path,
         leaf_geometric_error(sel.source_error, &block.bounds),
@@ -542,7 +542,7 @@ pub fn rebuild_tileset(
                 content_path,
                 content_uri: external_uri.clone(),
                 world_transform: block.representations[sel.representation_index]
-                    .world_transform
+                    .world_transform()
                     .clone(),
                 geometric_error: ge,
                 bounds: node.bounds.clone(),

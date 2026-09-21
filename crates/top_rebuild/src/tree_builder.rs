@@ -92,7 +92,9 @@ fn l0_nodes(blocks: &[SourceBlock], selections: &[(usize, Selection)]) -> Result
             level: 0,
             grid_x: gx,
             grid_y: gy,
-            bounds: block.bounds.world_bounds(&block.world_transform),
+            bounds: block.bounds.world_aabb(&block.world_transform)
+                .map(|aabb| aabb.to_box_bv())
+                .unwrap_or_else(BoundingVolume::empty),
             world_transform: block.world_transform.clone(),
             source_representation_ids: vec![rep.id.clone()],
             child_ids: vec![],
@@ -158,6 +160,7 @@ pub fn build_tree(blocks: &[SourceBlock], opts: &TreeBuildOptions) -> Result<Reb
 mod tests {
     use super::*;
     use crate::types::Representation;
+    use std::path::PathBuf;
 
     fn synth_block(gx: i32, gy: i32) -> SourceBlock {
         let cell = 100.0;
@@ -172,16 +175,15 @@ mod tests {
             grid_y: Some(gy),
             bounds: BoundingVolume::from_box(boxv),
             world_transform: Mat4d::identity(),
-            representations: vec![Representation {
-                id: format!("{id}#rep0"),
-                content_path: format!("{id}.b3dm").into(),
-                geometric_error_meters: 50.0,
-                triangle_count: 0,
-                texture_bytes: 0,
-                bounds: BoundingVolume::from_box(boxv),
-                world_transform: Mat4d::identity(),
-            }],
-            source_tileset: None,
+            representations: vec![Representation::single_part(
+                format!("{id}#rep0"),
+                format!("{id}.b3dm").into(),
+                50.0,
+                BoundingVolume::from_box(boxv),
+                Mat4d::identity(),
+            )],
+            source_tileset_path: PathBuf::new(),
+            source_block_dir: PathBuf::new(),
         }
     }
 

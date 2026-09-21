@@ -1,12 +1,4 @@
-//! Core SourceBlock / Representation / math types (plan §§9–11).
-//!
-//! Coordinate frames:
-//! - Mesh vertex = content local (glTF node / B3DM RTC already expanded on load)
-//! - Representation.world_transform = content local → world
-//! - SourceBlock.world_transform = block local → world
-//! - SourceBlock / Representation bounds = local to that world_transform
-//! - TreeBuilder spatial work uses world-space bounds
-//! - ProxyBuilder mesh = parent local
+//! Core SourceBlock / Representation / math types (plan §§9–11, Phase 11 P0-3/P0-4).
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -37,6 +29,17 @@ impl Mat4d {
         m.0[13] = ty;
         m.0[14] = tz;
         m
+    }
+
+    /// Rotation about Z (radians), column-major.
+    pub fn rotation_z(radians: f64) -> Self {
+        let (s, c) = radians.sin_cos();
+        Self([
+            c, s, 0.0, 0.0, // col0
+            -s, c, 0.0, 0.0, // col1
+            0.0, 0.0, 1.0, 0.0, // col2
+            0.0, 0.0, 0.0, 1.0, // col3
+        ])
     }
 
     pub fn from_slice(v: &[f64]) -> Option<Self> {
@@ -75,6 +78,105 @@ impl Mat4d {
             (xp, yp, zp)
         }
     }
+
+    /// Transform a direction vector (no translation, w=0).
+    pub fn transform_direction(&self, x: f64, y: f64, z: f64) -> (f64, f64, f64) {
+        let m = &self.0;
+        (
+            m[0] * x + m[4] * y + m[8] * z,
+            m[1] * x + m[5] * y + m[9] * z,
+            m[2] * x + m[6] * y + m[10] * z,
+        )
+    }
+
+    pub fn is_finite(&self) -> bool {
+        self.0.iter().all(|v| v.is_finite())
+    }
+
+    /// Max absolute element difference vs another matrix.
+    pub fn max_abs_diff(&self, other: &Mat4d) -> f64 {
+        self.0
+            .iter()
+            .zip(other.0.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f64, f64::max)
+    }
+}
+
+/// Axis-aligned bounding box in world (or any) space (Phase 11 / P0-4).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Aabb3d {
+    pub min: [f64; 3],
+    pub max: [f64; 3],
+}
+
+impl Aabb3d {
+    pub fn empty() -> Self {
+        Self {
+            min: [f64::MAX, f64::MAX, f64::MAX],
+            max: [f64::MIN, f64::MIN, f64::MIN],
+        }
+    }
+
+    pub fn is_valid(&self) -> bool {
+        self.min[0] <= self.max[0] && self.min[1] <= self.max[1] && self.min[2] <= self.max[2]
+    }
+
+    pub fn include_point(&mut self, x: f64, y: f64, z: f64) {
+        self.min[0] = self.min[0].min(x);
+        self.min[1] = self.min[1].min(y);
+        self.min[2] = self.min[2].min(z);
+        self.max[0] = self.max[0].max(x);
+        self.max[1] = self.max[1].max(y);
+        self.max[2] = self.max[2].max(z);
+    }
+
+    pub fn union(a: &Aabb3d, b: &Aabb3d) -> Aabb3d {
+        if !a.is_valid() {
+            return b.clone();
+        }
+        if !b.is_valid() {
+            return a.clone();
+        }
+        Aabb3d {
+            min: [
+                a.min[0].min(b.min[0]),
+                a.min[1].min(b.min[1]),
+                a.min[2].min(b.min[2]),
+            ],
+            max: [
+                a.max[0].max(b.max[0]),
+                a.max[1].max(b.max[1]),
+                a.max[2].max(b.max[2]),
+            ],
+        }
+    }
+
+    pub fn to_box_bv(&self) -> BoundingVolume {
+        let cx = (self.min[0] + self.max[0]) * 0.5;
+        let cy = (self.min[1] + self.max[1]) * 0.5;
+        let cz = (self.min[2] + self.max[2]) * 0.5;
+        let hx = (self.max[0] - self.min[0]) * 0.5;
+        let hy = (self.max[1] - self.min[1]) * 0.5;
+        let hz = (self.max[2] - self.min[2]) * 0.5;
+        BoundingVolume::from_box([cx, cy, cz, hx, 0.0, 0.0, 0.0, hy, 0.0, 0.0, 0.0, hz])
+    }
+}
+
+/// Local BV + conservative world AABB (Phase 11 / P0-4).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SpatialBounds {
+    pub local: BoundingVolume,
+    pub world_aabb: Aabb3d,
+}
+
+impl SpatialBounds {
+    pub fn from_local_and_world_transform(local: BoundingVolume, world: &Mat4d) -> Self {
+        let world_aabb = local
+            .world_aabb(world)
+            .unwrap_or_else(Aabb3d::empty);
+        Self { local, world_aabb }
+    }
 }
 
 /// Cesium-style `boundingVolume.box`: center(3) + half-axis vectors (9).
@@ -106,8 +208,8 @@ impl BoundingVolume {
         Some(m.transform_point(x, y, z))
     }
 
-    /// Eight OBB corners: `center ± axisX ± axisY ± axisZ`.
-    pub fn corners(&self) -> Option<[(f64, f64, f64); 8]> {
+    /// Eight OBB corners in local space: `center ± axisX ± axisY ± axisZ`.
+    pub fn local_corners(&self) -> Option<[(f64, f64, f64); 8]> {
         let b = self.box_values?;
         let c = (b[0], b[1], b[2]);
         let ax = (b[3], b[4], b[5]);
@@ -130,8 +232,27 @@ impl BoundingVolume {
         Some(out)
     }
 
+    #[deprecated(note = "use local_corners")]
+    pub fn corners(&self) -> Option<[(f64, f64, f64); 8]> {
+        self.local_corners()
+    }
+
+    /// Conservative world-space AABB of this local box under `world` transform.
+    pub fn world_aabb(&self, world: &Mat4d) -> Option<Aabb3d> {
+        let corners = self.local_corners()?;
+        let mut aabb = Aabb3d::empty();
+        for (x, y, z) in corners {
+            let p = world.transform_point(x, y, z);
+            if !p.0.is_finite() || !p.1.is_finite() || !p.2.is_finite() {
+                return None;
+            }
+            aabb.include_point(p.0, p.1, p.2);
+        }
+        Some(aabb)
+    }
+
     pub fn aabb_min_max(&self) -> Option<((f64, f64, f64), (f64, f64, f64))> {
-        let corners = self.corners()?;
+        let corners = self.local_corners()?;
         let mut amin = (f64::MAX, f64::MAX, f64::MAX);
         let mut amax = (f64::MIN, f64::MIN, f64::MIN);
         for (x, y, z) in corners {
@@ -145,6 +266,7 @@ impl BoundingVolume {
         Some((amin, amax))
     }
 
+    #[allow(dead_code)]
     fn from_aabb(min: (f64, f64, f64), max: (f64, f64, f64)) -> BoundingVolume {
         let cx = (min.0 + max.0) * 0.5;
         let cy = (min.1 + max.1) * 0.5;
@@ -155,25 +277,16 @@ impl BoundingVolume {
         BoundingVolume::from_box([cx, cy, cz, hx, 0.0, 0.0, 0.0, hy, 0.0, 0.0, 0.0, hz])
     }
 
-    /// Transform this box to another frame via 8 corners, then wrap as world AABB.
+    /// Transform this box to another frame via 8 corners, then wrap as AABB.
+    #[deprecated(note = "use world_aabb or explicit transform logic")]
     pub fn transform_bounds(&self, m: &Mat4d) -> BoundingVolume {
-        let Some(corners) = self.corners() else {
+        let Some(aabb) = self.world_aabb(m) else {
             return BoundingVolume::empty();
         };
-        let mut amin = (f64::MAX, f64::MAX, f64::MAX);
-        let mut amax = (f64::MIN, f64::MIN, f64::MIN);
-        for (x, y, z) in corners {
-            let p = m.transform_point(x, y, z);
-            amin.0 = amin.0.min(p.0);
-            amin.1 = amin.1.min(p.1);
-            amin.2 = amin.2.min(p.2);
-            amax.0 = amax.0.max(p.0);
-            amax.1 = amax.1.max(p.1);
-            amax.2 = amax.2.max(p.2);
-        }
-        BoundingVolume::from_aabb(amin, amax)
+        aabb.to_box_bv()
     }
 
+    #[allow(deprecated)]
     pub fn world_bounds(&self, world_transform: &Mat4d) -> BoundingVolume {
         self.transform_bounds(world_transform)
     }
@@ -187,7 +300,11 @@ impl BoundingVolume {
                 let max_x = amax.0.max(bmax.0);
                 let max_y = amax.1.max(bmax.1);
                 let max_z = amax.2.max(bmax.2);
-                BoundingVolume::from_aabb((min_x, min_y, min_z), (max_x, max_y, max_z))
+                Aabb3d {
+                    min: [min_x, min_y, min_z],
+                    max: [max_x, max_y, max_z],
+                }
+                .to_box_bv()
             }
             (Some(_), None) => a.clone(),
             (None, Some(_)) => b.clone(),
@@ -204,18 +321,77 @@ impl BoundingVolume {
     }
 }
 
-/// One SourceBlock LOD / content expression (plan §9.3).
+/// One content part of a coverage frontier (Phase 11 / P0-3).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RepresentationPart {
+    pub content_path: PathBuf,
+    pub world_transform: Mat4d,
+    pub bounds: BoundingVolume,
+}
+
+/// One SourceBlock LOD / content expression (plan §9.3 / P0-3).
+///
+/// Complete coverage frontier at one geometric-error band.
+/// `parts` is a non-overlapping set that together cover the SourceBlock.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Representation {
     pub id: String,
-    pub content_path: PathBuf,
     pub geometric_error_meters: f64,
+    pub parts: Vec<RepresentationPart>,
     pub triangle_count: u64,
     pub texture_bytes: u64,
-    /// Local to `world_transform`.
+    /// Union of all parts.
     pub bounds: BoundingVolume,
-    /// Content local → world.
-    pub world_transform: Mat4d,
+}
+
+impl Representation {
+    /// Convenience for single-content representations (chain LOD / fixtures).
+    pub fn single_part(
+        id: impl Into<String>,
+        content_path: PathBuf,
+        geometric_error_meters: f64,
+        bounds: BoundingVolume,
+        world_transform: Mat4d,
+    ) -> Self {
+        let part = RepresentationPart {
+            content_path,
+            world_transform,
+            bounds: bounds.clone(),
+        };
+        Self {
+            id: id.into(),
+            geometric_error_meters,
+            parts: vec![part],
+            triangle_count: 0,
+            texture_bytes: 0,
+            bounds,
+        }
+    }
+
+    /// Backward-compat: primary content path (parts[0]).
+    pub fn content_path(&self) -> &PathBuf {
+        self.primary_content_path().expect("representation has no parts")
+    }
+
+    /// Backward-compat: primary world transform (parts[0]).
+    pub fn world_transform(&self) -> &Mat4d {
+        &self.parts.first().expect("representation has no parts").world_transform
+    }
+
+    pub fn primary_content_path(&self) -> Option<&PathBuf> {
+        self.parts.first().map(|p| &p.content_path)
+    }
+
+    pub fn primary_world_transform(&self) -> Mat4d {
+        self.parts
+            .first()
+            .map(|p| p.world_transform.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn frontier_parts(&self) -> usize {
+        self.parts.len()
+    }
 }
 
 /// Spatial block from tileset adapter (plan §9.2).
@@ -228,9 +404,18 @@ pub struct SourceBlock {
     pub bounds: BoundingVolume,
     /// Block local → world.
     pub world_transform: Mat4d,
+    /// Absolute path to the original Block external tileset.json (P0-2).
+    pub source_tileset_path: PathBuf,
+    /// Directory containing the Block external tileset and its content.
+    pub source_block_dir: PathBuf,
     pub representations: Vec<Representation>,
-    /// Original block `tileset.json`, if loaded from disk.
-    pub source_tileset: Option<PathBuf>,
+}
+
+impl SourceBlock {
+    /// Backward-compat accessor for source_tileset (now source_tileset_path).
+    pub fn source_tileset(&self) -> Option<&PathBuf> {
+        Some(&self.source_tileset_path)
+    }
 }
 
 /// One node in the bottom-up quadtree (Phase 5: hierarchy only, no mesh merge).
@@ -321,15 +506,6 @@ impl Mat4d {
         }
         Self(a)
     }
-
-    pub fn transform_direction(&self, x: f64, y: f64, z: f64) -> (f64, f64, f64) {
-        let m = &self.0;
-        (
-            m[0] * x + m[4] * y + m[8] * z,
-            m[1] * x + m[5] * y + m[9] * z,
-            m[2] * x + m[6] * y + m[10] * z,
-        )
-    }
 }
 
 #[cfg(test)]
@@ -353,7 +529,7 @@ mod mat4_tests {
     fn obb_corners_and_translated_world_aabb() {
         let local =
             BoundingVolume::from_box([0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 2.0]);
-        let corners = local.corners().unwrap();
+        let corners = local.local_corners().unwrap();
         assert!(corners
             .iter()
             .any(|c| (c.0 - 10.0).abs() < 1e-12 && (c.1 - 5.0).abs() < 1e-12));
@@ -376,5 +552,19 @@ mod mat4_tests {
         assert!((amax.0 - 14.0).abs() < 1e-9);
         assert!((amin.1 + 14.0).abs() < 1e-9);
         assert!((amax.1 - 14.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn oriented_box_aabb_not_axis_assumption() {
+        let s = std::f64::consts::FRAC_1_SQRT_2 * 10.0;
+        let bv = BoundingVolume::from_box([
+            0.0, 0.0, 0.0, s, s, 0.0, -s, s, 0.0, 0.0, 0.0, 5.0,
+        ]);
+        let ((min_x, min_y, min_z), (max_x, max_y, max_z)) = bv.aabb_min_max().unwrap();
+        assert!((max_x - min_x) > 19.0, "dx={}", max_x - min_x);
+        assert!((max_y - min_y) > 19.0, "dy={}", max_y - min_y);
+        assert!((max_z - min_z - 10.0).abs() < 1e-9);
+        let naive_hx = 10.0 * std::f64::consts::FRAC_1_SQRT_2;
+        assert!((max_x - min_x) > naive_hx * 2.0 + 1.0);
     }
 }
