@@ -41,14 +41,12 @@ git rev-list --left-right --count origin/master...origin/feat/v1-prod-align
 
 ```bash
 # 从 master 创建新分支（如果不存在）
-git checkout -b cursor/v1-convergence-0fa8 origin/master
+git checkout -b feat/v1-convergence origin/master
 
 # 或者，如果分支已存在，重置到 master
-# git checkout cursor/v1-convergence-0fa8
+# git checkout feat/v1-convergence
 # git reset --hard origin/master
 ```
-
-**注意:** 分支名必须符合 `cursor/<descriptive-name>-0fa8` 格式。
 
 ## 步骤 4: 收集环境信息
 
@@ -122,7 +120,7 @@ git commit -m "docs(R00): establish V1 convergence baseline
 - Define acceptance output conventions"
 
 # 推送到远程
-git push -u origin cursor/v1-convergence-0fa8
+git push -u origin feat/v1-convergence
 ```
 
 ## 步骤 9: 创建 PR
@@ -132,7 +130,7 @@ git push -u origin cursor/v1-convergence-0fa8
 ```bash
 gh pr create \
   --base master \
-  --head cursor/v1-convergence-0fa8 \
+  --head feat/v1-convergence \
   --title "docs(R00): GeoForge V1 convergence baseline" \
   --body "Establish R00 baseline for V1 convergence plan (R00-R12).
 
