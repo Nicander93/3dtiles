@@ -38,10 +38,15 @@ pub fn prepare_temp(final_output: &Path, task_id: &str) -> Result<PathBuf, Strin
 }
 
 /// Commit temp directory to final output path (no-replace; no copy fallback).
+/// 
+/// Atomicity guarantee: once `rename_no_replace` succeeds, the output is committed
+/// and will not be removed by late cancellation. The temp guard is marked committed
+/// before returning, preventing cleanup even if cancellation arrives during manifest write.
 pub fn commit_rename(
     emitter: &Emitter,
     temp_dir: &Path,
     final_output: &Path,
+    temp_guard: Option<&mut TempGuard<'_>>,
 ) -> Result<(), String> {
     emitter.stage(Stage::Commit, "Committing output");
     ensure_owned_temp(temp_dir)?;
@@ -50,7 +55,16 @@ pub fn commit_rename(
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
-    let manifest = temp_dir.join(".geoforge-manifest.json");
+    // Atomic rename: once this succeeds, output is committed
+    path_policy::rename_no_replace(temp_dir, final_output)?;
+    
+    // Mark committed IMMEDIATELY after successful rename to prevent late-cancel cleanup
+    if let Some(guard) = temp_guard {
+        guard.mark_committed();
+    }
+
+    // Best-effort manifest write (non-critical; failure doesn't affect commit)
+    let manifest = final_output.join(".geoforge-manifest.json");
     let _ = fs::write(
         &manifest,
         serde_json::json!({
@@ -59,8 +73,6 @@ pub fn commit_rename(
         })
         .to_string(),
     );
-
-    path_policy::rename_no_replace(temp_dir, final_output)?;
 
     emitter.log(&format!("[commit] {}", final_output.display()));
     Ok(())
@@ -117,6 +129,17 @@ fn ensure_owned_temp(temp_dir: &Path) -> Result<(), String> {
 }
 
 /// Cleans only a work directory created by this run when cancellation interrupts it.
+///
+/// # Semantics
+///
+/// - **Cancel before commit**: cleanup removes temp directory if cancellation is detected
+/// - **Success after commit**: cleanup is suppressed by `mark_committed()`; output remains
+/// - **Late cancel after commit**: even if cancel arrives after `commit_rename` succeeds
+///   but before `mark_committed()`, the temp dir has already been renamed, so cleanup
+///   attempts to remove a non-existent path (safe no-op)
+///
+/// The guard does NOT clean up on normal success without cancellation, allowing
+/// diagnostic inspection of temp dirs when processing fails naturally.
 pub struct TempGuard<'a> {
     path: PathBuf,
     cancel: &'a CancelFlag,
@@ -198,6 +221,36 @@ mod tests {
         cleanup_temp(&wrong_marker);
         assert!(wrong_marker.join(TEMP_MARKER).is_file());
 
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn late_cancel_after_commit_does_not_remove_output() {
+        use super::TempGuard;
+        use crate::cancel::CancelFlag;
+        
+        let root = temp_root("late-cancel");
+        let output = root.join("output");
+        let temp = prepare_temp(&output, "task-commit").expect("prepare temp");
+        fs::write(temp.join("data.txt"), b"committed").expect("write data");
+        
+        let cancel = CancelFlag::new();
+        let mut guard = TempGuard::new(temp.clone(), &cancel);
+        
+        // Simulate commit: rename succeeds, guard is marked
+        fs::rename(&temp, &output).expect("rename temp to output");
+        guard.mark_committed();
+        
+        // Late cancel arrives AFTER commit
+        cancel.request();
+        
+        // Drop guard (simulates end of scope)
+        drop(guard);
+        
+        // Output must still exist (not removed by late cancel)
+        assert!(output.exists(), "committed output must not be removed by late cancel");
+        assert_eq!(fs::read(output.join("data.txt")).unwrap(), b"committed");
+        
         let _ = fs::remove_dir_all(root);
     }
 }

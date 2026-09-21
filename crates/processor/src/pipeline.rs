@@ -240,10 +240,10 @@ fn run_convert_osgb(
     check_cancel(cancel)?;
 
     // Brief non-cancellable publish window
-    commit::commit_rename(emitter, &staged, &final_out)?;
+    // Pass temp_guard to commit_rename for immediate mark_committed after atomic rename
+    commit::commit_rename(emitter, &staged, &final_out, Some(&mut temp_guard))?;
     emitter.metric("output.bytes", json!(directory_size_bytes(&final_out)));
     // Cleanup leftover temp shell
-    temp_guard.mark_committed();
     commit::cleanup_temp(&temp);
 
     Ok(final_out)
@@ -309,9 +309,8 @@ fn run_process_tileset(
     validate::validate_tileset_dir_cancellable(emitter, &work, Some(cancel))?;
     emitter.metric("temp.stagedBytes", json!(directory_size_bytes(&work)));
     check_cancel(cancel)?;
-    commit::commit_rename(emitter, &work, &final_out)?;
+    commit::commit_rename(emitter, &work, &final_out, Some(&mut temp_guard))?;
     emitter.metric("output.bytes", json!(directory_size_bytes(&final_out)));
-    temp_guard.mark_committed();
     commit::cleanup_temp(&temp);
     Ok(final_out)
 }
