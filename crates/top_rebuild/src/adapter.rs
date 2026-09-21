@@ -243,6 +243,20 @@ pub fn validate_grid_spatial(blocks: &[SourceBlock]) -> Result<()> {
 }
 
 /// Load root tileset.json and external Tile_* children into SourceBlocks.
+///
+/// # Phase 11 P0-2: External Tileset Preservation
+///
+/// Records the absolute path to each external tileset (source_tileset_path)
+/// and its directory (source_block_dir) for later preservation during rebuild.
+/// This supports the Phase 11 requirement to retain original Block external
+/// tilesets rather than flattening all content into a single output tileset.
+///
+/// The recorded paths enable tileset_writer to:
+/// - Copy external tilesets to the output directory
+/// - Preserve subtree structure and LOD hierarchies
+/// - Maintain world-space transform invariants
+///
+/// See also: tileset_writer::preserve_block_subtree (Phase 11 P0-2)
 pub fn load_source_blocks(tileset_path: &Path) -> Result<Vec<SourceBlock>> {
     let tileset_path = if tileset_path.is_dir() {
         tileset_path.join("tileset.json")
@@ -498,5 +512,70 @@ mod tests {
         };
         let blocks = vec![mk("A", 0, 0, 0.0, 0.0), mk("B", 1, 0, 100.0, 0.0)];
         validate_grid_spatial(&blocks).expect("ecef rotation must not collapse grid xy");
+    }
+
+    #[test]
+    fn external_tileset_paths_recorded() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().unwrap();
+        let root_path = tmp.path().join("tileset.json");
+        let tile_dir = tmp.path().join("Data").join("Tile_+000_+000");
+        fs::create_dir_all(&tile_dir).unwrap();
+
+        let tile_ts = tile_dir.join("tileset.json");
+        let tile_b3dm = tile_dir.join("Tile_+000_+000.b3dm");
+        fs::write(&tile_b3dm, b"fake b3dm").unwrap();
+
+        fs::write(
+            &tile_ts,
+            r#"{
+                "root": {
+                    "boundingVolume": {
+                        "box": [0,0,0,50,0,0,0,50,0,0,0,10]
+                    },
+                    "geometricError": 100.0,
+                    "refine": "REPLACE",
+                    "content": {
+                        "uri": "./Tile_+000_+000.b3dm"
+                    }
+                }
+            }"#,
+        ).unwrap();
+
+        fs::write(
+            &root_path,
+            r#"{
+                "root": {
+                    "boundingVolume": {
+                        "box": [0,0,0,100,0,0,0,100,0,0,0,50]
+                    },
+                    "geometricError": 500.0,
+                    "refine": "REPLACE",
+                    "children": [
+                        {
+                            "boundingVolume": {
+                                "box": [25,25,0,50,0,0,0,50,0,0,0,10]
+                            },
+                            "geometricError": 100.0,
+                            "content": {
+                                "uri": "./Data/Tile_+000_+000/tileset.json"
+                            }
+                        }
+                    ]
+                }
+            }"#,
+        ).unwrap();
+
+        let blocks = load_source_blocks(&root_path).unwrap();
+        assert_eq!(blocks.len(), 1);
+        let block = &blocks[0];
+
+        assert_eq!(block.grid_x, Some(0));
+        assert_eq!(block.grid_y, Some(0));
+        assert_eq!(block.source_tileset_path, tile_ts);
+        assert_eq!(block.source_block_dir, tile_dir);
+        assert!(!block.representations.is_empty());
     }
 }
