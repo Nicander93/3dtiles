@@ -305,6 +305,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn symlink_temp_is_rejected() {
         use super::ensure_owned_temp;
         
@@ -314,13 +315,10 @@ mod tests {
         fs::create_dir_all(&real_dir).expect("create real dir");
         
         let temp = temp_work_dir(&output, "task-symlink");
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(&real_dir, &temp).expect("create symlink");
-            let error = ensure_owned_temp(&temp).expect_err("symlink must fail");
-            assert!(error.contains("symlink"), "{error}");
-            assert!(error.contains("security risk"), "{error}");
-        }
+        std::os::unix::fs::symlink(&real_dir, &temp).expect("create symlink");
+        let error = ensure_owned_temp(&temp).expect_err("symlink must fail");
+        assert!(error.contains("symlink"), "{error}");
+        assert!(error.contains("security risk"), "{error}");
         
         let _ = fs::remove_dir_all(root);
     }
