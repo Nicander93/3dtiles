@@ -218,14 +218,19 @@ fn validate_tileset_file(
 
     let base_dir = tileset_path.parent().unwrap_or_else(|| Path::new("."));
 
-    if let Some(root) = value.get("root") {
-        visit_tile(output_root, base_dir, root, visited, report);
-    }
+    let tileset_ge = read_geometric_error(value.get("geometricError"), &path_s, report);
 
-    if let Some(children) = value.get("root").and_then(|r| r.get("children")).and_then(|c| c.as_array()) {
-        for child in children {
-            visit_tile(output_root, base_dir, child, visited, report);
-        }
+    if let Some(root) = value.get("root") {
+        visit_tile(
+            output_root,
+            base_dir,
+            root,
+            &format!("{path_s}#root"),
+            visited,
+            report,
+            tileset_ge,
+            true,
+        );
     }
 }
 
@@ -233,9 +238,86 @@ fn visit_tile(
     output_root: &Path,
     base_dir: &Path,
     tile: &Value,
+    loc: &str,
     visited: &mut HashSet<PathBuf>,
     report: &mut ValidationReport,
+    parent_ge: Option<f64>,
+    is_root: bool,
 ) {
+    let ge = match read_geometric_error(tile.get("geometricError"), loc, report) {
+        Some(g) => Some(g),
+        None if is_root => parent_ge,
+        None => {
+            report.add_warning(
+                ValidationCode::GeometricErrorInvalid,
+                loc,
+                "tile missing geometricError (inherited not validated)",
+            );
+            parent_ge
+        }
+    };
+
+    if let (Some(p), Some(c)) = (parent_ge, ge) {
+        if let Some(refine) = tile.get("refine").and_then(|v| v.as_str()) {
+            if refine.eq_ignore_ascii_case("REPLACE") && p + 1e-9 < c {
+                report.add_warning(
+                    ValidationCode::GeometricErrorMonotonicity,
+                    loc,
+                    format!("REPLACE parent geometricError {p} < child {c}"),
+                );
+            }
+        } else if p + 1e-9 < c {
+            report.add_warning(
+                ValidationCode::GeometricErrorMonotonicity,
+                loc,
+                format!("parent geometricError {p} < child {c}"),
+            );
+        }
+    }
+
+    if let Some(refine) = tile.get("refine") {
+        match refine.as_str() {
+            Some(s) if s.eq_ignore_ascii_case("REPLACE") || s.eq_ignore_ascii_case("ADD") => {}
+            Some(s) => report.add_error(
+                ValidationCode::RefineInvalid,
+                loc,
+                format!("refine must be REPLACE or ADD, got `{s}`"),
+            ),
+            None => report.add_error(
+                ValidationCode::RefineInvalid,
+                loc,
+                "refine must be a string REPLACE or ADD",
+            ),
+        }
+    }
+
+    match tile.get("boundingVolume") {
+        None => report.add_error(
+            ValidationCode::BoundingVolumeMissing,
+            loc,
+            "tile missing boundingVolume",
+        ),
+        Some(bv) => {
+            if !bounding_volume_ok(bv) {
+                report.add_error(
+                    ValidationCode::BoundingVolumeInvalid,
+                    loc,
+                    "boundingVolume must contain finite box[12], region[6], or sphere[4]",
+                );
+            }
+        }
+    }
+
+    if let Some(tf) = tile.get("transform") {
+        if !transform_ok(tf) {
+            report.add_error(
+                ValidationCode::TransformInvalid,
+                loc,
+                "transform must be length-16 array of finite numbers",
+            );
+        }
+    }
+
     if let Some(content) = tile.get("content") {
         validate_content(output_root, base_dir, content, visited, report);
     }
@@ -247,8 +329,17 @@ fn visit_tile(
     }
 
     if let Some(children) = tile.get("children").and_then(|v| v.as_array()) {
-        for child in children {
-            visit_tile(output_root, base_dir, child, visited, report);
+        for (i, child) in children.iter().enumerate() {
+            visit_tile(
+                output_root,
+                base_dir,
+                child,
+                &format!("{loc}/children[{i}]"),
+                visited,
+                report,
+                ge,
+                false,
+            );
         }
     }
 }
@@ -355,6 +446,52 @@ fn normalize_path(path: &Path) -> PathBuf {
 
 fn canonicalize_loose(path: &Path) -> PathBuf {
     fs::canonicalize(path).unwrap_or_else(|_| normalize_path(path))
+}
+
+fn read_geometric_error(v: Option<&Value>, loc: &str, report: &mut ValidationReport) -> Option<f64> {
+    let Some(v) = v else {
+        return None;
+    };
+    let Some(n) = v.as_f64() else {
+        report.add_error(
+            ValidationCode::GeometricErrorInvalid,
+            loc,
+            "geometricError must be a finite number >= 0",
+        );
+        return None;
+    };
+    if !n.is_finite() || n < 0.0 {
+        report.add_error(
+            ValidationCode::GeometricErrorInvalid,
+            loc,
+            format!("geometricError must be finite and >= 0, got {n}"),
+        );
+        return None;
+    }
+    Some(n)
+}
+
+fn bounding_volume_ok(bv: &Value) -> bool {
+    if let Some(box_v) = bv.get("box").and_then(|v| v.as_array()) {
+        return box_v.len() == 12 
+            && box_v.iter().all(|x| x.as_f64().map(|n| n.is_finite()).unwrap_or(false));
+    }
+    if let Some(region) = bv.get("region").and_then(|v| v.as_array()) {
+        return region.len() == 6
+            && region.iter().all(|x| x.as_f64().map(|n| n.is_finite()).unwrap_or(false));
+    }
+    if let Some(sphere) = bv.get("sphere").and_then(|v| v.as_array()) {
+        return sphere.len() == 4
+            && sphere.iter().all(|x| x.as_f64().map(|n| n.is_finite()).unwrap_or(false));
+    }
+    false
+}
+
+fn transform_ok(tf: &Value) -> bool {
+    let Some(arr) = tf.as_array() else {
+        return false;
+    };
+    arr.len() == 16 && arr.iter().all(|x| x.as_f64().map(|n| n.is_finite()).unwrap_or(false))
 }
 
 #[cfg(test)]
@@ -622,5 +759,186 @@ mod tests {
         let report = validate_tileset_tree(tmp.path());
         assert!(report.ok);
         assert_eq!(report.content_count, 1);
+    }
+
+    #[test]
+    fn validate_bounding_volume_missing() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        
+        fs::write(
+            tmp.path().join("tileset.json"),
+            r#"{
+                "asset": {"version": "1.0"},
+                "root": {
+                    "geometricError": 100.0
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let report = validate_tileset_tree(tmp.path());
+        assert!(!report.ok);
+        assert!(report.issues.iter().any(|i| i.code == "BOUNDING_VOLUME_MISSING"));
+    }
+
+    #[test]
+    fn validate_bounding_volume_box() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        
+        fs::write(
+            tmp.path().join("tileset.json"),
+            r#"{
+                "asset": {"version": "1.0"},
+                "root": {
+                    "boundingVolume": {"box": [0,0,0,1,0,0,0,1,0,0,0,1]},
+                    "geometricError": 100.0
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let report = validate_tileset_tree(tmp.path());
+        assert!(report.ok, "errors: {:?}", report.issues);
+    }
+
+    #[test]
+    fn validate_bounding_volume_invalid() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        
+        fs::write(
+            tmp.path().join("tileset.json"),
+            r#"{
+                "asset": {"version": "1.0"},
+                "root": {
+                    "boundingVolume": {"box": [0,0,0]},
+                    "geometricError": 100.0
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let report = validate_tileset_tree(tmp.path());
+        assert!(!report.ok);
+        assert!(report.issues.iter().any(|i| i.code == "BOUNDING_VOLUME_INVALID"));
+    }
+
+    #[test]
+    fn validate_transform_valid() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        
+        fs::write(
+            tmp.path().join("tileset.json"),
+            r#"{
+                "asset": {"version": "1.0"},
+                "root": {
+                    "boundingVolume": {"box": [0,0,0,1,0,0,0,1,0,0,0,1]},
+                    "geometricError": 100.0,
+                    "transform": [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let report = validate_tileset_tree(tmp.path());
+        assert!(report.ok, "errors: {:?}", report.issues);
+    }
+
+    #[test]
+    fn validate_transform_invalid() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        
+        fs::write(
+            tmp.path().join("tileset.json"),
+            r#"{
+                "asset": {"version": "1.0"},
+                "root": {
+                    "boundingVolume": {"box": [0,0,0,1,0,0,0,1,0,0,0,1]},
+                    "geometricError": 100.0,
+                    "transform": [1,0,0,0,0,1,0,0]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let report = validate_tileset_tree(tmp.path());
+        assert!(!report.ok);
+        assert!(report.issues.iter().any(|i| i.code == "TRANSFORM_INVALID"));
+    }
+
+    #[test]
+    fn validate_geometric_error_invalid() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        
+        fs::write(
+            tmp.path().join("tileset.json"),
+            r#"{
+                "asset": {"version": "1.0"},
+                "root": {
+                    "boundingVolume": {"box": [0,0,0,1,0,0,0,1,0,0,0,1]},
+                    "geometricError": -5.0
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let report = validate_tileset_tree(tmp.path());
+        assert!(!report.ok);
+        assert!(report.issues.iter().any(|i| i.code == "GEOMETRIC_ERROR_INVALID"));
+    }
+
+    #[test]
+    fn validate_geometric_error_monotonicity() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        
+        fs::write(
+            tmp.path().join("tileset.json"),
+            r#"{
+                "asset": {"version": "1.0"},
+                "root": {
+                    "boundingVolume": {"box": [0,0,0,1,0,0,0,1,0,0,0,1]},
+                    "geometricError": 10.0,
+                    "refine": "REPLACE",
+                    "children": [{
+                        "boundingVolume": {"box": [0,0,0,1,0,0,0,1,0,0,0,1]},
+                        "geometricError": 20.0
+                    }]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let report = validate_tileset_tree(tmp.path());
+        assert!(report.ok);
+        assert!(report.issues.iter().any(|i| i.code == "GEOMETRIC_ERROR_MONOTONICITY" && i.severity == "warning"));
+    }
+
+    #[test]
+    fn validate_refine_invalid() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        
+        fs::write(
+            tmp.path().join("tileset.json"),
+            r#"{
+                "asset": {"version": "1.0"},
+                "root": {
+                    "boundingVolume": {"box": [0,0,0,1,0,0,0,1,0,0,0,1]},
+                    "geometricError": 100.0,
+                    "refine": "INVALID"
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let report = validate_tileset_tree(tmp.path());
+        assert!(!report.ok);
+        assert!(report.issues.iter().any(|i| i.code == "REFINE_INVALID"));
     }
 }
