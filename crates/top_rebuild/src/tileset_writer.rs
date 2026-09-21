@@ -98,6 +98,18 @@ pub struct RebuildReport {
     pub total_glb_bytes: u64,
 }
 
+#[derive(Clone, Debug)]
+pub struct SubtreePreservationEntry {
+    pub block: String,
+    pub source_node_count: usize,
+    pub output_node_count: usize,
+    pub source_content_count: usize,
+    pub output_content_count: usize,
+    pub missing_uri: usize,
+    pub structure_preserved: bool,
+}
+
+
 #[derive(Clone)]
 struct NodePayload {
     content_path: PathBuf,
@@ -831,6 +843,215 @@ fn walk_probe(node: &Value, depth: u32, probe: &mut TilesetProbe) {
     }
 }
 
+#[allow(dead_code)]
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let to = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_recursive(&entry.path(), &to)?;
+        } else if ty.is_file() {
+            fs::copy(entry.path(), &to)?;
+        }
+    }
+    Ok(())
+}
+
+fn count_tileset_nodes(
+    node: &Value,
+    nodes: &mut usize,
+    contents: &mut usize,
+    uris: &mut Vec<String>,
+) {
+    *nodes += 1;
+    if let Some(uri) = node
+        .get("content")
+        .and_then(|c| c.get("uri"))
+        .and_then(|u| u.as_str())
+    {
+        *contents += 1;
+        uris.push(uri.to_string());
+    }
+    if let Some(children) = node.get("children").and_then(|c| c.as_array()) {
+        for c in children {
+            count_tileset_nodes(c, nodes, contents, uris);
+        }
+    }
+}
+
+pub fn structure_digest(tileset_path: &Path) -> Result<(usize, usize, Vec<String>)> {
+    let doc: Value = serde_json::from_str(&fs::read_to_string(tileset_path)?)?;
+    let root = doc
+        .get("root")
+        .ok_or_else(|| TopRebuildError::InvalidTileset("missing root".into()))?;
+    let mut nodes = 0usize;
+    let mut contents = 0usize;
+    let mut uris = Vec::new();
+    count_tileset_nodes(root, &mut nodes, &mut contents, &mut uris);
+    let stems: Vec<String> = uris
+        .into_iter()
+        .map(|u| {
+            Path::new(&u)
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or(u)
+        })
+        .collect();
+    Ok((nodes, contents, stems))
+}
+
+#[allow(dead_code)]
+fn content_usable(path: &Path) -> bool {
+    match fs::metadata(path) {
+        Ok(m) => m.len() > 32,
+        Err(_) => false,
+    }
+}
+
+#[allow(dead_code)]
+fn resolve_proxy_sources(
+    rep: &crate::types::Representation,
+    out_block_dir: &Path,
+    opts: &WriteOptions,
+) -> Result<Vec<ChildContent>> {
+    if rep.parts.is_empty() {
+        return Err(TopRebuildError::Other(
+            "selected representation has no parts".into(),
+        ));
+    }
+    let mut out = Vec::with_capacity(rep.parts.len());
+    for part in &rep.parts {
+        let file_name = part
+            .content_path
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .ok_or_else(|| {
+                TopRebuildError::Other(format!(
+                    "content path has no file name: {}",
+                    part.content_path.display()
+                ))
+            })?;
+        let dest = out_block_dir.join(&file_name);
+        let path = if content_usable(&dest) {
+            dest
+        } else if content_usable(&part.content_path) {
+            part.content_path.clone()
+        } else if opts.synthesize_if_empty {
+            dest
+        } else {
+            return Err(TopRebuildError::Other(format!(
+                "selected coverage part missing: {}",
+                part.content_path.display()
+            )));
+        };
+        out.push(ChildContent {
+            content_path: path,
+            world_transform: part.world_transform.clone(),
+        });
+    }
+    Ok(out)
+}
+
+#[allow(dead_code)]
+fn preserve_block_subtree(
+    block: &SourceBlock,
+    sel: &Selection,
+    out_block_dir: &Path,
+    opts: &WriteOptions,
+) -> Result<(Vec<ChildContent>, f64, SubtreePreservationEntry)> {
+    fs::create_dir_all(out_block_dir)?;
+
+    let src_tileset = &block.source_tileset_path;
+    let src_dir = &block.source_block_dir;
+    let (src_nodes, src_contents, src_stems) = if src_tileset.exists() {
+        structure_digest(src_tileset)?
+    } else if opts.synthesize_if_empty {
+        (0, 0, Vec::new())
+    } else {
+        return Err(TopRebuildError::Other(format!(
+            "missing source tileset {}",
+            src_tileset.display()
+        )));
+    };
+
+    if src_tileset.exists() && src_dir.exists() {
+        copy_dir_recursive(src_dir, out_block_dir)?;
+        let n = crate::b3dm::realign_b3dm_tree(out_block_dir)?;
+        if n > 0 {
+            eprintln!(
+                "[top_rebuild] realigned {n} b3dm file(s) under {}",
+                out_block_dir.display()
+            );
+        }
+    } else if !opts.synthesize_if_empty {
+        return Err(TopRebuildError::Other(format!(
+            "missing block dir {}",
+            src_dir.display()
+        )));
+    }
+
+    let out_tileset = out_block_dir.join("tileset.json");
+    if !out_tileset.exists() {
+        return Err(TopRebuildError::Other(format!(
+            "output tileset missing after preserve: {}",
+            out_tileset.display()
+        )));
+    }
+
+    let (out_nodes, out_contents, out_stems) = structure_digest(&out_tileset)?;
+    let mut missing_uri = 0usize;
+    {
+        let doc: Value = serde_json::from_str(&fs::read_to_string(&out_tileset)?)?;
+        let mut uris = Vec::new();
+        let mut n = 0usize;
+        let mut c = 0usize;
+        if let Some(root) = doc.get("root") {
+            count_tileset_nodes(root, &mut n, &mut c, &mut uris);
+        }
+        for uri in uris {
+            let rel = uri.trim_start_matches("./");
+            let p = out_block_dir.join(rel);
+            if !p.exists() {
+                missing_uri += 1;
+                if !opts.synthesize_if_empty {
+                    return Err(TopRebuildError::Other(format!(
+                        "subtree URI missing: {} (block {})",
+                        p.display(),
+                        block.id
+                    )));
+                }
+            }
+        }
+    }
+
+    let structure_preserved = out_nodes >= src_nodes
+        && out_contents >= src_contents
+        && missing_uri == 0
+        && (src_stems.is_empty() || {
+            let mut a = src_stems.clone();
+            let mut b = out_stems.clone();
+            a.sort();
+            b.sort();
+            a == b || out_contents >= src_contents
+        });
+
+    let entry = SubtreePreservationEntry {
+        block: block.id.clone(),
+        source_node_count: src_nodes,
+        output_node_count: out_nodes,
+        source_content_count: src_contents,
+        output_content_count: out_contents,
+        missing_uri,
+        structure_preserved,
+    };
+
+    let rep = &block.representations[sel.representation_index];
+    let proxy_sources = resolve_proxy_sources(rep, out_block_dir, opts)?;
+    Ok((proxy_sources, sel.source_error, entry))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -894,4 +1115,84 @@ mod tests {
         let c = local.center().unwrap();
         assert!(c.0.abs() < 1e-9 && c.1.abs() < 1e-9 && c.2.abs() < 1e-9);
     }
+
+    #[test]
+    fn structure_digest_counts_nodes() {
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().unwrap();
+        let tileset_path = tmp.path().join("tileset.json");
+
+        fs::write(
+            &tileset_path,
+            r#"{
+                "asset": { "version": "1.0" },
+                "geometricError": 100.0,
+                "root": {
+                    "boundingVolume": {
+                        "box": [0,0,0,50,0,0,0,50,0,0,0,10]
+                    },
+                    "geometricError": 50.0,
+                    "refine": "REPLACE",
+                    "content": {
+                        "uri": "./root.b3dm"
+                    },
+                    "children": [
+                        {
+                            "boundingVolume": {
+                                "box": [25,25,0,25,0,0,0,25,0,0,0,10]
+                            },
+                            "geometricError": 10.0,
+                            "content": {
+                                "uri": "./child1.b3dm"
+                            }
+                        },
+                        {
+                            "boundingVolume": {
+                                "box": [-25,25,0,25,0,0,0,25,0,0,0,10]
+                            },
+                            "geometricError": 10.0,
+                            "content": {
+                                "uri": "./child2.b3dm"
+                            }
+                        }
+                    ]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let (nodes, contents, stems) = structure_digest(&tileset_path).unwrap();
+        assert_eq!(nodes, 3);
+        assert_eq!(contents, 3);
+        assert_eq!(stems.len(), 3);
+        assert!(stems.contains(&"root.b3dm".to_string()));
+        assert!(stems.contains(&"child1.b3dm".to_string()));
+        assert!(stems.contains(&"child2.b3dm".to_string()));
+    }
+
+    #[test]
+    fn copy_dir_recursive_preserves_structure() {
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().unwrap();
+        let src = tmp.path().join("src");
+        let dst = tmp.path().join("dst");
+
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(src.join("subdir")).unwrap();
+        fs::write(src.join("file1.txt"), "content1").unwrap();
+        fs::write(src.join("subdir").join("file2.txt"), "content2").unwrap();
+
+        copy_dir_recursive(&src, &dst).unwrap();
+
+        assert!(dst.join("file1.txt").exists());
+        assert!(dst.join("subdir").join("file2.txt").exists());
+        assert_eq!(fs::read_to_string(dst.join("file1.txt")).unwrap(), "content1");
+        assert_eq!(
+            fs::read_to_string(dst.join("subdir").join("file2.txt")).unwrap(),
+            "content2"
+        );
+    }
 }
+
