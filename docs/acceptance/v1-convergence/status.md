@@ -1,8 +1,8 @@
 # GeoForge V1 Convergence Status
 
-**最后更新:** 2026-09-21 16:15:00 UTC  
-**工作分支:** cursor/r08-1-acceptance-harness-7ab0  
-**当前阶段:** R08.1 实现完成
+**最后更新:** 2026-09-21 16:30:00 UTC  
+**工作分支:** cursor/r08-2-spatial-quality-7ab0  
+**当前阶段:** R08.2 实现完成
 
 ## 任务状态表
 
@@ -33,8 +33,9 @@
 | R07.1 | Texture gap matrix + runtime 断言改进 | 验收通过 | Agent | 已合入 master@20129e8 (#23) |
 | R07.2 | Negative path tests | 验收通过 | Agent | 已合入 master@70a24d1 (#24) |
 | R07.3 | Packaging/runtime asserts 文档 | 验收通过 | Agent | 已合入 master@aac679d (#25) |
-| **R08** | **验收测试框架** | **进行中** | Agent | **Phase 15, R08.1 完成** |
-| R08.1 | Acceptance harness + D0 fixture | 完成 | Agent | **本 PR: 框架 + D0 smoke test** |
+| **R08** | **验收测试框架** | **进行中** | Agent | **Phase 15, R08.2 完成** |
+| R08.1 | Acceptance harness + D0 fixture | 验收通过 | Agent | 已合入 master@a489436 (#26) |
+| R08.2 | Spatial quality checklist + D1 定义 | 完成 | Agent | **本 PR: checklist + Layer B hooks** |
 | R09 | Cesium A/B 对比工具 | 未开始 | - | 验收测试工具 |
 | R10 | B3DM 对齐和 transform 补充测试 | 未开始 | - | Phase 11 补充 (可选) |
 | R11 | 同步 master 独有修复 | 未开始 | - | 处理双向差异 |
@@ -97,25 +98,30 @@
 - Python 依赖短期保留（UASTC 需要）
 - 集成/实际工具测试推迟到 R08 acceptance 框架
 
-## R08 验收测试框架 - R08.1 完成
+## R08 验收测试框架 - R08.2 完成
 
 **实施内容:**
-- ✅ R08.1: Acceptance harness + D0 tiny fixture
-  - 创建数据梯度定义（D0/D1/D2）
-  - 实现 `run-acceptance.sh` 脚本
-  - D0 fixture: `single-tile` (最小 Tile_+000_+000 结构)
-  - run-info.json 格式：绑定 tip SHA + binary hash
-  - Evidence 非继承原则文档
+- ✅ R08.1: Acceptance harness + D0 tiny fixture (已合入 master@a489436)
+- ✅ R08.2: Spatial quality checklist + D1 定义 + Layer B placeholders
+  - 定义空间质量检查项（Layer A/A+/B）
+  - 扩展 run-info.json 和 status.json schema
+  - D1 fixture 规格定义（small-grid synthetic）
+  - Layer B 实数质量 placeholders（GE/REPLACE）
+
+**Checklist 分层:**
+- **Layer A**: Machine-checkable（已实现 - validator）
+- **Layer A+**: Structural hooks（本 PR 定义 - frontier, subtree, transform）
+- **Layer B**: Real-number quality（Placeholders - GE, BV, REPLACE）
 
 **测试结果:**
-- ✅ D0 smoke test 通过：processor + top_rebuild 可以处理 D0 fixture
-- ✅ 输出格式正确：tileset.json + rebuild_metrics.json
-- ✅ 运行脚本工作正常
+- ✅ D0 smoke test 通过（R08.1）
+- ⚠️ D1 fixture 待实现（R08.3）
+- ❌ Layer B 实数检查待实现（R09+）
 
-**下一步 (R08.2+):**
-- ⚠️ R08.2: 空间质量 checklist 脚手架
-- ⚠️ R08.3: D1 medium fixture 定义和获取
+**下一步 (R08.3+):**
+- ⚠️ R08.3: 实现 D1 synthetic fixture (small-grid 2x2)
 - ⚠️ R08.4: CI 集成 D0
+- ⚠️ R09: Layer B 实数检查实现
 
 根据 R03-classification.md,还有以下项未移植:
 
@@ -153,13 +159,15 @@
 
 ## 下一步行动
 
-1. **R08.2:** 空间质量 checklist 脚手架
-   - 定义检查项（bounding volume 准确性、GE 单调性等）
-   - 集成到 acceptance harness
-2. **R08.3:** D1 medium fixture 定义和获取
-   - 识别开源数据集
-   - 验证许可
-   - 创建下载/设置脚本
+1. **R08.3:** D1 synthetic fixture 实现
+   - 生成 small-grid 2x2 Tile blocks
+   - 或获取 Cesium 示例数据（如果许可允许）
+2. **R08.4:** CI 集成 D0
+   - GitHub Actions 运行 D0
+3. **R09:** Layer B 实数检查实现
+   - GE 单调性验证
+   - BV tightness 分析
+   - Cesium baseline 对比
 
 ## 相关文档
 
@@ -192,7 +200,9 @@
 
 ### R08 文档
 - [R08-1-harness.md](./R08-1-harness.md) - R08.1 Acceptance harness 实现
+- [R08-2-spatial-quality.md](./R08-2-spatial-quality.md) - R08.2 Spatial quality checklist
 - [test-plan.md](./test-plan.md) - R08 完整测试计划
+- [schemas/](./schemas/) - run-info.json 和 status.json 示例
 
 ### 基础文档
 - [R01-summary.md](./R01-summary.md) - R01 实现总结
