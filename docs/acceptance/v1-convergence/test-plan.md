@@ -31,6 +31,11 @@
 - ⚠️ Geometric error 单调性
 - ⚠️ 层级合理性
 - ⚠️ 无几何退化
+- ⚠️ Frontier coverage (L0 blocks)
+- ⚠️ Subtree retention (外部 tileset)
+- ⚠️ Transform consistency (world-space)
+
+详见 [R08-2-spatial-quality.md](./R08-2-spatial-quality.md) 的完整 checklist。
 
 ### 3. 视觉质量 (D1+)
 - ⚠️ 纹理无明显失真
@@ -93,26 +98,48 @@ cd docs/acceptance/v1-convergence
 
 ### 计划的 Fixtures
 
-#### small-building (待定)
-- **内容**: 单栋建筑的 OSGB 或 3D Tiles
-- **大小**: ~10MB
-- **来源**: 开源数据集（待识别，license 待验证）
-- **特征**: 真实几何、纹理、多 LOD
+#### small-grid (R08.3 实现)
+- **内容**: 2x2 grid of Tile blocks, synthetic geometry
+- **大小**: ~1-5MB
+- **来源**: Repository-created (MIT license)
+- **特征**: Grid structure, 简单层级, 可 CI 运行
 
-#### urban-block (待定)
-- **内容**: 城市街区
-- **大小**: ~50MB
-- **特征**: 多建筑、空间层级、真实坐标系
+#### cesium-sample (R08.3+ 调研)
+- **内容**: Cesium 示例数据子集
+- **大小**: ~10-50MB
+- **来源**: Cesium 3D Tiles Samples (待验证许可)
+- **特征**: 真实几何、纹理、多 LOD
 
 ### 覆盖的检查项
 
-| 检查项 | 方法 | 预期 |
-|-------|------|------|
-| Bounding volume 准确性 | 计算实际范围 vs BV | <5% 误差 |
-| GE 单调性 | 父 GE ≥ 子 GE | 严格满足 |
-| 层级合理性 | 深度/分支因子 | 符合 3D Tiles 最佳实践 |
-| 纹理保真度 | 目视检查或 PSNR | 无明显失真 |
-| 坐标系正确性 | 关键点对比 | <1m 误差 |
+#### Layer A - Machine Checkable (R08.1 完成)
+
+| 检查项 | 方法 | 预期 | 实现 |
+|-------|------|------|------|
+| Tileset 结构 | JSON schema | 有效 | ✅ |
+| URI 解析 | 所有 content 可达 | 无 cycle | ✅ |
+| BoundingVolume | 所有 tile 有 BV | 存在 | ✅ |
+| Transform | 矩阵可解析 | 合法 | ✅ |
+| Content header | B3DM/GLB magic | 正确 | ✅ |
+
+#### Layer A+ - Structural Hooks (R08.2 定义)
+
+| 检查项 | 方法 | 预期 | 实现 |
+|-------|------|------|------|
+| Frontier coverage | Grid 连续性 | 无空洞 | ⚠️ Hook |
+| Subtree retention | Block tileset 保留 | 完整 | ⚠️ Hook |
+| Transform consistency | World-space 一致 | 合理 | ⚠️ Hook |
+
+#### Layer B - Real-Number Quality (R09+ Placeholders)
+
+| 检查项 | 方法 | 预期 | 实现 |
+|-------|------|------|------|
+| GE 单调性 | 父 GE ≥ 子 GE | 严格 | ❌ R09+ |
+| GE 合理性 | GE vs 实际几何 | 接近 | ❌ R09+ |
+| BV 紧密度 | BV vs 实际几何 | <2x 体积 | ❌ R09+ |
+| REPLACE 切换 | REPLACE 使用合理 | 符合最佳实践 | ❌ R09+ |
+
+详见 [R08-2-spatial-quality.md](./R08-2-spatial-quality.md)。
 
 ### 工具
 
@@ -278,23 +305,38 @@ acceptance-results/            # Gitignored
 - [x] Evidence 非继承声明
 - [x] 文档和 README
 
-### R08.2 (下一步)
-- [ ] 空间质量检查脚本
-- [ ] D1 fixture 识别和获取
+### R08.2 (本 PR) ✅
+- [x] 空间质量 checklist 定义
+- [x] D1 fixture 规格定义
+- [x] Layer B placeholders (GE/REPLACE 实数钩子)
+- [x] Schema 示例（run-info, status）
+- [x] 文档完善
+
+### R08.3 (下一步)
+- [ ] D1 synthetic fixture 实现 (small-grid)
+- [ ] 或 Cesium 示例数据获取
 - [ ] CI 集成 D0
 - [ ] Spatial report 生成
 
-### R08.3
+### R08.4
 - [ ] D2 数据集定义
 - [ ] 性能指标收集
 - [ ] 大规模鲁棒性测试
 
-### R08.4 (与 R09 重叠)
+### R09 (Layer B + Cesium A/B)
+- [ ] 实现 GE 单调性检查
+- [ ] 实现 BV tightness 分析
 - [ ] Cesium baseline 对比
 - [ ] Visual diff 工具
 - [ ] 完整验收报告
 
 ---
 
-**状态**: R08.1 完成，框架可运行
-**下一步**: R08.2 空间质量 checklist
+**状态**: R08.2 定义完成，Layer B hooks 就绪
+**下一步**: R08.3 D1 fixture 实现
+
+## 相关文档
+
+- [R08-1-harness.md](./R08-1-harness.md) - R08.1 框架实现
+- [R08-2-spatial-quality.md](./R08-2-spatial-quality.md) - R08.2 Spatial quality checklist
+- [schemas/](./schemas/) - run-info.json 和 status.json 示例
