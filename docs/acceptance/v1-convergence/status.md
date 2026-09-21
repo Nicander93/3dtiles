@@ -1,7 +1,7 @@
 # GeoForge V1 Convergence Status
 
-**最后更新:** 2026-09-21 20:13:00 CST  
-**工作分支:** master@176a3e2  
+**最后更新:** 2026-09-21 20:30:00 CST  
+**工作分支:** master@5ab6491  
 **当前阶段:** R05 Validator Layer A 验证 (进行中)
 
 ## 任务状态表
@@ -18,10 +18,11 @@
 | R03.4 | Tileset writer block subtree preservation | 验收通过 | Agent | 已合入 master@b529268 (#12) |
 | R03.5 | Phase 11 correctness 测试 | 验收通过 | Agent | 已合入 master@90d0032 (#13) |
 | **R04** | **TopRebuild Correctness 补充验证** | **代码通过** | Agent | **无 P0 缺口,验收推迟到 R08** |
-| **R05** | **Validator Layer A/B 验证** | 进行中 | Agent | Phase 12, 3个小 PR 已完成 |
+| **R05** | **Validator Layer A/B 验证** | 进行中 | Agent | Phase 12, 4个小 PR 已完成 |
 | R05.1 | ValidationCode + ValidationReport 基础结构 | 验收通过 | Agent | 已合入 master@f3b5d73 (#14) |
 | R05.2 | Layer A 基础 tileset 验证 | 验收通过 | Agent | 已合入 master@40df782 (#15) |
 | R05.3 | URI 解析 + cycle 检测 + 外部 tileset 递归 | 验收通过 | Agent | 已合入 master@176a3e2 (#16) |
+| R05.4 | boundingVolume + transform + geometricError + refine 验证 | 验收通过 | Agent | 已合入 master@5ab6491 (#17) |
 | R06 | Processor 修复 | 未开始 | - | Phase 13 兄弟暂存和安全提交 |
 | R07 | 零 Python 运行时 | 未开始 | - | Phase 14 发布流程改进 |
 | R08 | 验收测试框架 | 未开始 | - | Phase 15 公开数据测试 |
@@ -102,15 +103,14 @@
 
 ## 下一步行动
 
-1. **R05.4:** boundingVolume + transform + geometricError 验证
-   - boundingVolume 格式检查 (box[12], region[6], sphere[4])
-   - transform 有效性 (16 个有限数字)
-   - geometricError 单调性
-   - refine 枚举值检查
-2. **R05.5+:** 内容文件验证
-   - B3DM/GLB header 检查
-   - 文件大小检查
-   - 完成 Layer A 验证
+1. **R05.5:** B3DM/GLB/content header 验证
+   - content 文件大小检查 (最小 12 bytes)
+   - B3DM header 验证 (magic, version, byteLength)
+   - GLB header 验证 (magic)
+   - 完成 Layer A 基础验证
+2. **R05.6+:** Layer B 钩子或集成
+   - 与现有 validate.rs 集成
+   - 完成 Phase 12 Validator
 
 ## 相关文档
 
