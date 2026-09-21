@@ -177,10 +177,21 @@ case "$LEVEL" in
         if [[ -f "$FIXTURE_OUTPUT/output/tileset.json" ]]; then
             OUTPUT_SIZE=$(du -sb "$FIXTURE_OUTPUT/output" | cut -f1)
             LAYER_A="PASS"
+            
+            # Run GE monotonicity check (Layer B)
+            GE_RESULT=$("$PROCESSOR_PATH" check-ge --tileset "$FIXTURE_OUTPUT/output/tileset.json" 2>/dev/null || echo '{"checked": false, "passed": false, "violations": [], "total_tiles": 0}')
+            GE_CHECKED=$(echo "$GE_RESULT" | jq -r '.checked')
+            GE_PASSED=$(echo "$GE_RESULT" | jq -r '.passed')
+            GE_VIOLATIONS=$(echo "$GE_RESULT" | jq -r '.violations | length')
+            GE_TOTAL=$(echo "$GE_RESULT" | jq -r '.total_tiles')
         else
             OUTPUT_SIZE=0
             LAYER_A="FAIL"
             PASSED=false
+            GE_CHECKED="false"
+            GE_PASSED="false"
+            GE_VIOLATIONS=0
+            GE_TOTAL=0
         fi
         
         # Create status.json for fixture
@@ -194,6 +205,33 @@ case "$LEVEL" in
     "layerA": "$LAYER_A",
     "errors": $ERRORS,
     "warnings": $WARNINGS
+  },
+  "spatialQuality": {
+    "geMonotonicity": {
+      "checked": $GE_CHECKED,
+      "passed": $GE_PASSED,
+      "violations": $GE_VIOLATIONS,
+      "totalTiles": $GE_TOTAL,
+      "note": "GE monotonicity check (R09.1)"
+    },
+    "geReasonableness": {
+      "checked": false,
+      "note": "Layer B not implemented (R09.2+)"
+    },
+    "bvTightness": {
+      "checked": false,
+      "note": "Layer B not implemented (R09.2+)"
+    },
+    "replaceCorrectness": {
+      "checked": false,
+      "note": "Layer B not implemented (R09.2+)"
+    }
+  },
+  "cesiumAB": {
+    "enabled": false,
+    "status": "blocked",
+    "blockedReason": "D0 too small for far-view HLOD A/B comparison; need D2 (LandsD/PlanD)",
+    "note": "A/B blocked pending D2 data availability"
   },
   "outputSize": "$OUTPUT_SIZE bytes"
 }
@@ -251,10 +289,21 @@ EOF
         if [[ -f "$FIXTURE_OUTPUT/output/tileset.json" ]]; then
             OUTPUT_SIZE=$(du -sb "$FIXTURE_OUTPUT/output" | cut -f1)
             LAYER_A="PASS"
+            
+            # Run GE monotonicity check (Layer B)
+            GE_RESULT=$("$PROCESSOR_PATH" check-ge --tileset "$FIXTURE_OUTPUT/output/tileset.json" 2>/dev/null || echo '{"checked": false, "passed": false, "violations": [], "total_tiles": 0}')
+            GE_CHECKED=$(echo "$GE_RESULT" | jq -r '.checked')
+            GE_PASSED=$(echo "$GE_RESULT" | jq -r '.passed')
+            GE_VIOLATIONS=$(echo "$GE_RESULT" | jq -r '.violations | length')
+            GE_TOTAL=$(echo "$GE_RESULT" | jq -r '.total_tiles')
         else
             OUTPUT_SIZE=0
             LAYER_A="FAIL"
             PASSED=false
+            GE_CHECKED="false"
+            GE_PASSED="false"
+            GE_VIOLATIONS=0
+            GE_TOTAL=0
         fi
         
         # Create status.json for fixture
@@ -272,34 +321,43 @@ EOF
   "spatialQuality": {
     "frontierCoverage": {
       "checked": false,
-      "note": "Frontier analysis not yet implemented (R09+)",
+      "note": "Frontier analysis not yet implemented (R09.2+)",
       "gridSize": "2x2",
       "blocksCount": 4
     },
     "subtreeRetention": {
       "checked": false,
-      "note": "Subtree retention check not yet implemented (R09+)"
+      "note": "Subtree retention check not yet implemented (R09.2+)"
     },
     "transformConsistency": {
       "checked": false,
-      "note": "Transform consistency check not yet implemented (R09+)"
+      "note": "Transform consistency check not yet implemented (R09.2+)"
     },
     "geMonotonicity": {
-      "checked": false,
-      "note": "Layer B not implemented (R09+)"
+      "checked": $GE_CHECKED,
+      "passed": $GE_PASSED,
+      "violations": $GE_VIOLATIONS,
+      "totalTiles": $GE_TOTAL,
+      "note": "GE monotonicity check (R09.1)"
     },
     "geReasonableness": {
       "checked": false,
-      "note": "Layer B not implemented (R09+)"
+      "note": "Layer B not implemented (R09.2+)"
     },
     "bvTightness": {
       "checked": false,
-      "note": "Layer B not implemented (R09+)"
+      "note": "Layer B not implemented (R09.2+)"
     },
     "replaceCorrectness": {
       "checked": false,
-      "note": "Layer B not implemented (R09+)"
+      "note": "Layer B not implemented (R09.2+)"
     }
+  },
+  "cesiumAB": {
+    "enabled": false,
+    "status": "blocked",
+    "blockedReason": "D1 too small for far-view HLOD A/B comparison; need D2 (LandsD/PlanD)",
+    "note": "A/B blocked pending D2 data availability"
   },
   "outputSize": "$OUTPUT_SIZE bytes"
 }
@@ -334,7 +392,7 @@ EOF
 
 if [[ "$LEVEL" == "d0" ]]; then
     FIXTURE_STATUS=$(cat "$OUTPUT_DIR/d0-tiny/single-tile/status.json")
-    FIXTURE_PASSED=$(echo "$FIXTURE_STATUS" | grep -o '"passed": [^,]*' | cut -d' ' -f2)
+    FIXTURE_PASSED=$(echo "$FIXTURE_STATUS" | jq -r '.passed')
     
     if [[ "$FIXTURE_PASSED" == "true" ]]; then
         STATUS_ICON="✅"
@@ -344,12 +402,16 @@ if [[ "$LEVEL" == "d0" ]]; then
         OVERALL_RESULT="FAIL"
     fi
     
+    FIXTURE_DURATION=$(echo "$FIXTURE_STATUS" | jq -r '.duration')
+    FIXTURE_ERRORS=$(echo "$FIXTURE_STATUS" | jq -r '.validation.errors')
+    FIXTURE_WARNINGS=$(echo "$FIXTURE_STATUS" | jq -r '.validation.warnings')
+    
     cat >> "$SUMMARY_FILE" << EOF
 ### D0 Tiny Fixtures
 
 | Fixture | Status | Duration | Errors | Warnings |
 |---------|--------|----------|--------|----------|
-| single-tile | $STATUS_ICON | $(echo "$FIXTURE_STATUS" | grep -o '"duration": "[^"]*"' | cut -d'"' -f4) | $(echo "$FIXTURE_STATUS" | grep -o '"errors": [^,]*' | cut -d' ' -f2) | $(echo "$FIXTURE_STATUS" | grep -o '"warnings": [^,}]*' | cut -d' ' -f2) |
+| single-tile | $STATUS_ICON | $FIXTURE_DURATION | $FIXTURE_ERRORS | $FIXTURE_WARNINGS |
 
 **Overall**: $STATUS_ICON $OVERALL_RESULT
 
@@ -358,7 +420,7 @@ fi
 
 if [[ "$LEVEL" == "d1" ]]; then
     FIXTURE_STATUS=$(cat "$OUTPUT_DIR/d1-medium/small-grid/status.json")
-    FIXTURE_PASSED=$(echo "$FIXTURE_STATUS" | grep -o '"passed": [^,]*' | cut -d' ' -f2)
+    FIXTURE_PASSED=$(echo "$FIXTURE_STATUS" | jq -r '.passed')
     
     if [[ "$FIXTURE_PASSED" == "true" ]]; then
         STATUS_ICON="✅"
@@ -368,16 +430,20 @@ if [[ "$LEVEL" == "d1" ]]; then
         OVERALL_RESULT="FAIL"
     fi
     
+    FIXTURE_DURATION=$(echo "$FIXTURE_STATUS" | jq -r '.duration')
+    FIXTURE_ERRORS=$(echo "$FIXTURE_STATUS" | jq -r '.validation.errors')
+    FIXTURE_WARNINGS=$(echo "$FIXTURE_STATUS" | jq -r '.validation.warnings')
+    
     cat >> "$SUMMARY_FILE" << EOF
 ### D1 Medium Fixtures
 
 | Fixture | Status | Duration | Errors | Warnings |
 |---------|--------|----------|--------|----------|
-| small-grid | $STATUS_ICON | $(echo "$FIXTURE_STATUS" | grep -o '"duration": "[^"]*"' | cut -d'"' -f4) | $(echo "$FIXTURE_STATUS" | grep -o '"errors": [^,]*' | cut -d' ' -f2) | $(echo "$FIXTURE_STATUS" | grep -o '"warnings": [^,}]*' | cut -d' ' -f2) |
+| small-grid | $STATUS_ICON | $FIXTURE_DURATION | $FIXTURE_ERRORS | $FIXTURE_WARNINGS |
 
 **Overall**: $STATUS_ICON $OVERALL_RESULT
 
-**Note**: Spatial quality checks are placeholders (R09+). Layer B not implemented.
+**Note**: Spatial quality checks including GE monotonicity implemented (R09.1). Other Layer B checks pending R09.2+.
 
 EOF
 fi

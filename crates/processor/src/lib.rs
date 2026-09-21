@@ -8,6 +8,7 @@ pub mod pipeline;
 pub mod protocol;
 pub mod stages;
 pub mod util;
+pub mod validation;
 pub mod validator;
 
 pub use cancel::CancelFlag;
@@ -16,4 +17,5 @@ pub use path_policy::{validate_io_paths, ValidatedPaths};
 pub use pipeline::{run_task, RunOutcome};
 pub use protocol::{Emitter, Stage, TaskConfig, EXIT_CANCELLED, EXIT_FAILED, EXIT_OK};
 pub use stages::scan::scan_osgb;
+pub use validation::{check_ge_monotonicity, GeMonotonicityResult};
 pub use validator::{validate_tileset_tree, ValidationCode, ValidationIssue, ValidationReport};
