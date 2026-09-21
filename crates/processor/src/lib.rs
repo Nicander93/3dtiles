@@ -17,5 +17,6 @@ pub use path_policy::{validate_io_paths, ValidatedPaths};
 pub use pipeline::{run_task, RunOutcome};
 pub use protocol::{Emitter, Stage, TaskConfig, EXIT_CANCELLED, EXIT_FAILED, EXIT_OK};
 pub use stages::scan::scan_osgb;
-pub use validation::{check_ge_monotonicity, GeMonotonicityResult};
+pub use validation::{check_frontier_coverage, check_ge_monotonicity, check_subtree_retention, 
+                      FrontierCoverageResult, GeMonotonicityResult, SubtreeRetentionResult};
 pub use validator::{validate_tileset_tree, ValidationCode, ValidationIssue, ValidationReport};

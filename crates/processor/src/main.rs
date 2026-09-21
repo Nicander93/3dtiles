@@ -64,6 +64,18 @@ enum Commands {
         #[arg(long)]
         tileset: PathBuf,
     },
+    /// Check frontier coverage (Layer A+). Prints JSON to stdout.
+    CheckFrontier {
+        #[arg(long)]
+        tileset: PathBuf,
+    },
+    /// Check subtree retention (Layer A+). Prints JSON to stdout.
+    CheckSubtree {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -180,6 +192,38 @@ fn main() -> ExitCode {
                 }
                 Err(e) => {
                     eprintln!("GE check failed: {}", e);
+                    ExitCode::from(EXIT_FAILED as u8)
+                }
+            }
+        }
+        Commands::CheckFrontier { tileset } => {
+            match processor::check_frontier_coverage(&tileset) {
+                Ok(result) => {
+                    println!("{}", serde_json::to_string_pretty(&result).unwrap());
+                    if result.passed {
+                        ExitCode::SUCCESS
+                    } else {
+                        ExitCode::from(EXIT_FAILED as u8)
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Frontier check failed: {}", e);
+                    ExitCode::from(EXIT_FAILED as u8)
+                }
+            }
+        }
+        Commands::CheckSubtree { input, output } => {
+            match processor::check_subtree_retention(&input, &output) {
+                Ok(result) => {
+                    println!("{}", serde_json::to_string_pretty(&result).unwrap());
+                    if result.passed {
+                        ExitCode::SUCCESS
+                    } else {
+                        ExitCode::from(EXIT_FAILED as u8)
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Subtree check failed: {}", e);
                     ExitCode::from(EXIT_FAILED as u8)
                 }
             }
