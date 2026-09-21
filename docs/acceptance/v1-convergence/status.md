@@ -1,7 +1,7 @@
 # GeoForge V1 Convergence Status
 
 **最后更新:** 2026-09-21 17:06:49 CST  
-**工作分支:** feat/v1-convergence  
+**工作分支:** cursor/v1-convergence-0fa8  
 **基于:** master@8c84bb2
 
 ## 任务状态表
