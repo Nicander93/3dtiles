@@ -1,8 +1,8 @@
 # GeoForge V1 Convergence Status
 
-**最后更新:** 2026-09-21 17:45:00 CST  
-**工作分支:** cursor/v1-convergence-r03-2a7d  
-**基于:** master@3effd90
+**最后更新:** 2026-09-21 18:15:00 CST  
+**工作分支:** feat/v1-convergence-r03-2  
+**基于:** master@ddff89c (R03.1 已合并)
 
 ## 任务状态表
 
@@ -11,7 +11,8 @@
 | R00 | 建立基线：记录 git 状态、环境清单、分支差异 | 验收通过 | Agent | 已合入 master@3effd90 |
 | R01 | 并发参数传递与重试语义（convert.rs） | 验收通过 | Agent | 已合入 master@3effd90 |
 | R02 | 设置持久化、旧配置兼容与默认值（keep + 1 worker） | 验收通过 | Agent | 已合入 master@3effd90 |
-| R03 | 合并 feat/v1-prod-align Phase 11 修复 | 进行中 | Agent | 已完成核心类型重构 |
+| R03.1 | Phase 11 核心类型 (Aabb3d, SpatialBounds, Representation) | 验收通过 | Agent | 已合入 master@ddff89c (#9) |
+| R03.2 | B3DM 对齐 + adapter/tileset_writer + phase11 测试 | 进行中 | Agent | B3DM 对齐完成 |
 | R04 | 合并 Phase 12 tileset 验证器 | 未开始 | - | Layer A/B 验证 |
 | R05 | 合并 Phase 13 processor 修复 | 未开始 | - | 兄弟暂存和安全提交 |
 | R06 | 合并 Phase 14 零 Python 运行时 | 未开始 | - | 发布流程改进 |
@@ -34,16 +35,17 @@
 
 - [x] R00: 基线建立 (2026-09-21)
 - [x] R01-R02: 并发参数与设置持久化修复 (已合入 master)
-- [ ] R03: feat/v1-prod-align Phase 11 核心类型 (进行中)
-- [ ] R03.2-R09: feat/v1-prod-align 收敛
+- [x] R03.1: feat/v1-prod-align Phase 11 核心类型 (已合入 master@ddff89c)
+- [ ] R03.2: B3DM 对齐 + adapter/tileset 改进 (进行中)
+- [ ] R04-R09: Phase 12-15 收敛
 - [ ] R10: 双向同步
 - [ ] R11-R12: 完整验收
 
 ## 下一步行动
 
-1. R03: 已完成核心类型重构 (Aabb3d, SpatialBounds, RepresentationPart)
-2. 下一步: convert.rs B3DM 对齐修复
-3. 继续 Phase 11 adapter/tileset_writer 改进
+1. R03.2: B3DM 对齐完成,继续 adapter.rs 外部 tileset 保留
+2. tileset_writer 覆盖前沿选择
+3. phase11_correctness 测试移植
 
 ## 相关文档
 
