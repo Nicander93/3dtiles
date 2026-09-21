@@ -128,8 +128,18 @@ export function OsgbConvert() {
       if (s.defaultConvertThreads !== undefined) {
         setForm((f) => ({ ...f, convertThreads: s.defaultConvertThreads ?? 1 }));
       }
+      if (s.defaultTextureCompress !== undefined) {
+        setForm((f) => {
+          if (s.defaultTextureCompress) {
+            const ktx2Available = ktx2Etc1sEnabled(caps, false);
+            return { ...f, textureMode: ktx2Available ? 'ktx2-etc1s' : 'keep' };
+          } else {
+            return { ...f, textureMode: 'keep' };
+          }
+        });
+      }
     }).catch(() => {});
-  }, []);
+  }, [caps]);
 
   useEffect(() => {
     try {
