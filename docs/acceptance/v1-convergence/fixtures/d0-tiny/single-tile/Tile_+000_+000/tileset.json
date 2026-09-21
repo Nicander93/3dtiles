@@ -1,0 +1,20 @@
+{
+  "asset": {
+    "version": "1.0"
+  },
+  "geometricError": 10,
+  "root": {
+    "boundingVolume": {
+      "box": [
+        0, 0, 0,
+        5, 0, 0,
+        0, 5, 0,
+        0, 0, 5
+      ]
+    },
+    "geometricError": 0,
+    "content": {
+      "uri": "tile.b3dm"
+    }
+  }
+}
