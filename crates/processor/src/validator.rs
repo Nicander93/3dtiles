@@ -131,6 +131,75 @@ impl ValidationReport {
     }
 }
 
+use serde_json::Value;
+use std::fs;
+use std::path::Path;
+
+/// Validate a tileset directory (expects `tileset.json` at root).
+pub fn validate_tileset_tree(dir: &Path) -> ValidationReport {
+    let mut report = ValidationReport::new(dir.display().to_string());
+    let root_tileset = dir.join("tileset.json");
+    
+    if !root_tileset.is_file() {
+        report.add_error(
+            ValidationCode::TilesetMissing,
+            root_tileset.display().to_string(),
+            format!("tileset.json missing under {}", dir.display()),
+        );
+        return report;
+    }
+
+    validate_tileset_basic(&root_tileset, &mut report);
+    report
+}
+
+/// Basic tileset.json structure validation (asset, root, JSON parsing).
+fn validate_tileset_basic(tileset_path: &Path, report: &mut ValidationReport) {
+    let text = match fs::read_to_string(tileset_path) {
+        Ok(t) => t,
+        Err(e) => {
+            report.add_error(
+                ValidationCode::TilesetJsonInvalid,
+                tileset_path.display().to_string(),
+                format!("cannot read tileset: {e}"),
+            );
+            return;
+        }
+    };
+
+    let value: Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(e) => {
+            report.add_error(
+                ValidationCode::TilesetJsonInvalid,
+                tileset_path.display().to_string(),
+                format!("tileset.json is not valid JSON: {e}"),
+            );
+            return;
+        }
+    };
+
+    report.tileset_count += 1;
+
+    let path_s = tileset_path.display().to_string();
+    
+    if value.get("asset").is_none() {
+        report.add_error(
+            ValidationCode::AssetMissing,
+            &path_s,
+            "tileset missing required `asset`",
+        );
+    }
+
+    if value.get("root").is_none() {
+        report.add_error(
+            ValidationCode::RootMissing,
+            &path_s,
+            "tileset missing required `root`",
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,5 +264,75 @@ mod tests {
         assert_eq!(report.warning_count, 1);
         assert_eq!(report.issues.len(), 1);
         assert_eq!(report.issues[0].severity, "warning");
+    }
+
+    #[test]
+    fn validate_tileset_tree_missing() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        let report = validate_tileset_tree(tmp.path());
+        assert!(!report.ok);
+        assert_eq!(report.error_count, 1);
+        assert!(report.issues[0].code.contains("TILESET_MISSING"));
+    }
+
+    #[test]
+    fn validate_tileset_tree_invalid_json() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("tileset.json"), "not json").unwrap();
+        let report = validate_tileset_tree(tmp.path());
+        assert!(!report.ok);
+        assert_eq!(report.error_count, 1);
+        assert!(report.issues[0].code.contains("TILESET_JSON_INVALID"));
+    }
+
+    #[test]
+    fn validate_tileset_tree_missing_asset() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        fs::write(
+            tmp.path().join("tileset.json"),
+            r#"{"root": {"geometricError": 100}}"#,
+        )
+        .unwrap();
+        let report = validate_tileset_tree(tmp.path());
+        assert!(!report.ok);
+        assert!(report.issues.iter().any(|i| i.code.contains("ASSET_MISSING")));
+    }
+
+    #[test]
+    fn validate_tileset_tree_missing_root() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        fs::write(
+            tmp.path().join("tileset.json"),
+            r#"{"asset": {"version": "1.0"}}"#,
+        )
+        .unwrap();
+        let report = validate_tileset_tree(tmp.path());
+        assert!(!report.ok);
+        assert!(report.issues.iter().any(|i| i.code.contains("ROOT_MISSING")));
+    }
+
+    #[test]
+    fn validate_tileset_tree_minimal_ok() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        fs::write(
+            tmp.path().join("tileset.json"),
+            r#"{
+                "asset": {"version": "1.0"},
+                "geometricError": 100.0,
+                "root": {
+                    "boundingVolume": {"box": [0,0,0,1,0,0,0,1,0,0,0,1]},
+                    "geometricError": 50.0
+                }
+            }"#,
+        )
+        .unwrap();
+        let report = validate_tileset_tree(tmp.path());
+        assert!(report.ok, "errors: {:?}", report.issues);
+        assert_eq!(report.tileset_count, 1);
     }
 }
