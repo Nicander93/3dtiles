@@ -339,6 +339,7 @@ mod tests {
     use super::{resolve_thread_config, retry_single_thread};
     use crate::util::CommandResult;
     use serde_json::json;
+    use serial_test::serial;
 
     fn result(exit_code: i32, stderr_tail: &str) -> CommandResult {
         CommandResult {
@@ -419,6 +420,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn thread_config_omitted_no_env() {
         std::env::remove_var("GEOFORGE_CONVERT_THREADS");
         let options = json!({"convert": {}});
@@ -428,6 +430,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn thread_config_from_env() {
         std::env::set_var("GEOFORGE_CONVERT_THREADS", "4");
         let options = json!({"convert": {}});
@@ -438,6 +441,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn thread_config_env_invalid() {
         std::env::set_var("GEOFORGE_CONVERT_THREADS", "999");
         let options = json!({"convert": {}});
@@ -448,6 +452,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn thread_config_explicit_wins_over_env() {
         std::env::set_var("GEOFORGE_CONVERT_THREADS", "8");
         let options = json!({"convert": {"threads": 2}});
