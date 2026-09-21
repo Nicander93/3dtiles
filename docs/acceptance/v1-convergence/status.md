@@ -1,8 +1,8 @@
 # GeoForge V1 Convergence Status
 
-**最后更新:** 2026-09-21 19:30:00 CST  
-**工作分支:** master@90d0032  
-**当前阶段:** R05 Validator 准备中
+**最后更新:** 2026-09-21 19:56:00 CST  
+**工作分支:** master@40df782  
+**当前阶段:** R05 Validator Layer A 验证 (进行中)
 
 ## 任务状态表
 
@@ -18,7 +18,9 @@
 | R03.4 | Tileset writer block subtree preservation | 验收通过 | Agent | 已合入 master@b529268 (#12) |
 | R03.5 | Phase 11 correctness 测试 | 验收通过 | Agent | 已合入 master@90d0032 (#13) |
 | **R04** | **TopRebuild Correctness 补充验证** | **代码通过** | Agent | **无 P0 缺口,验收推迟到 R08** |
-| **R05** | **Validator Layer A/B 验证** | 进行中 | Agent | Phase 12, 第一个小 PR 准备中 |
+| **R05** | **Validator Layer A/B 验证** | 进行中 | Agent | Phase 12, R05.1 已合并, R05.2 已完成 |
+| R05.1 | ValidationCode + ValidationReport 基础结构 | 验收通过 | Agent | 已合入 master@f3b5d73 (#14) |
+| R05.2 | Layer A 基础 tileset 验证 | 验收通过 | Agent | 已合入 master@40df782 (#15) |
 | R06 | Processor 修复 | 未开始 | - | Phase 13 兄弟暂存和安全提交 |
 | R07 | 零 Python 运行时 | 未开始 | - | Phase 14 发布流程改进 |
 | R08 | 验收测试框架 | 未开始 | - | Phase 15 公开数据测试 |
@@ -99,11 +101,14 @@
 
 ## 下一步行动
 
-1. **R03.5:** 完成 PR 审查并合并
-2. **R04 启动:** Validator Layer A/B 验证 (Phase 12)
-   - 移植 `validator.rs` Layer A/B 逻辑
-   - 集成到 processor validate stage
-   - 验收测试
+1. **R05.3:** URI 和 cycle 检测验证
+   - content URI 解析和逃逸检查
+   - 外部 tileset 递归访问
+   - cycle 检测 (HashSet)
+2. **R05.4+:** 继续 Layer A 完整验证
+   - boundingVolume, transform 验证
+   - 内容文件检查
+   - geometricError 单调性
 
 ## 相关文档
 
@@ -116,6 +121,12 @@
 - [R03-phase4-plan.md](./R03-phase4-plan.md) - R03.4 实施计划
 - [R03-phase4-summary.md](./R03-phase4-summary.md) - R03.4 实施总结
 - [R03-phase5-summary.md](./R03-phase5-summary.md) - R03.5 实施总结
+
+### R04 文档
+- [R04-gap-matrix.md](./R04-gap-matrix.md) - R04 缺口分析
+
+### R05 文档
+- [R05-validator-plan.md](./R05-validator-plan.md) - R05 Validator 实施计划
 
 ### 基础文档
 - [R01-summary.md](./R01-summary.md) - R01 实现总结
