@@ -22,3 +22,8 @@ jobs:
           cargo test -p processor --lib
       - name: Processor capabilities smoke
         run: cargo run -p processor --quiet -- capabilities --json
+      - name: Run D0 acceptance tests
+        run: |
+          cargo build --release -p processor
+          cd docs/acceptance/v1-convergence
+          ./scripts/run-acceptance.sh --level d0

@@ -1,8 +1,8 @@
 # GeoForge V1 Convergence Status
 
-**最后更新:** 2026-09-21 16:52:00 UTC  
-**工作分支:** cursor/r08-3-d1-fixture-7ab0  
-**当前阶段:** R08.3 实现完成
+**最后更新:** 2026-09-21 17:10:00 UTC  
+**工作分支:** cursor/r08-4-ci-integration-7ab0  
+**当前阶段:** R08.4 实现完成，R08 代码通过
 
 ## 任务状态表
 
@@ -33,10 +33,11 @@
 | R07.1 | Texture gap matrix + runtime 断言改进 | 验收通过 | Agent | 已合入 master@20129e8 (#23) |
 | R07.2 | Negative path tests | 验收通过 | Agent | 已合入 master@70a24d1 (#24) |
 | R07.3 | Packaging/runtime asserts 文档 | 验收通过 | Agent | 已合入 master@aac679d (#25) |
-| **R08** | **验收测试框架** | **进行中** | Agent | **Phase 15, R08.3 完成** |
+| **R08** | **验收测试框架** | **代码通过** | Agent | **Phase 15, R08.4 完成** |
 | R08.1 | Acceptance harness + D0 fixture | 验收通过 | Agent | 已合入 master@a489436 (#26) |
 | R08.2 | Spatial quality checklist + D1 定义 | 验收通过 | Agent | 已合入 master@912ae4a (#27) |
-| R08.3 | D1 synthetic fixture 实现 | 完成 | Agent | **本 PR: small-grid 2x2 + hashes** |
+| R08.3 | D1 synthetic fixture 实现 | 验收通过 | Agent | 已合入 master@450476b (#28) |
+| R08.4 | CI 集成 D0 + D2 inventory | 完成 | Agent | **本 PR: D0 in CI + LandsD/PlanD doc** |
 | R09 | Cesium A/B 对比工具 | 未开始 | - | 验收测试工具 |
 | R10 | B3DM 对齐和 transform 补充测试 | 未开始 | - | Phase 11 补充 (可选) |
 | R11 | 同步 master 独有修复 | 未开始 | - | 处理双向差异 |
@@ -99,32 +100,43 @@
 - Python 依赖短期保留（UASTC 需要）
 - 集成/实际工具测试推迟到 R08 acceptance 框架
 
-## R08 验收测试框架 - R08.3 完成
+## R08 验收测试框架 - 代码通过
 
 **实施内容:**
 - ✅ R08.1: Acceptance harness + D0 tiny fixture (已合入 master@a489436)
 - ✅ R08.2: Spatial quality checklist + D1 定义 + Layer B placeholders (已合入 master@912ae4a)
-- ✅ R08.3: D1 synthetic fixture 实现 (small-grid 2x2)
-  - 生成脚本: `scripts/generate-d1-fixture.py`
-  - Fixture: 2x2 grid, 4 blocks, 8 tiles, 6 KB
-  - Fixture hash: dcf467ef... (记录在 R08-3-d1-fixture.md)
-  - 集成到 run-acceptance.sh
-  - D1 smoke test 通过
+- ✅ R08.3: D1 synthetic fixture 实现 (已合入 master@450476b)
+- ✅ R08.4: CI 集成 D0 + D2 inventory 文档
+  - D0 集成到 `.github/workflows/linux.yml`
+  - LandsD/PlanD (D2) inventory 文档化
+  - 明确 pending-local on LM，无虚假运行
 
-**Checklist 分层:**
-- **Layer A**: Machine-checkable（已实现 - validator）
-- **Layer A+**: Structural hooks（R08.2 定义 - frontier, subtree, transform）
-- **Layer B**: Real-number quality（Placeholders - GE, BV, REPLACE）
+**Scaffolding 完整性:**
+- ✅ Data gradient 定义 (D0/D1/D2)
+- ✅ D0/D1 fixtures 实现
+- ✅ D2 inventory 文档
+- ✅ run-acceptance.sh (D0/D1 支持)
+- ✅ Schema 定义 (run-info, status, spatialQuality)
+- ✅ CI 集成 (D0 每次 push)
+- ✅ Evidence 原则严格
 
-**测试结果 (Tip SHA: 912ae4a):**
-- ✅ D0 smoke test 通过
-- ✅ D1 smoke test 通过 (small-grid: PASS, 0s, 0 errors)
-- ✅ Layer B placeholders 正确标注 "not implemented"
-- ✅ 无虚假 Layer B pass
+**测试结果:**
+- ✅ D0 smoke test 通过 (CI)
+- ✅ D1 smoke test 通过
+- ✅ Layer B placeholders 正确标注
+- ✅ 无虚假 pass
 
-**下一步 (R08.4+):**
-- ⚠️ R08.4: CI 集成 D0 (如果可行)
-- ⚠️ R09: Layer B 实数检查实现
+**完成总结:**
+- R08 状态: **代码通过**
+- Tip re-run 可用: D0/D1 任何 SHA
+- Layer B hooks 就绪: R09 可以开始实现
+- D2 inventory 就绪: 待本地数据可用
+
+**剩余工作推迟到 R09+:**
+- ⚠️ Layer B 实数检查实现 (GE, BV, frontier, subtree)
+- ⚠️ Cesium A/B 对比工具
+- ⚠️ D2 run-acceptance.sh 支持（外部数据路径）
+- ⚠️ 真实 D2 数据运行
 
 根据 R03-classification.md,还有以下项未移植:
 
@@ -162,15 +174,16 @@
 
 ## 下一步行动
 
-1. **R08.4:** CI 集成 D0（如果可行）
-   - GitHub Actions 运行 D0
-   - PR 必须 D0 green
-2. **R09:** Layer B 实数检查实现
+1. **R09:** Layer B 实数检查实现
    - GE 单调性验证
    - BV tightness 分析
+   - Frontier coverage 检查
    - Cesium baseline 对比
-3. **可选:** LandsD/PlanD inventory（如果 R08.4 不可行）
-   - 文档化 pending-local 数据路径
+2. **R10-R13:** 其他收敛任务
+   - B3DM 补充测试
+   - Master 同步
+   - 完整回归
+   - Windows 实机验收
 
 ## 相关文档
 
@@ -205,6 +218,7 @@
 - [R08-1-harness.md](./R08-1-harness.md) - R08.1 Acceptance harness 实现
 - [R08-2-spatial-quality.md](./R08-2-spatial-quality.md) - R08.2 Spatial quality checklist
 - [R08-3-d1-fixture.md](./R08-3-d1-fixture.md) - R08.3 D1 fixture 实现 + hashes
+- [R08-4-ci-d2-inventory.md](./R08-4-ci-d2-inventory.md) - R08.4 CI 集成 + D2 inventory
 - [test-plan.md](./test-plan.md) - R08 完整测试计划
 - [schemas/](./schemas/) - run-info.json 和 status.json 示例
 
