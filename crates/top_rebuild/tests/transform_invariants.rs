@@ -187,21 +187,21 @@ fn external_tileset_cumulative_transform() {
     let ext = Mat4d::translation(0.0, 0.0, 5.0);
     write_root_two_tiles(&root, &root_t, &Mat4d::identity(), &child1, &ext, &ext);
     let blocks = load_source_blocks(&root).expect("load");
-    let w0 = &blocks
+    let w0 = blocks
         .iter()
         .find(|b| b.id.contains("000"))
         .unwrap()
         .representations[0]
-        .world_transform;
+        .world_transform();
     let p = w0.transform_point(0.0, 0.0, 0.0);
     assert!((p.0 - 1000.0).abs() < 1e-6);
     assert!((p.2 - 5.0).abs() < 1e-6);
-    let w1 = &blocks
+    let w1 = blocks
         .iter()
         .find(|b| b.id.contains("001"))
         .unwrap()
         .representations[0]
-        .world_transform;
+        .world_transform();
     let p1 = w1.transform_point(0.0, 0.0, 0.0);
     assert!((p1.0 - 1100.0).abs() < 1e-6);
     assert!((p1.2 - 5.0).abs() < 1e-6);
@@ -308,8 +308,8 @@ fn remount_accumulated_world_matches_source() {
             "Tile_+000_+000"
         };
         let block = blocks.iter().find(|b| b.id == id).unwrap();
-        let expected = &block.representations[0].world_transform;
-        assert_world_transform_invariant(&Mat4d::identity(), expected, world, 1e-4)
+        let expected = block.representations[0].world_transform();
+        assert_world_transform_invariant(&Mat4d::identity(), &expected, world, 1e-4)
             .unwrap_or_else(|_| panic!("{uri} remount world mismatch"));
         let p_old = expected.transform_point(0.0, 0.0, 0.0);
         let p_new = world.transform_point(0.0, 0.0, 0.0);
