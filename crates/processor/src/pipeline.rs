@@ -202,11 +202,13 @@ fn run_convert_osgb(
         options,
         cfg_json.as_deref(),
     )?;
+    commit::write_checkpoint(&temp, commit::Checkpoint::Converted)?;
     check_cancel(cancel)?;
 
     let mut work = convert_dir;
     if rebuild::rebuild_enabled(options) {
         let rebuild_out = temp.join("rebuild");
+        commit::write_checkpoint(&temp, commit::Checkpoint::Rebuilding)?;
         rebuild::run_rebuild(
             emitter,
             cancel,
@@ -214,11 +216,14 @@ fn run_convert_osgb(
             &rebuild_out,
             &rebuild::rebuild_opts(options),
         )?;
+        commit::write_checkpoint(&temp, commit::Checkpoint::Rebuilt)?;
         check_cancel(cancel)?;
         work = rebuild_out;
     }
 
+    commit::write_checkpoint(&temp, commit::Checkpoint::Texturing)?;
     texture::finish_texture(emitter, cancel, &work, &tex_mode)?;
+    commit::write_checkpoint(&temp, commit::Checkpoint::Textured)?;
     check_cancel(cancel)?;
 
     // Stage final content into temp root for commit
@@ -235,13 +240,17 @@ fn run_convert_osgb(
         })?;
     }
 
+    commit::write_checkpoint(&temp, commit::Checkpoint::Validating)?;
     validate::validate_tileset_dir_cancellable(emitter, &staged, Some(cancel))?;
+    commit::write_checkpoint(&temp, commit::Checkpoint::Validated)?;
     emitter.metric("temp.stagedBytes", json!(directory_size_bytes(&staged)));
     check_cancel(cancel)?;
 
     // Brief non-cancellable publish window
+    commit::write_checkpoint(&temp, commit::Checkpoint::Committing)?;
     // Pass temp_guard to commit_rename for immediate mark_committed after atomic rename
     commit::commit_rename(emitter, &staged, &final_out, Some(&mut temp_guard))?;
+    commit::write_checkpoint(&temp, commit::Checkpoint::Committed)?;
     emitter.metric("output.bytes", json!(directory_size_bytes(&final_out)));
     // Cleanup leftover temp shell
     commit::cleanup_temp(&temp);
@@ -287,7 +296,9 @@ fn run_process_tileset(
     let work = temp.join("work");
 
     if want_rebuild {
+        commit::write_checkpoint(&temp, commit::Checkpoint::Rebuilding)?;
         rebuild::run_rebuild(emitter, cancel, &in_dir, &work, &rebuild_opts)?;
+        commit::write_checkpoint(&temp, commit::Checkpoint::Rebuilt)?;
     } else {
         // texture-only: copy input tree (work is outside input_root by path_policy)
         emitter.log(&format!(
@@ -300,16 +311,22 @@ fn run_process_tileset(
     check_cancel(cancel)?;
 
     if want_texture {
+        commit::write_checkpoint(&temp, commit::Checkpoint::Texturing)?;
         texture::finish_texture(emitter, cancel, &work, &tex_mode)?;
+        commit::write_checkpoint(&temp, commit::Checkpoint::Textured)?;
         check_cancel(cancel)?;
     } else {
         texture::finish_texture(emitter, cancel, &work, "keep")?;
     }
 
+    commit::write_checkpoint(&temp, commit::Checkpoint::Validating)?;
     validate::validate_tileset_dir_cancellable(emitter, &work, Some(cancel))?;
+    commit::write_checkpoint(&temp, commit::Checkpoint::Validated)?;
     emitter.metric("temp.stagedBytes", json!(directory_size_bytes(&work)));
     check_cancel(cancel)?;
+    commit::write_checkpoint(&temp, commit::Checkpoint::Committing)?;
     commit::commit_rename(emitter, &work, &final_out, Some(&mut temp_guard))?;
+    commit::write_checkpoint(&temp, commit::Checkpoint::Committed)?;
     emitter.metric("output.bytes", json!(directory_size_bytes(&final_out)));
     commit::cleanup_temp(&temp);
     Ok(final_out)
