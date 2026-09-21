@@ -1,17 +1,17 @@
 # GeoForge V1 Convergence Status
 
-**最后更新:** 2026-09-21 17:20:00 CST  
-**工作分支:** feat/v1-convergence  
-**基于:** master@8c84bb2
+**最后更新:** 2026-09-21 17:45:00 CST  
+**工作分支:** cursor/v1-convergence-r03-2a7d  
+**基于:** master@3effd90
 
 ## 任务状态表
 
 | 任务 | 描述 | 状态 | 负责人 | 备注 |
 |------|------|------|--------|------|
-| R00 | 建立基线：记录 git 状态、环境清单、分支差异 | 代码通过 | Agent | 文档已提交，PR 已开启 |
-| R01 | 并发参数传递与重试语义（convert.rs） | 代码通过 | Agent | 已实现并通过测试 |
-| R02 | 设置持久化、旧配置兼容与默认值（keep + 1 worker） | 代码通过 | Agent | 已实现并通过测试 |
-| R03 | 合并 feat/v1-prod-align Phase 11 修复 | 未开始 | - | top_rebuild 正确性硬化 |
+| R00 | 建立基线：记录 git 状态、环境清单、分支差异 | 验收通过 | Agent | 已合入 master@3effd90 |
+| R01 | 并发参数传递与重试语义（convert.rs） | 验收通过 | Agent | 已合入 master@3effd90 |
+| R02 | 设置持久化、旧配置兼容与默认值（keep + 1 worker） | 验收通过 | Agent | 已合入 master@3effd90 |
+| R03 | 合并 feat/v1-prod-align Phase 11 修复 | 进行中 | Agent | 已完成核心类型重构 |
 | R04 | 合并 Phase 12 tileset 验证器 | 未开始 | - | Layer A/B 验证 |
 | R05 | 合并 Phase 13 processor 修复 | 未开始 | - | 兄弟暂存和安全提交 |
 | R06 | 合并 Phase 14 零 Python 运行时 | 未开始 | - | 发布流程改进 |
@@ -33,19 +33,23 @@
 ## 里程碑
 
 - [x] R00: 基线建立 (2026-09-21)
-- [ ] R01-R02: 并发参数与设置持久化修复
-- [ ] R03-R09: feat/v1-prod-align 收敛
+- [x] R01-R02: 并发参数与设置持久化修复 (已合入 master)
+- [ ] R03: feat/v1-prod-align Phase 11 核心类型 (进行中)
+- [ ] R03.2-R09: feat/v1-prod-align 收敛
 - [ ] R10: 双向同步
 - [ ] R11-R12: 完整验收
 
 ## 下一步行动
 
-1. 等待 R00 PR CI 通过
-2. 启动 R01：实现 convert.rs 并发参数传递与重试语义
-3. 完成后继续 R02：设置持久化和默认值
+1. R03: 已完成核心类型重构 (Aabb3d, SpatialBounds, RepresentationPart)
+2. 下一步: convert.rs B3DM 对齐修复
+3. 继续 Phase 11 adapter/tileset_writer 改进
 
 ## 相关文档
 
+- [R03-classification.md](./R03-classification.md) - R03 三路对比分类
+- [R01-summary.md](./R01-summary.md) - R01 实现总结
+- [R02-summary.md](./R02-summary.md) - R02 实现总结  
 - [baseline.json](./baseline.json) - Git 状态和环境清单
 - [branch-diff.md](./branch-diff.md) - 分支差异详细分析
 - [rerun-commands.md](./rerun-commands.md) - 重现基线的命令
