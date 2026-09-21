@@ -31,7 +31,8 @@ pub use texture::{basisu_path_prefixes, find_basisu, path_with_basisu_dirs, proc
 pub use tileset_writer::{
     assert_world_transform_invariant, box_diagonal, bv_world_to_local, geometric_error_proxy,
     leaf_geometric_error, probe_tileset_structure, rebuild_tileset, relative_transform,
-    ProxyWriteMetrics, RebuildReport, TilesetProbe, WriteOptions,
+    structure_digest, validate_release_content, ProxyWriteMetrics, RebuildReport,
+    SubtreePreservationEntry, TilesetProbe, WriteOptions,
 };
 pub use tree_builder::{build_tree, TreeBuildOptions};
 pub use types::{BoundingVolume, Mat4d, RebuildTree, Representation, SourceBlock, TreeNode};

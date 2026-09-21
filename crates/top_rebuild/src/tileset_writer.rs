@@ -90,6 +90,8 @@ pub struct RebuildReport {
     pub proxies: Vec<ProxyWriteMetrics>,
     pub tileset_path: PathBuf,
     pub metrics_path: PathBuf,
+    pub subtree_preservation_path: PathBuf,
+    pub subtree_preservation: Vec<SubtreePreservationEntry>,
     pub warnings: Vec<String>,
     pub gap: GapMetrics,
     pub texture: TextureMetrics,
@@ -756,11 +758,19 @@ pub fn rebuild_tileset(
     });
     fs::write(&metrics_path, serde_json::to_string_pretty(&metrics_json)?)?;
 
+    let subtree_preservation_path = output.join("subtree_preservation.json");
+    fs::write(
+        &subtree_preservation_path,
+        serde_json::to_string_pretty(&json!([]))?,
+    )?;
+
     Ok(RebuildReport {
         level_counts: tree.level_counts(),
         proxies: proxy_metrics,
         tileset_path,
         metrics_path,
+        subtree_preservation_path,
+        subtree_preservation: vec![],
         warnings,
         gap: agg_gap,
         texture: agg_texture,
@@ -908,6 +918,83 @@ fn content_usable(path: &Path) -> bool {
         Ok(m) => m.len() > 32,
         Err(_) => false,
     }
+}
+
+pub fn validate_release_content(path: &Path) -> Result<()> {
+    if !path.exists() {
+        return Err(TopRebuildError::Other(format!(
+            "CONTENT_MISSING: {}",
+            path.display()
+        )));
+    }
+    let meta = fs::metadata(path)?;
+    if meta.len() < 32 {
+        return Err(TopRebuildError::Other(format!(
+            "CONTENT_INVALID: too small ({} bytes): {}",
+            meta.len(),
+            path.display()
+        )));
+    }
+    let data = fs::read(path)?;
+    let is_b3dm = data.len() >= 4 && &data[0..4] == b"b3dm";
+    let is_glb = data.len() >= 4 && &data[0..4] == b"glTF";
+    if !is_b3dm && !is_glb {
+        return Err(TopRebuildError::Other(format!(
+            "CONTENT_INVALID: not b3dm/glb magic: {}",
+            path.display()
+        )));
+    }
+    if is_b3dm {
+        if data.len() < 28 {
+            return Err(TopRebuildError::Other(format!(
+                "CONTENT_INVALID: b3dm header truncated: {}",
+                path.display()
+            )));
+        }
+        let byte_length = u32::from_le_bytes(data[8..12].try_into().unwrap()) as usize;
+        if byte_length > 0 && byte_length > data.len() {
+            return Err(TopRebuildError::Other(format!(
+                "CONTENT_INVALID: b3dm byteLength {byte_length} > file {}: {}",
+                data.len(),
+                path.display()
+            )));
+        }
+    }
+    let glb = crate::b3dm::load_content_glb(path).map_err(|e| {
+        TopRebuildError::Other(format!(
+            "CONTENT_INVALID: failed to extract glb from {}: {e}",
+            path.display()
+        ))
+    })?;
+    let mesh = crate::glb::load_mesh_from_glb(&glb).map_err(|e| {
+        TopRebuildError::Other(format!(
+            "GLTF_INVALID: gltf parse failed for {}: {e}",
+            path.display()
+        ))
+    })?;
+    if mesh.primitives.is_empty() {
+        return Err(TopRebuildError::Other(format!(
+            "GLTF_INVALID: no primitives in {}",
+            path.display()
+        )));
+    }
+    for p in &mesh.primitives {
+        if p.positions.is_empty() {
+            return Err(TopRebuildError::Other(format!(
+                "GLTF_INVALID: POSITION missing in {}",
+                path.display()
+            )));
+        }
+        for v in &p.positions {
+            if !v[0].is_finite() || !v[1].is_finite() || !v[2].is_finite() {
+                return Err(TopRebuildError::Other(format!(
+                    "GLTF_INVALID: non-finite POSITION in {}",
+                    path.display()
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[allow(dead_code)]
