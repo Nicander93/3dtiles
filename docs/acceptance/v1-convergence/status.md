@@ -1,6 +1,6 @@
 # GeoForge V1 Convergence Status
 
-**最后更新:** 2026-09-21 17:06:49 CST  
+**最后更新:** 2026-09-21 17:13:00 CST  
 **工作分支:** feat/v1-convergence  
 **基于:** master@8c84bb2
 
@@ -9,7 +9,7 @@
 | 任务 | 描述 | 状态 | 负责人 | 备注 |
 |------|------|------|--------|------|
 | R00 | 建立基线：记录 git 状态、环境清单、分支差异 | 代码通过 | Agent | 文档已提交，PR 已开启 |
-| R01 | 并发参数传递与重试语义（convert.rs） | 未开始 | - | threads 选项传递、重试控制 |
+| R01 | 并发参数传递与重试语义（convert.rs） | 代码通过 | Agent | 已实现并通过测试 |
 | R02 | 设置持久化、旧配置兼容与默认值（keep + 1 worker） | 未开始 | - | 依赖 R01 完成 |
 | R03 | 合并 feat/v1-prod-align Phase 11 修复 | 未开始 | - | top_rebuild 正确性硬化 |
 | R04 | 合并 Phase 12 tileset 验证器 | 未开始 | - | Layer A/B 验证 |
