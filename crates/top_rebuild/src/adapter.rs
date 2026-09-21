@@ -114,15 +114,13 @@ fn collect_representations(
         let content_path = block_dir.join(&rel);
         let rep_id = format!("{block_id}#rep{counter}");
         *counter += 1;
-        out.push(Representation {
-            id: rep_id,
+        out.push(Representation::single_part(
+            rep_id,
             content_path,
-            geometric_error_meters: ge,
-            triangle_count: 0,
-            texture_bytes: 0,
-            bounds: bounds.clone(),
-            world_transform: world.clone(),
-        });
+            ge,
+            bounds.clone(),
+            world.clone(),
+        ));
     }
 
     if let Some(children) = node.get("children").and_then(|c| c.as_array()) {
@@ -355,8 +353,9 @@ pub fn load_source_blocks(tileset_path: &Path) -> Result<Vec<SourceBlock>> {
             grid_y: Some(grid_y),
             bounds,
             world_transform: child_world,
+            source_tileset_path: ext_path,
+            source_block_dir: block_dir,
             representations,
-            source_tileset: Some(ext_path),
         });
     }
 
@@ -412,16 +411,15 @@ mod tests {
                 cx, cy, 0.0, 50.0, 0.0, 0.0, 0.0, 50.0, 0.0, 0.0, 0.0, 10.0,
             ]),
             world_transform: Mat4d::identity(),
-            representations: vec![Representation {
-                id: format!("{id}#r0"),
-                content_path: "x.b3dm".into(),
-                geometric_error_meters: 10.0,
-                triangle_count: 0,
-                texture_bytes: 0,
-                bounds: BoundingVolume::empty(),
-                world_transform: Mat4d::identity(),
-            }],
-            source_tileset: None,
+            representations: vec![Representation::single_part(
+                format!("{id}#r0"),
+                "x.b3dm".into(),
+                10.0,
+                BoundingVolume::empty(),
+                Mat4d::identity(),
+            )],
+            source_tileset_path: PathBuf::new(),
+            source_block_dir: PathBuf::new(),
         };
         let blocks = vec![
             mk("A", 0, 0, 50.0, 50.0),
@@ -443,16 +441,15 @@ mod tests {
                 0.0, 0.0, 0.0, 50.0, 0.0, 0.0, 0.0, 50.0, 0.0, 0.0, 0.0, 10.0,
             ]),
             world_transform: Mat4d::translation(tx, ty, 0.0),
-            representations: vec![Representation {
-                id: format!("{id}#r0"),
-                content_path: "x.b3dm".into(),
-                geometric_error_meters: 10.0,
-                triangle_count: 0,
-                texture_bytes: 0,
-                bounds: BoundingVolume::empty(),
-                world_transform: Mat4d::translation(tx, ty, 0.0),
-            }],
-            source_tileset: None,
+            representations: vec![Representation::single_part(
+                format!("{id}#r0"),
+                "x.b3dm".into(),
+                10.0,
+                BoundingVolume::empty(),
+                Mat4d::translation(tx, ty, 0.0),
+            )],
+            source_tileset_path: PathBuf::new(),
+            source_block_dir: PathBuf::new(),
         };
         let blocks = vec![
             mk("Tile_0_0", 0, 0, 0.0, 0.0),
@@ -489,16 +486,15 @@ mod tests {
                 cx, cy, 0.0, 50.0, 0.0, 0.0, 0.0, 50.0, 0.0, 0.0, 0.0, 10.0,
             ]),
             world_transform: ecef.clone(),
-            representations: vec![Representation {
-                id: format!("{id}#r0"),
-                content_path: "x.b3dm".into(),
-                geometric_error_meters: 10.0,
-                triangle_count: 0,
-                texture_bytes: 0,
-                bounds: BoundingVolume::empty(),
-                world_transform: ecef.clone(),
-            }],
-            source_tileset: None,
+            representations: vec![Representation::single_part(
+                format!("{id}#r0"),
+                "x.b3dm".into(),
+                10.0,
+                BoundingVolume::empty(),
+                ecef.clone(),
+            )],
+            source_tileset_path: PathBuf::new(),
+            source_block_dir: PathBuf::new(),
         };
         let blocks = vec![mk("A", 0, 0, 0.0, 0.0), mk("B", 1, 0, 100.0, 0.0)];
         validate_grid_spatial(&blocks).expect("ecef rotation must not collapse grid xy");

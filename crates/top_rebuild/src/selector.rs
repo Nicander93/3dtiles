@@ -106,19 +106,20 @@ pub fn default_target_proxy_error(blocks: &[SourceBlock]) -> f64 {
 mod tests {
     use super::*;
     use crate::types::{BoundingVolume, Mat4d};
+    use std::path::PathBuf;
 
     fn block_with(ges: &[f64]) -> SourceBlock {
         let reps: Vec<_> = ges
             .iter()
             .enumerate()
-            .map(|(i, &ge)| Representation {
-                id: format!("r{i}"),
-                content_path: format!("c{i}.b3dm").into(),
-                geometric_error_meters: ge,
-                triangle_count: 100 - i as u64,
-                texture_bytes: 0,
-                bounds: BoundingVolume::empty(),
-                world_transform: Mat4d::identity(),
+            .map(|(i, &ge)| {
+                Representation::single_part(
+                    format!("r{i}"),
+                    format!("c{i}.b3dm").into(),
+                    ge,
+                    BoundingVolume::empty(),
+                    Mat4d::identity(),
+                )
             })
             .collect();
         SourceBlock {
@@ -128,7 +129,8 @@ mod tests {
             bounds: BoundingVolume::empty(),
             world_transform: Mat4d::identity(),
             representations: reps,
-            source_tileset: None,
+            source_tileset_path: PathBuf::new(),
+            source_block_dir: PathBuf::new(),
         }
     }
 
