@@ -207,8 +207,109 @@ EOF
         ;;
         
     d1)
-        log "D1 medium fixtures: Not yet implemented (R08.2+)"
-        error "D1 level not yet supported"
+        log "Running D1 medium fixtures..."
+        D1_DIR="$FIXTURES_DIR/d1-medium"
+        D1_OUTPUT="$OUTPUT_DIR/d1-medium"
+        mkdir -p "$D1_OUTPUT"
+        
+        # Run small-grid fixture
+        FIXTURE="small-grid"
+        FIXTURE_INPUT="$D1_DIR/$FIXTURE"
+        FIXTURE_OUTPUT="$D1_OUTPUT/$FIXTURE"
+        
+        if [[ ! -d "$FIXTURE_INPUT" ]]; then
+            error "D1 fixture not found: $FIXTURE_INPUT"
+        fi
+        
+        log "Processing fixture: $FIXTURE"
+        mkdir -p "$FIXTURE_OUTPUT"
+        
+        # Copy input for reference
+        cp -r "$FIXTURE_INPUT" "$FIXTURE_OUTPUT/input"
+        
+        # Run processor
+        START_TIME=$(date +%s)
+        if "$PROCESSOR_PATH" process-tileset \
+            --input "$FIXTURE_INPUT" \
+            --output "$FIXTURE_OUTPUT/output" \
+            --rebuild-top \
+            > "$FIXTURE_OUTPUT/logs.txt" 2>&1; then
+            PASSED=true
+            EXIT_CODE=0
+        else
+            PASSED=false
+            EXIT_CODE=$?
+        fi
+        END_TIME=$(date +%s)
+        DURATION=$((END_TIME - START_TIME))
+        
+        # Count errors/warnings in logs
+        ERRORS=$(grep -c "ERROR" "$FIXTURE_OUTPUT/logs.txt" || true)
+        WARNINGS=$(grep -c "WARN" "$FIXTURE_OUTPUT/logs.txt" || true)
+        
+        # Check if output tileset exists
+        if [[ -f "$FIXTURE_OUTPUT/output/tileset.json" ]]; then
+            OUTPUT_SIZE=$(du -sb "$FIXTURE_OUTPUT/output" | cut -f1)
+            LAYER_A="PASS"
+        else
+            OUTPUT_SIZE=0
+            LAYER_A="FAIL"
+            PASSED=false
+        fi
+        
+        # Create status.json for fixture
+        cat > "$FIXTURE_OUTPUT/status.json" << EOF
+{
+  "fixture": "d1-medium/$FIXTURE",
+  "passed": $PASSED,
+  "exitCode": $EXIT_CODE,
+  "duration": "${DURATION}s",
+  "validation": {
+    "layerA": "$LAYER_A",
+    "errors": $ERRORS,
+    "warnings": $WARNINGS
+  },
+  "spatialQuality": {
+    "frontierCoverage": {
+      "checked": false,
+      "note": "Frontier analysis not yet implemented (R09+)",
+      "gridSize": "2x2",
+      "blocksCount": 4
+    },
+    "subtreeRetention": {
+      "checked": false,
+      "note": "Subtree retention check not yet implemented (R09+)"
+    },
+    "transformConsistency": {
+      "checked": false,
+      "note": "Transform consistency check not yet implemented (R09+)"
+    },
+    "geMonotonicity": {
+      "checked": false,
+      "note": "Layer B not implemented (R09+)"
+    },
+    "geReasonableness": {
+      "checked": false,
+      "note": "Layer B not implemented (R09+)"
+    },
+    "bvTightness": {
+      "checked": false,
+      "note": "Layer B not implemented (R09+)"
+    },
+    "replaceCorrectness": {
+      "checked": false,
+      "note": "Layer B not implemented (R09+)"
+    }
+  },
+  "outputSize": "$OUTPUT_SIZE bytes"
+}
+EOF
+        
+        if $PASSED; then
+            log "✅ $FIXTURE: PASS ($DURATION s)"
+        else
+            log "❌ $FIXTURE: FAIL ($DURATION s, exit $EXIT_CODE)"
+        fi
         ;;
         
     d2)
@@ -255,6 +356,32 @@ if [[ "$LEVEL" == "d0" ]]; then
 EOF
 fi
 
+if [[ "$LEVEL" == "d1" ]]; then
+    FIXTURE_STATUS=$(cat "$OUTPUT_DIR/d1-medium/small-grid/status.json")
+    FIXTURE_PASSED=$(echo "$FIXTURE_STATUS" | grep -o '"passed": [^,]*' | cut -d' ' -f2)
+    
+    if [[ "$FIXTURE_PASSED" == "true" ]]; then
+        STATUS_ICON="✅"
+        OVERALL_RESULT="PASS"
+    else
+        STATUS_ICON="❌"
+        OVERALL_RESULT="FAIL"
+    fi
+    
+    cat >> "$SUMMARY_FILE" << EOF
+### D1 Medium Fixtures
+
+| Fixture | Status | Duration | Errors | Warnings |
+|---------|--------|----------|--------|----------|
+| small-grid | $STATUS_ICON | $(echo "$FIXTURE_STATUS" | grep -o '"duration": "[^"]*"' | cut -d'"' -f4) | $(echo "$FIXTURE_STATUS" | grep -o '"errors": [^,]*' | cut -d' ' -f2) | $(echo "$FIXTURE_STATUS" | grep -o '"warnings": [^,}]*' | cut -d' ' -f2) |
+
+**Overall**: $STATUS_ICON $OVERALL_RESULT
+
+**Note**: Spatial quality checks are placeholders (R09+). Layer B not implemented.
+
+EOF
+fi
+
 cat >> "$SUMMARY_FILE" << EOF
 ## Evidence Non-Inheritance
 
@@ -283,6 +410,14 @@ cat "$SUMMARY_FILE"
 
 # Exit with failure if any test failed
 if [[ "$LEVEL" == "d0" ]]; then
+    if [[ "$FIXTURE_PASSED" == "true" ]]; then
+        exit 0
+    else
+        exit 1
+    fi
+fi
+
+if [[ "$LEVEL" == "d1" ]]; then
     if [[ "$FIXTURE_PASSED" == "true" ]]; then
         exit 0
     else

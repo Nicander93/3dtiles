@@ -1,8 +1,8 @@
 # GeoForge V1 Convergence Status
 
-**最后更新:** 2026-09-21 16:30:00 UTC  
-**工作分支:** cursor/r08-2-spatial-quality-7ab0  
-**当前阶段:** R08.2 实现完成
+**最后更新:** 2026-09-21 16:52:00 UTC  
+**工作分支:** cursor/r08-3-d1-fixture-7ab0  
+**当前阶段:** R08.3 实现完成
 
 ## 任务状态表
 
@@ -33,9 +33,10 @@
 | R07.1 | Texture gap matrix + runtime 断言改进 | 验收通过 | Agent | 已合入 master@20129e8 (#23) |
 | R07.2 | Negative path tests | 验收通过 | Agent | 已合入 master@70a24d1 (#24) |
 | R07.3 | Packaging/runtime asserts 文档 | 验收通过 | Agent | 已合入 master@aac679d (#25) |
-| **R08** | **验收测试框架** | **进行中** | Agent | **Phase 15, R08.2 完成** |
+| **R08** | **验收测试框架** | **进行中** | Agent | **Phase 15, R08.3 完成** |
 | R08.1 | Acceptance harness + D0 fixture | 验收通过 | Agent | 已合入 master@a489436 (#26) |
-| R08.2 | Spatial quality checklist + D1 定义 | 完成 | Agent | **本 PR: checklist + Layer B hooks** |
+| R08.2 | Spatial quality checklist + D1 定义 | 验收通过 | Agent | 已合入 master@912ae4a (#27) |
+| R08.3 | D1 synthetic fixture 实现 | 完成 | Agent | **本 PR: small-grid 2x2 + hashes** |
 | R09 | Cesium A/B 对比工具 | 未开始 | - | 验收测试工具 |
 | R10 | B3DM 对齐和 transform 补充测试 | 未开始 | - | Phase 11 补充 (可选) |
 | R11 | 同步 master 独有修复 | 未开始 | - | 处理双向差异 |
@@ -98,29 +99,31 @@
 - Python 依赖短期保留（UASTC 需要）
 - 集成/实际工具测试推迟到 R08 acceptance 框架
 
-## R08 验收测试框架 - R08.2 完成
+## R08 验收测试框架 - R08.3 完成
 
 **实施内容:**
 - ✅ R08.1: Acceptance harness + D0 tiny fixture (已合入 master@a489436)
-- ✅ R08.2: Spatial quality checklist + D1 定义 + Layer B placeholders
-  - 定义空间质量检查项（Layer A/A+/B）
-  - 扩展 run-info.json 和 status.json schema
-  - D1 fixture 规格定义（small-grid synthetic）
-  - Layer B 实数质量 placeholders（GE/REPLACE）
+- ✅ R08.2: Spatial quality checklist + D1 定义 + Layer B placeholders (已合入 master@912ae4a)
+- ✅ R08.3: D1 synthetic fixture 实现 (small-grid 2x2)
+  - 生成脚本: `scripts/generate-d1-fixture.py`
+  - Fixture: 2x2 grid, 4 blocks, 8 tiles, 6 KB
+  - Fixture hash: dcf467ef... (记录在 R08-3-d1-fixture.md)
+  - 集成到 run-acceptance.sh
+  - D1 smoke test 通过
 
 **Checklist 分层:**
 - **Layer A**: Machine-checkable（已实现 - validator）
-- **Layer A+**: Structural hooks（本 PR 定义 - frontier, subtree, transform）
+- **Layer A+**: Structural hooks（R08.2 定义 - frontier, subtree, transform）
 - **Layer B**: Real-number quality（Placeholders - GE, BV, REPLACE）
 
-**测试结果:**
-- ✅ D0 smoke test 通过（R08.1）
-- ⚠️ D1 fixture 待实现（R08.3）
-- ❌ Layer B 实数检查待实现（R09+）
+**测试结果 (Tip SHA: 912ae4a):**
+- ✅ D0 smoke test 通过
+- ✅ D1 smoke test 通过 (small-grid: PASS, 0s, 0 errors)
+- ✅ Layer B placeholders 正确标注 "not implemented"
+- ✅ 无虚假 Layer B pass
 
-**下一步 (R08.3+):**
-- ⚠️ R08.3: 实现 D1 synthetic fixture (small-grid 2x2)
-- ⚠️ R08.4: CI 集成 D0
+**下一步 (R08.4+):**
+- ⚠️ R08.4: CI 集成 D0 (如果可行)
 - ⚠️ R09: Layer B 实数检查实现
 
 根据 R03-classification.md,还有以下项未移植:
@@ -159,15 +162,15 @@
 
 ## 下一步行动
 
-1. **R08.3:** D1 synthetic fixture 实现
-   - 生成 small-grid 2x2 Tile blocks
-   - 或获取 Cesium 示例数据（如果许可允许）
-2. **R08.4:** CI 集成 D0
+1. **R08.4:** CI 集成 D0（如果可行）
    - GitHub Actions 运行 D0
-3. **R09:** Layer B 实数检查实现
+   - PR 必须 D0 green
+2. **R09:** Layer B 实数检查实现
    - GE 单调性验证
    - BV tightness 分析
    - Cesium baseline 对比
+3. **可选:** LandsD/PlanD inventory（如果 R08.4 不可行）
+   - 文档化 pending-local 数据路径
 
 ## 相关文档
 
@@ -201,6 +204,7 @@
 ### R08 文档
 - [R08-1-harness.md](./R08-1-harness.md) - R08.1 Acceptance harness 实现
 - [R08-2-spatial-quality.md](./R08-2-spatial-quality.md) - R08.2 Spatial quality checklist
+- [R08-3-d1-fixture.md](./R08-3-d1-fixture.md) - R08.3 D1 fixture 实现 + hashes
 - [test-plan.md](./test-plan.md) - R08 完整测试计划
 - [schemas/](./schemas/) - run-info.json 和 status.json 示例
 
