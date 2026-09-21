@@ -17,23 +17,43 @@ pub fn temp_work_dir(final_output: &Path, task_id: &str) -> PathBuf {
 pub fn prepare_temp(final_output: &Path, task_id: &str) -> Result<PathBuf, String> {
     validate_task_id(task_id)?;
     let temp = temp_work_dir(final_output, task_id);
-    // `create_dir` is intentionally exclusive: a check followed by
-    // `create_dir_all` would leave a race where another process can replace
-    // the path between the two operations.
+    
+    // Exclusive create: intentionally no check-then-act race window.
+    // If the directory exists, we refuse to proceed rather than risking
+    // data loss from deleting unknown content or race with another process.
     match fs::create_dir(&temp) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
             return Err(format!(
-                "temporary work directory already exists; refusing to delete it: {}",
+                "temporary work directory already exists (refusing to overwrite): {} \
+                 This may indicate: (1) a previous run was interrupted, (2) another process \
+                 is using the same task ID, or (3) leftover state from a crash. \
+                 If you're certain no other process is using this directory, manually remove it \
+                 and retry.",
                 temp.display()
             ));
         }
-        Err(error) => return Err(format!("create temp: {error}")),
+        Err(error) => {
+            return Err(format!(
+                "failed to create temporary work directory: {} ({})",
+                temp.display(),
+                error
+            ))
+        }
     }
-    if let Err(error) = fs::write(temp.join(TEMP_MARKER), format!("geoforge-task:{task_id}\n")) {
+    
+    // Write ownership marker
+    let marker = temp.join(TEMP_MARKER);
+    if let Err(error) = fs::write(&marker, format!("geoforge-task:{task_id}\n")) {
+        // Cleanup: remove the directory we just created
         let _ = fs::remove_dir(&temp);
-        return Err(format!("write temp ownership marker: {error}"));
+        return Err(format!(
+            "failed to write ownership marker: {} ({})",
+            marker.display(),
+            error
+        ));
     }
+    
     Ok(temp)
 }
 
@@ -98,33 +118,82 @@ fn owns_temp_dir(temp_dir: &Path) -> bool {
     else {
         return false;
     };
-    fs::read_to_string(temp_dir.join(TEMP_MARKER))
-        .map(|value| value.trim() == format!("geoforge-task:{task_id}"))
-        .unwrap_or(false)
+    
+    // Read and validate marker content
+    let marker_path = temp_dir.join(TEMP_MARKER);
+    let Ok(marker_content) = fs::read_to_string(&marker_path) else {
+        return false;
+    };
+    
+    let expected = format!("geoforge-task:{task_id}\n");
+    marker_content == expected || marker_content.trim() == format!("geoforge-task:{task_id}")
 }
 
 fn ensure_owned_temp(temp_dir: &Path) -> Result<(), String> {
+    // Check directory exists and is not a symlink
     let metadata = fs::symlink_metadata(temp_dir).map_err(|error| {
         format!(
-            "temporary work directory is missing or inaccessible {}: {error}",
-            temp_dir.display()
+            "temporary work directory is missing or inaccessible: {} ({})",
+            temp_dir.display(),
+            error
         )
     })?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+    
+    // Check symlink BEFORE checking is_dir (symlinks can point to dirs)
+    if metadata.file_type().is_symlink() {
         return Err(format!(
-            "temporary work directory is not a real directory: {}",
+            "temporary work directory is a symlink (security risk): {}",
             temp_dir.display()
         ));
     }
+    
+    if !metadata.is_dir() {
+        return Err(format!(
+            "temporary work directory is not a directory: {}",
+            temp_dir.display()
+        ));
+    }
+    
+    // Check ownership marker
     if owns_temp_dir(temp_dir) {
         return Ok(());
     }
+    
+    // Fallback: allow if parent directory is owned (for nested operations)
     if temp_dir.parent().map(owns_temp_dir).unwrap_or(false) {
         return Ok(());
     }
+    
+    // Detailed error message
+    let marker_path = temp_dir.join(TEMP_MARKER);
+    if !marker_path.exists() {
+        return Err(format!(
+            "temporary work directory missing ownership marker: {} (expected {})",
+            temp_dir.display(),
+            marker_path.display()
+        ));
+    }
+    
+    // Marker exists but content is wrong
+    let marker_content = fs::read_to_string(&marker_path)
+        .unwrap_or_else(|_| "<unreadable>".to_string());
+    
+    let Some(task_id) = temp_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .and_then(|n| n.strip_prefix(".geoforge-task-"))
+    else {
+        return Err(format!(
+            "temporary work directory name does not match pattern '.geoforge-task-<id>': {}",
+            temp_dir.display()
+        ));
+    };
+    
     Err(format!(
-        "temporary work directory ownership marker missing or unsafe: {}",
-        temp_dir.display()
+        "temporary work directory ownership marker mismatch: {} (expected 'geoforge-task:{}', found '{}')",
+        temp_dir.display(),
+        task_id,
+        marker_content.trim()
     ))
 }
 
@@ -195,7 +264,64 @@ mod tests {
 
         let error = prepare_temp(&output, "task-safe").expect_err("existing temp must fail");
         assert!(error.contains("already exists"), "{error}");
-        assert!(temp.join("sentinel").is_file());
+        assert!(error.contains("refusing"), "{error}");
+        assert!(temp.join("sentinel").is_file(), "sentinel must be preserved");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn ownership_marker_mismatch_gives_detailed_error() {
+        use super::{ensure_owned_temp, TEMP_MARKER};
+        
+        let root = temp_root("marker-mismatch");
+        let output = root.join("output");
+        let temp = temp_work_dir(&output, "task-check");
+        fs::create_dir_all(&temp).expect("create temp");
+        fs::write(temp.join(TEMP_MARKER), "geoforge-task:wrong-id\n")
+            .expect("write wrong marker");
+        
+        let error = ensure_owned_temp(&temp).expect_err("wrong marker must fail");
+        assert!(error.contains("mismatch"), "{error}");
+        assert!(error.contains("task-check"), "{error}");
+        assert!(error.contains("wrong-id"), "{error}");
+        
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn missing_ownership_marker_gives_detailed_error() {
+        use super::ensure_owned_temp;
+        
+        let root = temp_root("marker-missing");
+        let output = root.join("output");
+        let temp = temp_work_dir(&output, "task-nomarker");
+        fs::create_dir_all(&temp).expect("create temp");
+        
+        let error = ensure_owned_temp(&temp).expect_err("missing marker must fail");
+        assert!(error.contains("missing ownership marker"), "{error}");
+        assert!(error.contains(TEMP_MARKER), "{error}");
+        
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn symlink_temp_is_rejected() {
+        use super::ensure_owned_temp;
+        
+        let root = temp_root("symlink");
+        let output = root.join("output");
+        let real_dir = root.join("real");
+        fs::create_dir_all(&real_dir).expect("create real dir");
+        
+        let temp = temp_work_dir(&output, "task-symlink");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&real_dir, &temp).expect("create symlink");
+            let error = ensure_owned_temp(&temp).expect_err("symlink must fail");
+            assert!(error.contains("symlink"), "{error}");
+            assert!(error.contains("security risk"), "{error}");
+        }
+        
         let _ = fs::remove_dir_all(root);
     }
 

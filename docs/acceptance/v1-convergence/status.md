@@ -1,8 +1,8 @@
 # GeoForge V1 Convergence Status
 
-**最后更新:** 2026-09-21 21:30:00 CST  
-**工作分支:** cursor/r06-1-tempguard-late-cancel-7ab0  
-**当前阶段:** R06.1 代码完成，等待 CI
+**最后更新:** 2026-09-21 22:00:00 CST  
+**工作分支:** cursor/r06-2-ownership-validation-7ab0  
+**当前阶段:** R06.2 代码完成，等待 CI
 
 ## 任务状态表
 
@@ -25,8 +25,9 @@
 | R05.4 | boundingVolume + transform + geometricError + refine 验证 | 验收通过 | Agent | 已合入 master@5ab6491 (#17) |
 | R05.5 | content size + B3DM/GLB/i3dm/pnts header 验证 | 验收通过 | Agent | 已合入 master@3142a8a (#18) |
 | R05.6 | 作为正式 processor 入口集成 | 验收通过 | Agent | 已合入 master@e0b14ae (#19) |
-| **R06** | **Processor 修复 (output commit/cancel/recovery)** | 进行中 | Agent | Phase 13, R06.1 TempGuard 语义 |
-| R06.1 | TempGuard late-cancel 语义澄清 | 代码完成 | Agent | **本 PR: 原子性保证** |
+| **R06** | **Processor 修复 (output commit/cancel/recovery)** | 进行中 | Agent | Phase 13, R06.2 Ownership 验证 |
+| R06.1 | TempGuard late-cancel 语义澄清 | 验收通过 | Agent | 已合入 master@629bd95 (#20) |
+| R06.2 | Ownership 验证增强 + 错误消息改进 | 代码完成 | Agent | **本 PR: 安全检查 + 清晰诊断** |
 | R07 | 零 Python 运行时 | 未开始 | - | Phase 14 发布流程改进 |
 | R08 | 验收测试框架 | 未开始 | - | Phase 15 公开数据测试 |
 | R09 | Cesium A/B 对比工具 | 未开始 | - | 验收测试工具 |
@@ -136,6 +137,7 @@
 
 ### R06 文档
 - [R06-1-summary.md](./R06-1-summary.md) - R06.1 TempGuard late-cancel 语义
+- [R06-2-summary.md](./R06-2-summary.md) - R06.2 Ownership 验证增强
 
 ### 基础文档
 - [R01-summary.md](./R01-summary.md) - R01 实现总结
