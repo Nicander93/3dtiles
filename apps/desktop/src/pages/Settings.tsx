@@ -10,7 +10,7 @@ const defaults: DesktopSettings = {
   defaultOutputRoot: "",
   defaultRebuildTop: true,
   defaultRebuildLevels: 0,
-  defaultTextureCompress: true,
+  defaultTextureCompress: false,
   defaultConvertThreads: 1,
   pythonServerUrl: "http://127.0.0.1:8787",
   resourceServerPort: 0,
@@ -141,6 +141,7 @@ export function Settings() {
             >
               默认开启纹理压缩（KTX2）（实验）
             </Switch>
+            <div className="field-hint">需要 basisu 运行时；如不可用请保持关闭（keep）</div>
           </div>
           <div className="field">
             <label>默认转换并发数</label>

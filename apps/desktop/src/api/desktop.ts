@@ -55,7 +55,8 @@ const settingsDefaults: DesktopSettings = {
   defaultOutputRoot: '',
   defaultRebuildTop: true,
   defaultRebuildLevels: 0,
-  defaultTextureCompress: true,
+  defaultTextureCompress: false,
+  defaultConvertThreads: 1,
   pythonServerUrl: 'http://127.0.0.1:8787',
   resourceServerPort: 0,
 };

@@ -1,0 +1,53 @@
+{
+  "baseline_metadata": {
+    "created_at_utc": "2026-09-21T09:06:49Z",
+    "created_at_cst": "2026-09-21 17:06:49 CST",
+    "baseline_id": "R00",
+    "purpose": "GeoForge V1 Convergence baseline - capture state before R01-R12 fixes"
+  },
+  "git_state": {
+    "repository": "https://github.com/Nicander93/3dtiles",
+    "master_tip_sha": "8c84bb2f1d3c8220805b19ec9e6e4a1dec9b010e",
+    "compare_branch_tip_sha": "81f3494b4002c6fb97064e8c531c58ec1f92a7dc",
+    "compare_branch_name": "origin/feat/v1-prod-align",
+    "merge_base_sha": "671145d9cf86ab28a3ce538aacc3224162a5bd2b",
+    "working_branch_name": "feat/v1-convergence",
+    "branch_relationship": {
+      "master_ahead_of_compare": 9,
+      "compare_ahead_of_master": 10,
+      "note": "master 包含 9 个 feat/v1-prod-align 没有的提交，feat/v1-prod-align 包含 10 个 master 没有的提交"
+    }
+  },
+  "runtime_environment": {
+    "os": "Linux 6.12.94+",
+    "rustc": "1.83.0 (90b35a623 2024-11-26)",
+    "cargo": "1.83.0 (5ffbef321 2024-10-29)",
+    "node": "v22.14.0",
+    "platform": "linux-x86_64",
+    "note": "CI/cloud environment - binary build occurs on platform-specific runners"
+  },
+  "windows_runtime": {
+    "note": "Windows-specific fields require local Windows machine",
+    "os_version": "pending-local (run: systeminfo | findstr /B /C:\"OS Name\" /C:\"OS Version\")",
+    "webview2_runtime": "pending-local (check registry: HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5})",
+    "cpu": "pending-local (run: wmic cpu get name)",
+    "ram": "pending-local (run: wmic computersystem get totalphysicalmemory)",
+    "disk": "pending-local (run: wmic logicaldisk get size,freespace,caption)",
+    "binary_hashes": {
+      "converter_exe": "pending-local (sha256sum apps/desktop/src-tauri/resources/runtime/converter.exe)",
+      "processor_exe": "pending-local (sha256sum apps/desktop/src-tauri/resources/runtime/processor.exe)",
+      "top_rebuild_exe": "pending-local (sha256sum apps/desktop/src-tauri/resources/runtime/top_rebuild.exe)",
+      "basisu_exe": "pending-local (sha256sum apps/desktop/src-tauri/resources/runtime/basisu.exe)"
+    }
+  },
+  "lockfiles": {
+    "rust_cargo_lock": "./Cargo.lock",
+    "tauri_cargo_lock": "./apps/desktop/src-tauri/Cargo.lock",
+    "desktop_package_lock": "./apps/desktop/package-lock.json",
+    "note": "Lockfiles committed in repo, provide exact dependency versions"
+  },
+  "historical_note": {
+    "v0_done_reports": "不继承历史 'done' 报告",
+    "explanation": "本基线从 master@8c84bb2 开始，不带入 feat/v1-prod-align 的验收记录；R03+ 合并时会处理冲突"
+  }
+}

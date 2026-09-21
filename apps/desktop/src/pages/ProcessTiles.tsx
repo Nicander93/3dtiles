@@ -79,8 +79,20 @@ export function ProcessTiles() {
 
   useEffect(() => {
     void api.capabilities().then(setCaps).catch(() => setCaps(null));
-    void api.getSettings().then((s) => setDefaultOutputRoot(s.defaultOutputRoot || '')).catch(() => {});
-  }, []);
+    void api.getSettings().then((s) => {
+      setDefaultOutputRoot(s.defaultOutputRoot || '');
+      if (s.defaultTextureCompress !== undefined) {
+        setForm((f) => {
+          if (s.defaultTextureCompress) {
+            const ktx2Available = ktx2Etc1sEnabled(caps, true);
+            return { ...f, textureMode: ktx2Available ? 'ktx2-etc1s' : 'keep' };
+          } else {
+            return { ...f, textureMode: 'keep' };
+          }
+        });
+      }
+    }).catch(() => {});
+  }, [caps]);
 
   useEffect(() => {
     try {
