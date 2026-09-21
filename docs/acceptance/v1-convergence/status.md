@@ -152,7 +152,9 @@
 
 ### R09.1 - Cesium A/B Harness + GE Monotonicity
 
-**状态:** 进行中 (cursor/r09-1-ab-harness-ge-7ab0)
+**状态:** 完成 (已合入 master@268afa8)  
+**PR:** [#30](https://github.com/Nicander93/3dtiles/pull/30)  
+**合并时间:** 2026-09-21
 
 **实施内容:**
 - ✅ Cesium A/B harness 定义文档
