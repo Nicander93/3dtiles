@@ -10,6 +10,7 @@ use std::time::Duration;
 pub fn capabilities_json() -> Value {
     let tools = tool_paths();
     let convert = probe_bin(&tools.convert_bin, &["_3dtile", "--help"]);
+    let model = probe_model_capabilities(&tools.convert_bin);
     let top = probe_bin(&tools.top_rebuild, &["top_rebuild", "--help"]);
     let texture = if tools.texture_bin.is_file() {
         probe_bin(&tools.texture_bin, &["geoforge-texture", "--help"])
@@ -73,8 +74,78 @@ pub fn capabilities_json() -> Value {
                 Value::Null
             },
         },
+        "model": model,
         "textureModes": texture_modes(native_ktx2, postprocess_ready),
     })
+}
+
+fn probe_model_capabilities(path: &Path) -> Value {
+    if !path.is_file() {
+        return json!({ "ready": false, "reason": "converter missing" });
+    }
+    let mut command = Command::new(path);
+    command
+        .arg("--capabilities-json")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    hide_console_window(&mut command);
+    let output = match command.output() {
+        Ok(output) if output.status.success() => output,
+        Ok(output) => return json!({
+            "ready": false,
+            "reason": format!("--capabilities-json exited with {:?}", output.status.code()),
+        }),
+        Err(error) => return json!({ "ready": false, "reason": error.to_string() }),
+    };
+    let parsed: Value = match serde_json::from_slice(&output.stdout) {
+        Ok(parsed) => parsed,
+        Err(error) => return json!({ "ready": false, "reason": format!("invalid capability JSON: {error}") }),
+    };
+    model_capability_value(&parsed)
+}
+
+fn model_capability_value(parsed: &Value) -> Value {
+    let formats = parsed.get("formats").and_then(Value::as_array);
+    let supports_fbx = formats
+        .map(|formats| formats.iter().any(|format| format.as_str() == Some("fbx")))
+        .unwrap_or(false);
+    let supports_obj = formats
+        .map(|formats| formats.iter().any(|format| format.as_str() == Some("obj")))
+        .unwrap_or(false);
+    let config_version = parsed.get("modelConfigVersion").and_then(Value::as_u64);
+    json!({
+        "ready": supports_fbx && supports_obj && config_version == Some(1),
+        "formats": formats.cloned().unwrap_or_default(),
+        "modelConfigVersion": config_version,
+        "georeferenceModes": parsed.get("georeferenceModes").cloned().unwrap_or_default(),
+        "projectedGeoreference": parsed.get("projectedGeoreference").cloned().unwrap_or(Value::Bool(false)),
+        "reason": if supports_fbx && supports_obj && config_version == Some(1) { Value::Null } else { json!("converter does not support FBX, OBJ, and modelConfigVersion=1") },
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::model_capability_value;
+    use serde_json::json;
+
+    #[test]
+    fn accepts_v1_fbx_and_obj_model_capability() {
+        let result = model_capability_value(&json!({
+            "formats": ["fbx", "obj"],
+            "modelConfigVersion": 1,
+            "georeferenceModes": ["local", "anchor"],
+            "projectedGeoreference": false,
+        }));
+        assert_eq!(result["ready"], true);
+        assert_eq!(result["projectedGeoreference"], false);
+    }
+
+    #[test]
+    fn rejects_legacy_converter_capability() {
+        let result = model_capability_value(&json!({ "formats": ["fbx"] }));
+        assert_eq!(result["ready"], false);
+        assert!(result["reason"].as_str().unwrap_or_default().contains("modelConfigVersion"));
+    }
 }
 
 fn texture_modes(native_ktx2: bool, postprocess: bool) -> Value {

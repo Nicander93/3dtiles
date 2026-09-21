@@ -9,6 +9,7 @@
     "allow-select-input-directory",
     "allow-select-output-directory",
     "allow-select-tileset-file",
+    "allow-select-model-file",
     "allow-task-store",
     "allow-artifact-store",
     "allow-settings",

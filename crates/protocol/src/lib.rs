@@ -28,6 +28,276 @@ pub struct PathRef {
     pub path: String,
 }
 
+/// Typed options for the `convert-model` operation. Existing operations retain
+/// their JSON options so adding model conversion does not reinterpret legacy
+/// task files.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelTaskOptions {
+    pub model: ModelImportOptions,
+    #[serde(default)]
+    pub georeference: GeoReferenceOptions,
+    #[serde(default)]
+    pub texture: ModelTextureOptions,
+    #[serde(default)]
+    pub model_output: ModelOutputOptions,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelImportOptions {
+    pub format: ModelFormat,
+    #[serde(default)]
+    pub unit: ModelUnit,
+    #[serde(default)]
+    pub axes: ModelAxes,
+    #[serde(default)]
+    pub missing_texture_policy: MissingTexturePolicy,
+    #[serde(default)]
+    pub texture_roots: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelFormat {
+    Fbx,
+    Obj,
+}
+
+impl ModelFormat {
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Fbx => "fbx",
+            Self::Obj => "obj",
+        }
+    }
+}
+
+impl ModelTaskOptions {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.model.format == ModelFormat::Obj && self.model.unit == ModelUnit::FromMetadata {
+            return Err("OBJ requires an explicit model.unit; OBJ does not reliably declare units".into());
+        }
+        if self.model.format == ModelFormat::Obj && self.model.axes == ModelAxes::FromMetadata {
+            return Err("OBJ requires explicit model.axes; OBJ does not reliably declare axes".into());
+        }
+        match &self.georeference {
+            GeoReferenceOptions::Local => Ok(()),
+            GeoReferenceOptions::Anchor {
+                longitude_deg,
+                latitude_deg,
+                ellipsoid_height_m,
+                heading_deg,
+                pitch_deg,
+                roll_deg,
+                ..
+            } => {
+                let values = [
+                    *longitude_deg,
+                    *latitude_deg,
+                    *ellipsoid_height_m,
+                    *heading_deg,
+                    *pitch_deg,
+                    *roll_deg,
+                ];
+                if values.iter().any(|value| !value.is_finite()) {
+                    return Err("anchor georeference values must be finite numbers".into());
+                }
+                if !(-180.0..=180.0).contains(longitude_deg) {
+                    return Err("anchor longitudeDeg must be between -180 and 180".into());
+                }
+                if !(-90.0..=90.0).contains(latitude_deg) {
+                    return Err("anchor latitudeDeg must be between -90 and 90".into());
+                }
+                Ok(())
+            }
+            GeoReferenceOptions::Projected {
+                source_crs,
+                origin_offset,
+                ..
+            } => {
+                if source_crs.trim().is_empty() {
+                    return Err("projected georeference requires sourceCrs".into());
+                }
+                if origin_offset.iter().any(|value| !value.is_finite()) {
+                    return Err("projected originOffset values must be finite numbers".into());
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelUnit {
+    FromMetadata,
+    Meters,
+    Centimeters,
+    Millimeters,
+    Feet,
+}
+
+impl Default for ModelUnit {
+    fn default() -> Self {
+        Self::FromMetadata
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelAxes {
+    FromMetadata,
+    YUpRightHanded,
+    ZUpRightHanded,
+}
+
+impl Default for ModelAxes {
+    fn default() -> Self {
+        Self::FromMetadata
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MissingTexturePolicy {
+    Error,
+    Warn,
+}
+
+impl Default for MissingTexturePolicy {
+    fn default() -> Self {
+        Self::Error
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "camelCase")]
+pub enum GeoReferenceOptions {
+    Local,
+    Anchor {
+        #[serde(rename = "longitudeDeg")]
+        longitude_deg: f64,
+        #[serde(rename = "latitudeDeg")]
+        latitude_deg: f64,
+        #[serde(rename = "ellipsoidHeightM")]
+        ellipsoid_height_m: f64,
+        #[serde(default)]
+        pivot: ModelPivot,
+        #[serde(default)]
+        heading_deg: f64,
+        #[serde(default)]
+        pitch_deg: f64,
+        #[serde(default)]
+        roll_deg: f64,
+    },
+    Projected {
+        #[serde(rename = "sourceCrs")]
+        source_crs: String,
+        #[serde(rename = "axisMapping")]
+        axis_mapping: ProjectedAxisMapping,
+        #[serde(rename = "originOffset", default)]
+        origin_offset: [f64; 3],
+    },
+}
+
+impl Default for GeoReferenceOptions {
+    fn default() -> Self {
+        Self::Local
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelPivot {
+    Original,
+    BottomCenter,
+    BoundingBoxCenter,
+}
+
+impl Default for ModelPivot {
+    fn default() -> Self {
+        Self::Original
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ProjectedAxisMapping {
+    EastNorthHeight,
+    NorthEastHeight,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelTextureOptions {
+    #[serde(default)]
+    pub mode: ModelTextureMode,
+}
+
+impl Default for ModelTextureOptions {
+    fn default() -> Self {
+        Self { mode: ModelTextureMode::Keep }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelTextureMode {
+    Keep,
+}
+
+impl Default for ModelTextureMode {
+    fn default() -> Self {
+        Self::Keep
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelOutputOptions {
+    #[serde(default)]
+    pub format: ModelOutputFormat,
+    #[serde(default)]
+    pub tiling: ModelTiling,
+    #[serde(default)]
+    pub lod: bool,
+}
+
+impl Default for ModelOutputOptions {
+    fn default() -> Self {
+        Self {
+            format: ModelOutputFormat::Tiles3d10,
+            tiling: ModelTiling::Single,
+            lod: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ModelOutputFormat {
+    #[serde(rename = "3dtiles-1.0")]
+    Tiles3d10,
+}
+
+impl Default for ModelOutputFormat {
+    fn default() -> Self {
+        Self::Tiles3d10
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelTiling {
+    Single,
+}
+
+impl Default for ModelTiling {
+    fn default() -> Self {
+        Self::Single
+    }
+}
+
 impl TaskConfig {
     pub fn input_path(&self) -> &str {
         &self.input.path
@@ -39,6 +309,12 @@ impl TaskConfig {
 
     pub fn options_obj(&self) -> &Value {
         &self.options
+    }
+
+    pub fn model_options(&self) -> Result<ModelTaskOptions, String> {
+        let options = serde_json::from_value(self.options.clone())
+            .map_err(|error| format!("invalid convert-model options: {error}"))?;
+        Ok(options)
     }
 
     /// Reject unsupported schema versions. Missing version is treated as v1 (legacy).
@@ -118,5 +394,46 @@ mod tests {
             options: json!({}),
         };
         assert!(cfg.validate_schema().is_err());
+    }
+
+    #[test]
+    fn parses_anchor_model_options_at_the_geographic_origin() {
+        let cfg = TaskConfig {
+            schema_version: Some(1),
+            task_id: "model-001".into(),
+            operation: "convert-model".into(),
+            input: PathRef { path: "building.fbx".into() },
+            output: PathRef { path: "result".into() },
+            options: json!({
+                "model": { "format": "fbx" },
+                "georeference": {
+                    "mode": "anchor",
+                    "longitudeDeg": 0.0,
+                    "latitudeDeg": 0.0,
+                    "ellipsoidHeightM": 0.0
+                }
+            }),
+        };
+
+        let result = cfg.model_options().and_then(|options| options.validate());
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn obj_requires_explicit_unit_and_axes() {
+        let cfg = TaskConfig {
+            schema_version: Some(1),
+            task_id: "model-002".into(),
+            operation: "convert-model".into(),
+            input: PathRef { path: "building.obj".into() },
+            output: PathRef { path: "result".into() },
+            options: json!({ "model": { "format": "obj" } }),
+        };
+
+        let error = cfg
+            .model_options()
+            .and_then(|options| options.validate())
+            .expect_err("OBJ metadata is insufficient");
+        assert!(error.contains("model.unit"));
     }
 }

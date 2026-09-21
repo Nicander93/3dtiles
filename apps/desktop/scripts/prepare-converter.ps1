@@ -151,6 +151,21 @@ if (-not $p.WaitForExit(8000)) {
   throw "_3dtile.exe --help failed with exit=$($p.ExitCode); refusing to stage an unverified converter"
 }
 
+$capabilityOutput = & $exe --capabilities-json 2>&1
+if ($LASTEXITCODE -ne 0) {
+  throw "_3dtile.exe --capabilities-json failed with exit=$LASTEXITCODE; refusing to stage a converter without model capability verification"
+}
+try {
+  $capabilities = ($capabilityOutput -join "`n") | ConvertFrom-Json
+} catch {
+  throw "_3dtile.exe --capabilities-json did not return valid JSON: $capabilityOutput"
+}
+if ($capabilities.modelConfigVersion -ne 1 -or
+    -not ($capabilities.formats -contains "fbx") -or
+    -not ($capabilities.formats -contains "obj")) {
+  throw "Converter is missing required model conversion capabilities (FBX, OBJ, modelConfigVersion=1)"
+}
+
 if (Test-Path $OutDir) {
   Remove-Item -Recurse -Force $OutDir
 }
