@@ -129,6 +129,13 @@ impl ValidationReport {
         self.issues.push(ValidationIssue::warning(code, path, message));
         self.warning_count += 1;
     }
+
+    pub fn first_error_summary(&self) -> Option<String> {
+        self.issues
+            .iter()
+            .find(|i| i.severity == "error")
+            .map(|i| format!("{}: {} ({})", i.code, i.message, i.path))
+    }
 }
 
 use serde_json::Value;

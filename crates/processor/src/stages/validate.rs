@@ -2,6 +2,7 @@
 
 use crate::cancel::CancelFlag;
 use crate::protocol::{Emitter, Stage};
+use crate::validator;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::fs;
@@ -42,6 +43,33 @@ pub fn validate_tileset_dir_cancellable(
     cancel: Option<&CancelFlag>,
 ) -> Result<(), String> {
     emitter.stage(Stage::Validate, "Verifying output");
+    
+    // Layer A formal validation entry point
+    let report = validator::validate_tileset_tree(dir);
+    
+    if !report.ok {
+        if let Some(summary) = report.first_error_summary() {
+            return Err(format!("Layer A validation failed: {summary}"));
+        }
+        return Err(format!(
+            "Layer A validation failed: {} errors, {} warnings",
+            report.error_count, report.warning_count
+        ));
+    }
+    
+    emitter.log(&format!(
+        "[validate] Layer A OK: {} tilesets, {} content files, {} external tilesets",
+        report.tileset_count, report.content_count, report.external_tileset_count
+    ));
+    
+    if report.warning_count > 0 {
+        emitter.log(&format!(
+            "[validate] {} warnings (non-blocking)",
+            report.warning_count
+        ));
+    }
+    
+    // Legacy fallback validation (keeping for transition period)
     let root = dir.join("tileset.json");
     if !root.is_file() {
         return Err(format!("tileset.json missing under {}", dir.display()));
@@ -694,7 +722,7 @@ mod tests {
         let e = Emitter::new("t");
         let err = validate_tileset_dir(&e, &dir).unwrap_err();
         assert!(
-            err.contains("TILESET_ROOT") || err.contains("missing root"),
+            err.contains("ROOT_MISSING") || err.contains("TILESET_ROOT") || err.contains("missing root"),
             "{err}"
         );
         let _ = fs::remove_dir_all(&dir);
@@ -730,11 +758,11 @@ mod tests {
     #[test]
     fn rejects_missing_content() {
         let dir = tmp();
-        let tileset = r#"{"asset":{"version":"1.0"},"root":{"geometricError":1,"content":{"uri":"missing.b3dm"}}}"#;
+        let tileset = r#"{"asset":{"version":"1.0"},"root":{"geometricError":1,"boundingVolume":{"box":[0,0,0,1,0,0,0,1,0,0,0,1]},"content":{"uri":"missing.b3dm"}}}"#;
         fs::write(dir.join("tileset.json"), tileset).unwrap();
         let e = Emitter::new("t");
         let err = validate_tileset_dir(&e, &dir).unwrap_err();
-        assert!(err.contains("MISSING_CONTENT"), "{err}");
+        assert!(err.contains("CONTENT_MISSING") || err.contains("MISSING_CONTENT"), "{err}");
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -745,7 +773,7 @@ mod tests {
         fs::write(dir.join("tileset.json"), tileset).unwrap();
         let e = Emitter::new("t");
         let err = validate_tileset_dir(&e, &dir).unwrap_err();
-        assert!(err.contains("BAD_BOUNDS"), "{err}");
+        assert!(err.contains("BOUNDING_VOLUME_INVALID") || err.contains("BAD_BOUNDS"), "{err}");
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -760,12 +788,12 @@ mod tests {
         .unwrap();
         fs::write(
             dir.join("tileset.json"),
-            r#"{"asset":{"version":"1.0"},"root":{"geometricError":1,"content":{"uri":"nested.gltf"}}}"#,
+            r#"{"asset":{"version":"1.0"},"root":{"geometricError":1,"boundingVolume":{"box":[0,0,0,1,0,0,0,1,0,0,0,1]},"content":{"uri":"nested.gltf"}}}"#,
         )
         .unwrap();
         let e = Emitter::new("t");
         let err = validate_tileset_dir(&e, &dir).unwrap_err();
-        assert!(err.contains("PATH_ESCAPE"), "{err}");
+        assert!(err.contains("PATH_ESCAPE") || err.contains("CONTENT_URI_ESCAPE"), "{err}");
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -776,22 +804,22 @@ mod tests {
         let b = dir.join("b.json");
         fs::write(
             &a,
-            r#"{"asset":{"version":"1.0"},"root":{"geometricError":1,"content":{"uri":"b.json"}}}"#,
+            r#"{"asset":{"version":"1.0"},"root":{"geometricError":1,"boundingVolume":{"box":[0,0,0,1,0,0,0,1,0,0,0,1]},"content":{"uri":"b.json"}}}"#,
         )
         .unwrap();
         fs::write(
             &b,
-            r#"{"asset":{"version":"1.0"},"root":{"geometricError":1,"content":{"uri":"a.json"}}}"#,
+            r#"{"asset":{"version":"1.0"},"root":{"geometricError":1,"boundingVolume":{"box":[0,0,0,1,0,0,0,1,0,0,0,1]},"content":{"uri":"a.json"}}}"#,
         )
         .unwrap();
         fs::write(
             dir.join("tileset.json"),
-            r#"{"asset":{"version":"1.0"},"root":{"geometricError":1,"content":{"uri":"a.json"}}}"#,
+            r#"{"asset":{"version":"1.0"},"root":{"geometricError":1,"boundingVolume":{"box":[0,0,0,1,0,0,0,1,0,0,0,1]},"content":{"uri":"a.json"}}}"#,
         )
         .unwrap();
         let e = Emitter::new("t");
         let err = validate_tileset_dir(&e, &dir).unwrap_err();
-        assert!(err.contains("CYCLE"), "{err}");
+        assert!(err.contains("CYCLE_DETECTED") || err.contains("CYCLE"), "{err}");
         let _ = fs::remove_dir_all(&dir);
     }
 }
