@@ -119,14 +119,14 @@ fn owns_temp_dir(temp_dir: &Path) -> bool {
         return false;
     };
     
-    // Read and validate marker content
+    // Read and validate marker content (normalize line endings)
     let marker_path = temp_dir.join(TEMP_MARKER);
     let Ok(marker_content) = fs::read_to_string(&marker_path) else {
         return false;
     };
     
-    let expected = format!("geoforge-task:{task_id}\n");
-    marker_content == expected || marker_content.trim() == format!("geoforge-task:{task_id}")
+    // Compare with expected, normalizing both sides (trim handles \r\n, \n, or no newline)
+    marker_content.trim() == format!("geoforge-task:{task_id}")
 }
 
 fn ensure_owned_temp(temp_dir: &Path) -> Result<(), String> {
