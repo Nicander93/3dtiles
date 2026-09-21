@@ -8,6 +8,72 @@ use std::path::{Path, PathBuf};
 
 /// `<output-parent>/.geoforge-task-<task-id>/`
 const TEMP_MARKER: &str = ".geoforge-owned";
+const CHECKPOINT_FILE: &str = ".geoforge-checkpoint";
+
+/// Pipeline stage checkpoints for crash recovery diagnostics
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Checkpoint {
+    Prepared,
+    Converting,
+    Converted,
+    Rebuilding,
+    Rebuilt,
+    Texturing,
+    Textured,
+    Validating,
+    Validated,
+    Committing,
+    Committed,
+}
+
+impl Checkpoint {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Checkpoint::Prepared => "prepared",
+            Checkpoint::Converting => "converting",
+            Checkpoint::Converted => "converted",
+            Checkpoint::Rebuilding => "rebuilding",
+            Checkpoint::Rebuilt => "rebuilt",
+            Checkpoint::Texturing => "texturing",
+            Checkpoint::Textured => "textured",
+            Checkpoint::Validating => "validating",
+            Checkpoint::Validated => "validated",
+            Checkpoint::Committing => "committing",
+            Checkpoint::Committed => "committed",
+        }
+    }
+    
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "prepared" => Some(Checkpoint::Prepared),
+            "converting" => Some(Checkpoint::Converting),
+            "converted" => Some(Checkpoint::Converted),
+            "rebuilding" => Some(Checkpoint::Rebuilding),
+            "rebuilt" => Some(Checkpoint::Rebuilt),
+            "texturing" => Some(Checkpoint::Texturing),
+            "textured" => Some(Checkpoint::Textured),
+            "validating" => Some(Checkpoint::Validating),
+            "validated" => Some(Checkpoint::Validated),
+            "committing" => Some(Checkpoint::Committing),
+            "committed" => Some(Checkpoint::Committed),
+            _ => None,
+        }
+    }
+}
+
+/// Write a checkpoint marker to track pipeline progress
+pub fn write_checkpoint(temp_dir: &Path, checkpoint: Checkpoint) -> Result<(), String> {
+    let checkpoint_path = temp_dir.join(CHECKPOINT_FILE);
+    fs::write(&checkpoint_path, format!("{}\n", checkpoint.as_str()))
+        .map_err(|e| format!("failed to write checkpoint: {}", e))
+}
+
+/// Read the last checkpoint from a temp directory
+pub fn read_checkpoint(temp_dir: &Path) -> Option<Checkpoint> {
+    let checkpoint_path = temp_dir.join(CHECKPOINT_FILE);
+    let content = fs::read_to_string(&checkpoint_path).ok()?;
+    Checkpoint::from_str(content.trim())
+}
 
 pub fn temp_work_dir(final_output: &Path, task_id: &str) -> PathBuf {
     let parent = final_output.parent().unwrap_or_else(|| Path::new("."));
@@ -24,13 +90,19 @@ pub fn prepare_temp(final_output: &Path, task_id: &str) -> Result<PathBuf, Strin
     match fs::create_dir(&temp) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            // Diagnose existing temp directory
+            let checkpoint_info = read_checkpoint(&temp)
+                .map(|cp| format!(" Last checkpoint: {}", cp.as_str()))
+                .unwrap_or_else(|| " No checkpoint found.".to_string());
+            
             return Err(format!(
-                "temporary work directory already exists (refusing to overwrite): {} \
+                "temporary work directory already exists (refusing to overwrite): {}{} \
                  This may indicate: (1) a previous run was interrupted, (2) another process \
                  is using the same task ID, or (3) leftover state from a crash. \
                  If you're certain no other process is using this directory, manually remove it \
                  and retry.",
-                temp.display()
+                temp.display(),
+                checkpoint_info
             ));
         }
         Err(error) => {
@@ -52,6 +124,12 @@ pub fn prepare_temp(final_output: &Path, task_id: &str) -> Result<PathBuf, Strin
             marker.display(),
             error
         ));
+    }
+    
+    // Write initial checkpoint
+    if let Err(error) = write_checkpoint(&temp, Checkpoint::Prepared) {
+        let _ = fs::remove_dir_all(&temp);
+        return Err(error);
     }
     
     Ok(temp)
@@ -321,6 +399,88 @@ mod tests {
         assert!(error.contains("security risk"), "{error}");
         
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn checkpoint_write_and_read() {
+        use super::{read_checkpoint, write_checkpoint, Checkpoint};
+        
+        let root = temp_root("checkpoint");
+        let output = root.join("output");
+        let temp = temp_work_dir(&output, "task-cp");
+        fs::create_dir_all(&temp).expect("create temp");
+        
+        // Write and read checkpoint
+        write_checkpoint(&temp, Checkpoint::Converting).expect("write checkpoint");
+        let cp = read_checkpoint(&temp).expect("read checkpoint");
+        assert_eq!(cp, Checkpoint::Converting);
+        
+        // Overwrite checkpoint
+        write_checkpoint(&temp, Checkpoint::Validated).expect("write checkpoint 2");
+        let cp2 = read_checkpoint(&temp).expect("read checkpoint 2");
+        assert_eq!(cp2, Checkpoint::Validated);
+        
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepare_temp_includes_checkpoint() {
+        use super::{prepare_temp, read_checkpoint, Checkpoint};
+        
+        let root = temp_root("prepare-cp");
+        let output = root.join("output");
+        
+        let temp = prepare_temp(&output, "task-prep").expect("prepare temp");
+        
+        // Check checkpoint exists and is Prepared
+        let cp = read_checkpoint(&temp).expect("read checkpoint");
+        assert_eq!(cp, Checkpoint::Prepared);
+        
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn existing_temp_reports_last_checkpoint() {
+        use super::{prepare_temp, write_checkpoint, Checkpoint};
+        
+        let root = temp_root("existing-cp");
+        let output = root.join("output");
+        
+        // Create temp with a checkpoint
+        let temp = prepare_temp(&output, "task-exist").expect("prepare temp");
+        write_checkpoint(&temp, Checkpoint::Converting).expect("write checkpoint");
+        
+        // Try to prepare again
+        let error = prepare_temp(&output, "task-exist").expect_err("should fail");
+        assert!(error.contains("already exists"), "{error}");
+        assert!(error.contains("Last checkpoint: converting"), "{error}");
+        
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn checkpoint_roundtrip_all_stages() {
+        use super::Checkpoint;
+        
+        let stages = [
+            Checkpoint::Prepared,
+            Checkpoint::Converting,
+            Checkpoint::Converted,
+            Checkpoint::Rebuilding,
+            Checkpoint::Rebuilt,
+            Checkpoint::Texturing,
+            Checkpoint::Textured,
+            Checkpoint::Validating,
+            Checkpoint::Validated,
+            Checkpoint::Committing,
+            Checkpoint::Committed,
+        ];
+        
+        for stage in &stages {
+            let s = stage.as_str();
+            let parsed = Checkpoint::from_str(s).expect("parse checkpoint");
+            assert_eq!(*stage, parsed, "roundtrip failed for {:?}", stage);
+        }
     }
 
     #[test]
