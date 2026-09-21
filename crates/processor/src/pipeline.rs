@@ -5,6 +5,7 @@ use crate::geo::{build_tile_config_json, missing_crs_message, resolve_effective_
 use crate::path_policy;
 use crate::protocol::{Emitter, Stage, TaskConfig, EXIT_CANCELLED, EXIT_FAILED, EXIT_OK};
 use crate::stages::{commit, convert, rebuild, scan, texture, validate};
+use geoforge_protocol::GeoReferenceOptions;
 use serde_json::json;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -29,6 +30,7 @@ pub fn run_task(config: TaskConfig, cancel: CancelFlag) -> RunOutcome {
 
     let result = match config.operation.as_str() {
         "convert-osgb" => run_convert_osgb(&config, &emitter, &cancel),
+        "convert-model" => run_convert_model(&config, &emitter, &cancel),
         "process-tileset" => run_process_tileset(&config, &emitter, &cancel),
         other => Err(format!("Unknown operation: {other}")),
     };
@@ -61,6 +63,83 @@ pub fn run_task(config: TaskConfig, cancel: CancelFlag) -> RunOutcome {
     }
 }
 
+fn run_convert_model(
+    config: &TaskConfig,
+    emitter: &Arc<Emitter>,
+    cancel: &CancelFlag,
+) -> Result<PathBuf, String> {
+    let options = config.model_options()?;
+    options.validate()?;
+    let input_file = Path::new(config.input_path());
+    if !input_file.is_file() {
+        return Err(format!("model input must be a file: {}", input_file.display()));
+    }
+    let extension = input_file.extension().and_then(|value| value.to_str()).unwrap_or_default();
+    if !extension.eq_ignore_ascii_case(options.model.format.extension()) {
+        return Err(format!(
+            "model.format={} does not match input file: {}",
+            options.model.format.extension(),
+            input_file.display()
+        ));
+    }
+    let resource_root = input_file.parent().ok_or_else(|| "model input has no parent directory".to_string())?;
+    let validated = path_policy::validate_io_paths(resource_root, Path::new(config.output_path()), &config.task_id)?;
+    report_output_space(emitter, validated.output_parent_free_bytes);
+    emitter.stage(Stage::Scan, "Validating model input");
+    emitter.metric("input.modelBytes", json!(std::fs::metadata(input_file).map_err(|error| error.to_string())?.len()));
+
+    let (longitude, latitude, height) = match options.georeference {
+        GeoReferenceOptions::Anchor { longitude_deg, latitude_deg, ellipsoid_height_m, .. } => {
+            (Some(longitude_deg), Some(latitude_deg), Some(ellipsoid_height_m))
+        }
+        GeoReferenceOptions::Local => (None, None, None),
+        GeoReferenceOptions::Projected { .. } => {
+            return Err("projected model georeference requires a converter with model-config support".into());
+        }
+    };
+    check_cancel(cancel)?;
+
+    let final_out = validated.output.clone();
+    let temp = commit::prepare_temp(&final_out, &config.task_id)?;
+    let mut temp_guard = commit::TempGuard::new(temp.clone(), cancel);
+    let staged = temp.join("staged");
+    let model_config_path = temp.join("model-config.json");
+    let mut model_config = serde_json::to_value(&options).map_err(|error| error.to_string())?;
+    model_config
+        .as_object_mut()
+        .ok_or_else(|| "model config serialization did not produce an object".to_string())?
+        .insert("version".into(), json!(1));
+    std::fs::write(
+        &model_config_path,
+        serde_json::to_vec_pretty(&model_config).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| format!("cannot write model converter config: {error}"))?;
+    convert::run_model_convert(
+        emitter,
+        cancel,
+        input_file,
+        &staged,
+        options.model.format,
+        &model_config_path,
+        longitude,
+        latitude,
+        height,
+    )?;
+    commit::write_checkpoint(&temp, commit::Checkpoint::Converted)?;
+    check_cancel(cancel)?;
+    commit::write_checkpoint(&temp, commit::Checkpoint::Validating)?;
+    validate::validate_tileset_dir_cancellable(emitter, &staged, Some(cancel))?;
+    commit::write_checkpoint(&temp, commit::Checkpoint::Validated)?;
+    emitter.metric("temp.stagedBytes", json!(directory_size_bytes(&staged)));
+    check_cancel(cancel)?;
+    commit::write_checkpoint(&temp, commit::Checkpoint::Committing)?;
+    commit::commit_rename(emitter, &staged, &temp, &final_out, Some(&mut temp_guard))?;
+    commit::write_checkpoint(&temp, commit::Checkpoint::Committed)?;
+    emitter.metric("output.bytes", json!(directory_size_bytes(&final_out)));
+    commit::cleanup_temp(&temp);
+    Ok(final_out)
+}
+
 /// Keep a small, stable error vocabulary in the JSONL/UI layer while
 /// preserving the original message for diagnostics. This is intentionally a
 /// classifier rather than a new error hierarchy so stage implementations can
@@ -82,6 +161,18 @@ fn error_code_for_message(message: &str) -> &'static str {
         "PATH_OUTPUT_NOT_WRITABLE"
     } else if lower.contains("must not") && lower.contains("input") {
         "PATH_OVERLAP"
+    } else if lower.contains("invalid convert-model options")
+        || lower.contains("model config")
+        || lower.contains("model.format")
+    {
+        "MODEL_CONFIG_INVALID"
+    } else if lower.contains("model input must be a file")
+        || lower.contains("only .fbx and .obj")
+        || lower.contains("requires an explicit model")
+    {
+        "MODEL_INPUT_INVALID"
+    } else if lower.contains("projected model georeference") {
+        "MODEL_GEOREFERENCE_UNSUPPORTED"
     // A converter failure often echoes the input metadata path in stderr.  Use
     // the explicit process-exit marker first so that this cannot be mistaken
     // for a scan-time metadata error.
@@ -249,7 +340,7 @@ fn run_convert_osgb(
     // Brief non-cancellable publish window
     commit::write_checkpoint(&temp, commit::Checkpoint::Committing)?;
     // Pass temp_guard to commit_rename for immediate mark_committed after atomic rename
-    commit::commit_rename(emitter, &staged, &final_out, Some(&mut temp_guard))?;
+    commit::commit_rename(emitter, &staged, &temp, &final_out, Some(&mut temp_guard))?;
     commit::write_checkpoint(&temp, commit::Checkpoint::Committed)?;
     emitter.metric("output.bytes", json!(directory_size_bytes(&final_out)));
     // Cleanup leftover temp shell
@@ -325,7 +416,7 @@ fn run_process_tileset(
     emitter.metric("temp.stagedBytes", json!(directory_size_bytes(&work)));
     check_cancel(cancel)?;
     commit::write_checkpoint(&temp, commit::Checkpoint::Committing)?;
-    commit::commit_rename(emitter, &work, &final_out, Some(&mut temp_guard))?;
+    commit::commit_rename(emitter, &work, &temp, &final_out, Some(&mut temp_guard))?;
     commit::write_checkpoint(&temp, commit::Checkpoint::Committed)?;
     emitter.metric("output.bytes", json!(directory_size_bytes(&final_out)));
     commit::cleanup_temp(&temp);
@@ -460,6 +551,22 @@ mod tests {
         assert_eq!(
             error_code_for_message("unexpected native failure"),
             "TASK_FAILED"
+        );
+    }
+
+    #[test]
+    fn classifies_model_configuration_and_georeference_errors() {
+        assert_eq!(
+            error_code_for_message("OBJ requires an explicit model.unit; OBJ does not reliably declare units"),
+            "MODEL_INPUT_INVALID"
+        );
+        assert_eq!(
+            error_code_for_message("invalid convert-model options: missing field `model`"),
+            "MODEL_CONFIG_INVALID"
+        );
+        assert_eq!(
+            error_code_for_message("projected model georeference requires a converter with model-config support"),
+            "MODEL_GEOREFERENCE_UNSUPPORTED"
         );
     }
 

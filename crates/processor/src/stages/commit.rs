@@ -142,19 +142,21 @@ pub fn prepare_temp(final_output: &Path, task_id: &str) -> Result<PathBuf, Strin
 /// before returning, preventing cleanup even if cancellation arrives during manifest write.
 pub fn commit_rename(
     emitter: &Emitter,
-    temp_dir: &Path,
+    staged_dir: &Path,
+    owned_temp_dir: &Path,
     final_output: &Path,
     temp_guard: Option<&mut TempGuard<'_>>,
 ) -> Result<(), String> {
     emitter.stage(Stage::Commit, "Committing output");
-    ensure_owned_temp(temp_dir)?;
+    ensure_owned_temp(owned_temp_dir)?;
+    ensure_staged_output(staged_dir, owned_temp_dir)?;
 
     if let Some(parent) = final_output.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
     // Atomic rename: once this succeeds, output is committed
-    path_policy::rename_no_replace(temp_dir, final_output)?;
+    path_policy::rename_no_replace(staged_dir, final_output)?;
     
     // Mark committed IMMEDIATELY after successful rename to prevent late-cancel cleanup
     if let Some(guard) = temp_guard {
@@ -173,6 +175,32 @@ pub fn commit_rename(
     );
 
     emitter.log(&format!("[commit] {}", final_output.display()));
+    Ok(())
+}
+
+fn ensure_staged_output(staged_dir: &Path, owned_temp_dir: &Path) -> Result<(), String> {
+    let staged_metadata = fs::symlink_metadata(staged_dir).map_err(|error| {
+        format!("staged output is missing or inaccessible: {} ({error})", staged_dir.display())
+    })?;
+    if !staged_metadata.is_dir() || staged_metadata.file_type().is_symlink() {
+        return Err(format!("staged output must be a real directory: {}", staged_dir.display()));
+    }
+
+    let staged_parent = staged_dir
+        .parent()
+        .ok_or_else(|| format!("staged output has no parent: {}", staged_dir.display()))?;
+    let canonical_parent = fs::canonicalize(staged_parent).map_err(|error| {
+        format!("cannot resolve staged output parent {}: {error}", staged_parent.display())
+    })?;
+    let canonical_temp = fs::canonicalize(owned_temp_dir).map_err(|error| {
+        format!("cannot resolve owned temporary directory {}: {error}", owned_temp_dir.display())
+    })?;
+    if canonical_parent != canonical_temp {
+        return Err(format!(
+            "staged output must be a direct child of its owned temporary directory: {}",
+            staged_dir.display()
+        ));
+    }
     Ok(())
 }
 
@@ -535,6 +563,57 @@ mod tests {
         assert!(output.exists(), "committed output must not be removed by late cancel");
         assert_eq!(fs::read(output.join("data.txt")).unwrap(), b"committed");
         
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn commits_staged_output_from_owned_temp_directory() {
+        use super::{commit_rename, TempGuard};
+        use crate::cancel::CancelFlag;
+        use crate::protocol::Emitter;
+
+        let root = temp_root("staged-commit");
+        let output = root.join("output");
+        let temp = prepare_temp(&output, "task-staged").expect("prepare owned temp");
+        let staged = temp.join("staged");
+        fs::create_dir(&staged).expect("create staged output");
+        fs::write(staged.join("tileset.json"), b"{}").expect("write tileset");
+
+        let cancel = CancelFlag::new();
+        let mut guard = TempGuard::new(temp.clone(), &cancel);
+        let emitter = Emitter::new("task-staged");
+        commit_rename(&emitter, &staged, &temp, &output, Some(&mut guard))
+            .expect("commit staged model output");
+        cleanup_temp(&temp);
+
+        assert!(output.join("tileset.json").is_file());
+        assert!(!temp.exists());
+        drop(guard);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn refuses_to_commit_staged_output_outside_owned_temp_directory() {
+        use super::{commit_rename, TempGuard};
+        use crate::cancel::CancelFlag;
+        use crate::protocol::Emitter;
+
+        let root = temp_root("staged-outside");
+        let output = root.join("output");
+        let temp = prepare_temp(&output, "task-staged-outside").expect("prepare owned temp");
+        let foreign = root.join("foreign");
+        fs::create_dir(&foreign).expect("create foreign output");
+        fs::write(foreign.join("tileset.json"), b"{}").expect("write tileset");
+
+        let cancel = CancelFlag::new();
+        let mut guard = TempGuard::new(temp.clone(), &cancel);
+        let emitter = Emitter::new("task-staged-outside");
+        let error = commit_rename(&emitter, &foreign, &temp, &output, Some(&mut guard))
+            .expect_err("foreign output must not be committed");
+
+        assert!(error.contains("direct child"));
+        assert!(!output.exists());
+        cleanup_temp(&temp);
         let _ = fs::remove_dir_all(root);
     }
 }

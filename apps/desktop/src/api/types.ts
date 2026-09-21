@@ -113,6 +113,14 @@ export interface CapabilitiesResponse {
   textureModes?: TextureModeInfo[];
   aliases?: Record<string, string>;
   postprocessBasisu?: { available?: boolean; path?: string | null };
+  model?: {
+    ready?: boolean;
+    formats?: string[];
+    modelConfigVersion?: number;
+    georeferenceModes?: string[];
+    projectedGeoreference?: boolean;
+    reason?: string | null;
+  };
 }
 
 export interface OsgbScanGeo {
@@ -162,6 +170,21 @@ export interface OsgbScanResult {
     name: string;
     entryExists?: boolean;
     osgbCount?: number;
+  }>;
+}
+
+export interface ModelScanResult {
+  path: string;
+  format?: 'fbx' | 'obj';
+  valid: boolean;
+  errors?: string[];
+  warnings?: string[];
+  summary?: { bytes?: number; materialLibraryCount?: number };
+  materials?: Array<{
+    reference: string;
+    path: string;
+    exists: boolean;
+    textures?: Array<{ reference: string; path: string; exists: boolean }>;
   }>;
 }
 

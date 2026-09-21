@@ -96,8 +96,20 @@ pub fn submit_task(state: State<'_, AppState>, config: SubmitTaskConfig) -> Resu
   let options = config.options.unwrap_or(json!({}));
   // Preflight path policy (same rules as processor); provisional id for validation only
   let provisional_id = "task-preflight0";
+  let input_path = config.input.path();
+  let path_policy_input = if config.operation == "convert-model" {
+    let model_file = std::path::Path::new(&input_path);
+    if !model_file.is_file() {
+      return Err(format!("路径校验失败: 模型输入必须是文件: {}", model_file.display()));
+    }
+    model_file
+      .parent()
+      .ok_or_else(|| "路径校验失败: 模型输入没有父目录".to_string())?
+  } else {
+    std::path::Path::new(&input_path)
+  };
   processor::validate_io_paths(
-    std::path::Path::new(&config.input.path()),
+    path_policy_input,
     std::path::Path::new(&config.output.path()),
     provisional_id,
   )
@@ -313,6 +325,48 @@ pub fn scan_osgb(path: String) -> Result<Value, String> {
   serde_json::from_str(stdout.trim()).map_err(|e| {
     format!(
       "解析扫描结果失败: {e}; stderr={stderr}; stdout={}",
+      stdout.chars().take(400).collect::<String>()
+    )
+  })
+}
+
+#[tauri::command]
+pub fn select_model_file(app: AppHandle) -> Result<Option<String>, String> {
+  let picked = app
+    .dialog()
+    .file()
+    .set_title("选择 FBX 或 OBJ 模型")
+    .add_filter("3D 模型", &["fbx", "obj"])
+    .blocking_pick_file();
+  match picked {
+    Some(path) => Ok(Some(file_path_to_string(path)?)),
+    None => Ok(None),
+  }
+}
+
+/// FBX/OBJ preflight via the processor. Only diagnostics cross the Tauri
+/// boundary; mesh data stays in the native converter process.
+#[tauri::command]
+pub fn scan_model(path: String) -> Result<Value, String> {
+  let bin = ProcessManager::processor_bin().ok_or_else(|| {
+    "找不到 processor 组件，无法扫描。请修复安装或设置环境变量 GEOFORGE_PROCESSOR。".to_string()
+  })?;
+  let mut command = Command::new(&bin);
+  ProcessManager::apply_runtime_env(&mut command);
+  let output = command
+    .args(["scan-model", "--path", &path])
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .output()
+    .map_err(|error| format!("启动 processor 模型扫描失败: {error}"))?;
+  let stdout = String::from_utf8_lossy(&output.stdout);
+  let stderr = String::from_utf8_lossy(&output.stderr);
+  if stdout.trim().is_empty() {
+    return Err(format!("processor 模型扫描无输出 (exit {:?}): {stderr}", output.status.code()));
+  }
+  serde_json::from_str(stdout.trim()).map_err(|error| {
+    format!(
+      "解析模型扫描结果失败: {error}; stderr={stderr}; stdout={}",
       stdout.chars().take(400).collect::<String>()
     )
   })

@@ -1,7 +1,7 @@
-//! processor CLI — `run --task`, `convert-osgb`, `process-tileset`, `scan-osgb`.
+//! processor CLI — task pipelines and lightweight input preflight.
 
 use clap::{Parser, Subcommand};
-use processor::{capabilities_json, run_task, scan_osgb, CancelFlag, TaskConfig, EXIT_FAILED};
+use processor::{capabilities_json, run_task, scan_model, scan_osgb, CancelFlag, TaskConfig, EXIT_FAILED};
 use serde_json::json;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -51,6 +51,11 @@ enum Commands {
     },
     /// OSGB scan (no Python). Prints JSON to stdout (not JSONL events).
     ScanOsgb {
+        #[arg(long)]
+        path: PathBuf,
+    },
+    /// FBX/OBJ preflight without loading mesh data into the desktop process.
+    ScanModel {
         #[arg(long)]
         path: PathBuf,
     },
@@ -163,6 +168,15 @@ fn main() -> ExitCode {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false)
             {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(EXIT_FAILED as u8)
+            }
+        }
+        Commands::ScanModel { path } => {
+            let result = scan_model(&path.to_string_lossy());
+            println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+            if result.get("valid").and_then(|value| value.as_bool()).unwrap_or(false) {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::from(EXIT_FAILED as u8)
