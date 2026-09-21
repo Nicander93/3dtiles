@@ -296,6 +296,34 @@ EOF
             GE_PASSED=$(echo "$GE_RESULT" | jq -r '.passed')
             GE_VIOLATIONS=$(echo "$GE_RESULT" | jq -r '.violations | length')
             GE_TOTAL=$(echo "$GE_RESULT" | jq -r '.total_tiles')
+            
+            # Run frontier coverage check (Layer A+)
+            if FRONTIER_RESULT=$("$PROCESSOR_PATH" check-frontier --tileset "$FIXTURE_OUTPUT/output/tileset.json" 2>/dev/null); then
+                FRONTIER_CHECKED=$(echo "$FRONTIER_RESULT" | jq -r '.checked')
+                FRONTIER_PASSED=$(echo "$FRONTIER_RESULT" | jq -r '.passed')
+                FRONTIER_BLOCKS=$(echo "$FRONTIER_RESULT" | jq -r '.blocks_found')
+                FRONTIER_GAPS=$(echo "$FRONTIER_RESULT" | jq -r '.gaps | length')
+            else
+                FRONTIER_CHECKED="false"
+                FRONTIER_PASSED="false"
+                FRONTIER_BLOCKS=0
+                FRONTIER_GAPS=0
+            fi
+            
+            # Run subtree retention check (Layer A+)
+            if SUBTREE_RESULT=$("$PROCESSOR_PATH" check-subtree --input "$FIXTURE_INPUT/tileset.json" --output "$FIXTURE_OUTPUT/output/tileset.json" 2>/dev/null); then
+                SUBTREE_CHECKED=$(echo "$SUBTREE_RESULT" | jq -r '.checked')
+                SUBTREE_PASSED=$(echo "$SUBTREE_RESULT" | jq -r '.passed')
+                SUBTREE_EXPECTED=$(echo "$SUBTREE_RESULT" | jq -r '.blocks_expected')
+                SUBTREE_RETAINED=$(echo "$SUBTREE_RESULT" | jq -r '.blocks_retained')
+                SUBTREE_LOST=$(echo "$SUBTREE_RESULT" | jq -r '.blocks_lost | length')
+            else
+                SUBTREE_CHECKED="false"
+                SUBTREE_PASSED="false"
+                SUBTREE_EXPECTED=0
+                SUBTREE_RETAINED=0
+                SUBTREE_LOST=0
+            fi
         else
             OUTPUT_SIZE=0
             LAYER_A="FAIL"
@@ -304,6 +332,15 @@ EOF
             GE_PASSED="false"
             GE_VIOLATIONS=0
             GE_TOTAL=0
+            FRONTIER_CHECKED="false"
+            FRONTIER_PASSED="false"
+            FRONTIER_BLOCKS=0
+            FRONTIER_GAPS=0
+            SUBTREE_CHECKED="false"
+            SUBTREE_PASSED="false"
+            SUBTREE_EXPECTED=0
+            SUBTREE_RETAINED=0
+            SUBTREE_LOST=0
         fi
         
         # Create status.json for fixture
@@ -320,14 +357,21 @@ EOF
   },
   "spatialQuality": {
     "frontierCoverage": {
-      "checked": false,
-      "note": "Frontier analysis not yet implemented (R09.2+)",
+      "checked": $FRONTIER_CHECKED,
+      "passed": $FRONTIER_PASSED,
       "gridSize": "2x2",
-      "blocksCount": 4
+      "blocksExpected": 4,
+      "blocksFound": $FRONTIER_BLOCKS,
+      "gaps": $FRONTIER_GAPS,
+      "note": "Frontier coverage check (R09.2)"
     },
     "subtreeRetention": {
-      "checked": false,
-      "note": "Subtree retention check not yet implemented (R09.2+)"
+      "checked": $SUBTREE_CHECKED,
+      "passed": $SUBTREE_PASSED,
+      "blocksExpected": $SUBTREE_EXPECTED,
+      "blocksRetained": $SUBTREE_RETAINED,
+      "blocksLost": $SUBTREE_LOST,
+      "note": "Subtree retention check (R09.2)"
     },
     "transformConsistency": {
       "checked": false,

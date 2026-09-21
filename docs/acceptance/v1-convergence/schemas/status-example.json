@@ -17,15 +17,18 @@
       "checked": true,
       "passed": true,
       "gridSize": "2x2",
-      "blocksCount": 4,
-      "note": "Continuous 2x2 grid, no gaps"
+      "blocksExpected": 4,
+      "blocksFound": 4,
+      "gaps": 0,
+      "note": "Frontier coverage check (R09.2)"
     },
     "subtreeRetention": {
       "checked": true,
       "passed": true,
       "blocksExpected": 4,
       "blocksRetained": 4,
-      "details": "All external block tilesets preserved"
+      "blocksLost": 0,
+      "note": "Subtree retention check (R09.2)"
     },
     "transformConsistency": {
       "checked": true,
