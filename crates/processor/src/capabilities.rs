@@ -141,6 +141,22 @@ mod tests {
     }
 
     #[test]
+    fn preserves_projected_model_capability() {
+        let result = model_capability_value(&json!({
+            "formats": ["fbx", "obj"],
+            "modelConfigVersion": 1,
+            "georeferenceModes": ["local", "anchor", "projected"],
+            "projectedGeoreference": true,
+        }));
+
+        assert_eq!(result["ready"], true);
+        assert_eq!(result["projectedGeoreference"], true);
+        assert!(result["georeferenceModes"]
+            .as_array()
+            .is_some_and(|modes| modes.iter().any(|mode| mode == "projected")));
+    }
+
+    #[test]
     fn rejects_legacy_converter_capability() {
         let result = model_capability_value(&json!({ "formats": ["fbx"] }));
         assert_eq!(result["ready"], false);

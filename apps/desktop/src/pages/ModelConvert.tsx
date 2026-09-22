@@ -20,10 +20,17 @@ type FormState = {
   longitude: string;
   latitude: string;
   height: string;
+  georeferenceMode: 'local' | 'anchor' | 'projected';
+  sourceCrs: string;
+  axisMapping: 'eastNorthHeight' | 'northEastHeight';
+  originX: string;
+  originY: string;
+  originZ: string;
 };
 
 const defaults: FormState = {
   input: '', output: '', name: '', format: 'fbx', unit: 'fromMetadata', axes: 'fromMetadata', longitude: '', latitude: '', height: '',
+  georeferenceMode: 'local', sourceCrs: '', axisMapping: 'eastNorthHeight', originX: '0', originY: '0', originZ: '0',
 };
 
 function inferredFormat(path: string): ModelFormat {
@@ -72,13 +79,16 @@ export function ModelConvert() {
     if (form.format === 'obj' && (form.unit === 'fromMetadata' || form.axes === 'fromMetadata')) {
       return setError('OBJ 不可靠地声明单位和轴向，请明确选择。');
     }
-    const hasAnchor = form.longitude || form.latitude || form.height;
-    if (hasAnchor && (!form.longitude || !form.latitude || !form.height)) return setError('锚点定位需要完整的经度、纬度和椭球高。');
+    if (form.georeferenceMode === 'anchor' && (!form.longitude || !form.latitude || !form.height)) return setError('锚点定位需要完整的经度、纬度和椭球高。');
+    if (form.georeferenceMode === 'projected' && !form.sourceCrs.trim()) return setError('已有投影坐标模式需要完整的源 CRS（例如 EPSG:4547 或 WKT2）。');
+    if (form.georeferenceMode === 'projected' && capabilities?.model?.projectedGeoreference !== true) return setError('当前转换器不支持已有投影坐标模式，请更新运行组件。');
     setSubmitting(true);
     try {
-      const georeference = hasAnchor
+      const georeference = form.georeferenceMode === 'anchor'
         ? { mode: 'anchor', longitudeDeg: Number(form.longitude), latitudeDeg: Number(form.latitude), ellipsoidHeightM: Number(form.height) }
-        : { mode: 'local' };
+        : form.georeferenceMode === 'projected'
+          ? { mode: 'projected', sourceCrs: form.sourceCrs.trim(), axisMapping: form.axisMapping, originOffset: [Number(form.originX), Number(form.originY), Number(form.originZ)] }
+          : { mode: 'local' };
       const result = await api.createTask({
         operation: 'convert-model', input: { path: form.input.trim() }, output: { path: form.output.trim() }, taskName: form.name || undefined,
         options: { model: { format: form.format, unit: form.unit, axes: form.axes, missingTexturePolicy: 'error', textureRoots: [] }, georeference, texture: { mode: 'keep' }, modelOutput: { format: '3dtiles-1.0', tiling: 'single', lod: false } },
@@ -96,7 +106,9 @@ export function ModelConvert() {
       {scan?.warnings?.map((warning) => <Alert key={warning} kind="warn">{warning}</Alert>)}</FormSection>
     {detailsOpen && scan?.materials?.length ? <div className="summary-box"><dl><dt>MTL 文件</dt><dd>{scan.summary?.materialLibraryCount ?? scan.materials.length}</dd>{scan.materials.map((material) => <><dt key={`${material.path}-label`}>{material.reference}</dt><dd key={material.path}>{material.exists ? `${material.textures?.filter((texture) => texture.exists).length ?? 0} 个贴图可用` : '缺失'}{material.textures?.filter((texture) => !texture.exists).map((texture) => <div key={texture.path} className="field-error">缺失贴图：{texture.reference}</div>)}</dd></>)}</dl></div> : null}
     <FormSection title="模型设置"><div className="field"><label>格式</label><select className="select" value={form.format} onChange={(event) => update('format', event.target.value as ModelFormat)}><option value="fbx">FBX</option><option value="obj">OBJ</option></select></div><div className="field"><label>单位</label><select className="select" value={form.unit} onChange={(event) => update('unit', event.target.value as FormState['unit'])}><option value="fromMetadata">从文件元数据读取</option><option value="meters">米</option><option value="centimeters">厘米</option><option value="millimeters">毫米</option><option value="feet">英尺</option></select></div><div className="field"><label>轴向</label><select className="select" value={form.axes} onChange={(event) => update('axes', event.target.value as FormState['axes'])}><option value="fromMetadata">从文件元数据读取</option><option value="yUpRightHanded">右手 Y 向上</option><option value="zUpRightHanded">右手 Z 向上</option></select></div></FormSection>
-    <FormSection title="地理定位（可选锚点）"><div className="row"><input className="input" placeholder="经度" value={form.longitude} onChange={(event) => update('longitude', event.target.value)} /><input className="input" placeholder="纬度" value={form.latitude} onChange={(event) => update('latitude', event.target.value)} /><input className="input" placeholder="椭球高（米）" value={form.height} onChange={(event) => update('height', event.target.value)} /></div></FormSection>
+    <FormSection title="地理定位"><div className="field"><label>定位模式</label><select className="select" value={form.georeferenceMode} onChange={(event) => update('georeferenceMode', event.target.value as FormState['georeferenceMode'])}><option value="local">保留本地坐标</option><option value="anchor">WGS84 锚点放置</option><option value="projected" disabled={capabilities?.model?.projectedGeoreference === false}>已有投影坐标</option></select></div>
+      {form.georeferenceMode === 'anchor' ? <div className="row"><input className="input" placeholder="经度" value={form.longitude} onChange={(event) => update('longitude', event.target.value)} /><input className="input" placeholder="纬度" value={form.latitude} onChange={(event) => update('latitude', event.target.value)} /><input className="input" placeholder="椭球高（米）" value={form.height} onChange={(event) => update('height', event.target.value)} /></div> : null}
+      {form.georeferenceMode === 'projected' ? <><div className="field"><label>源 CRS</label><input className="input" placeholder="EPSG:4547 或完整 WKT2" value={form.sourceCrs} onChange={(event) => update('sourceCrs', event.target.value)} /></div><div className="field"><label>源坐标轴</label><select className="select" value={form.axisMapping} onChange={(event) => update('axisMapping', event.target.value as FormState['axisMapping'])}><option value="eastNorthHeight">E / N / H</option><option value="northEastHeight">N / E / H</option></select></div><div className="row"><input className="input" placeholder="原点偏移 E/N 或 N/E" value={form.originX} onChange={(event) => update('originX', event.target.value)} /><input className="input" placeholder="原点偏移 N/E 或 E/N" value={form.originY} onChange={(event) => update('originY', event.target.value)} /><input className="input" placeholder="原点偏移 H" value={form.originZ} onChange={(event) => update('originZ', event.target.value)} /></div><Alert kind="warn">投影转换会逐顶点重投影；请确认 CRS、轴顺序和原点偏移均与源模型一致。</Alert></> : null}</FormSection>
     <FormSection title="输出"><PathField label="成果目录" value={form.output} onChange={(value) => update('output', value)} /></FormSection>
     <SubmitBar onReset={() => { setForm(defaults); setScan(null); setError(null); }} primaryLabel={submitting ? '提交中…' : '开始转换'} onPrimary={() => void submit()} primaryDisabled={submitting || capabilities?.model?.ready === false} />
   </div></div>;
