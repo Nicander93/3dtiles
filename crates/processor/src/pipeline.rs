@@ -93,9 +93,9 @@ fn run_convert_model(
             (Some(longitude_deg), Some(latitude_deg), Some(ellipsoid_height_m))
         }
         GeoReferenceOptions::Local => (None, None, None),
-        GeoReferenceOptions::Projected { .. } => {
-            return Err("projected model georeference requires a converter with model-config support".into());
-        }
+        // The complete projected configuration is serialized in model-config.
+        // CLI longitude/latitude flags are only the legacy anchor transport.
+        GeoReferenceOptions::Projected { .. } => (None, None, None),
     };
     check_cancel(cancel)?;
 

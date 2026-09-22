@@ -162,8 +162,10 @@ try {
 }
 if ($capabilities.modelConfigVersion -ne 1 -or
     -not ($capabilities.formats -contains "fbx") -or
-    -not ($capabilities.formats -contains "obj")) {
-  throw "Converter is missing required model conversion capabilities (FBX, OBJ, modelConfigVersion=1)"
+    -not ($capabilities.formats -contains "obj") -or
+    -not $capabilities.projectedGeoreference -or
+    -not ($capabilities.georeferenceModes -contains "projected")) {
+  throw "Converter is missing required model conversion capabilities (FBX, OBJ, projected georeference, modelConfigVersion=1)"
 }
 
 if (Test-Path $OutDir) {
