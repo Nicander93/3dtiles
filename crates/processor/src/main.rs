@@ -1,7 +1,7 @@
 //! processor CLI — task pipelines and lightweight input preflight.
 
 use clap::{Parser, Subcommand};
-use processor::{capabilities_json, run_task, scan_model, scan_osgb, CancelFlag, TaskConfig, EXIT_FAILED};
+use processor::{capabilities_json, run_task, scan_model_with_roots, scan_osgb, CancelFlag, TaskConfig, EXIT_FAILED};
 use serde_json::json;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -58,6 +58,8 @@ enum Commands {
     ScanModel {
         #[arg(long)]
         path: PathBuf,
+        #[arg(long = "texture-root")]
+        texture_roots: Vec<PathBuf>,
     },
     /// Probe bundled tools (JSON). Same source as desktop capabilities.
     Capabilities {
@@ -173,8 +175,8 @@ fn main() -> ExitCode {
                 ExitCode::from(EXIT_FAILED as u8)
             }
         }
-        Commands::ScanModel { path } => {
-            let result = scan_model(&path.to_string_lossy());
+        Commands::ScanModel { path, texture_roots } => {
+            let result = scan_model_with_roots(&path.to_string_lossy(), &texture_roots);
             println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
             if result.get("valid").and_then(|value| value.as_bool()).unwrap_or(false) {
                 ExitCode::SUCCESS

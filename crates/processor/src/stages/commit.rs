@@ -1,6 +1,5 @@
 //! Temp dir → final output rename/commit (plan §7.4 / T01).
 
-use crate::cancel::CancelFlag;
 use crate::path_policy::{self, validate_task_id};
 use crate::protocol::{Emitter, Stage};
 use std::fs;
@@ -145,7 +144,7 @@ pub fn commit_rename(
     staged_dir: &Path,
     owned_temp_dir: &Path,
     final_output: &Path,
-    temp_guard: Option<&mut TempGuard<'_>>,
+    temp_guard: Option<&mut TempGuard>,
 ) -> Result<(), String> {
     emitter.stage(Stage::Commit, "Committing output");
     ensure_owned_temp(owned_temp_dir)?;
@@ -303,29 +302,22 @@ fn ensure_owned_temp(temp_dir: &Path) -> Result<(), String> {
     ))
 }
 
-/// Cleans only a work directory created by this run when cancellation interrupts it.
+/// Removes this run's owned work directory whenever processing exits before commit.
 ///
 /// # Semantics
 ///
-/// - **Cancel before commit**: cleanup removes temp directory if cancellation is detected
+/// - **Failure or cancel before commit**: cleanup removes the owned temp directory
 /// - **Success after commit**: cleanup is suppressed by `mark_committed()`; output remains
-/// - **Late cancel after commit**: even if cancel arrives after `commit_rename` succeeds
-///   but before `mark_committed()`, the temp dir has already been renamed, so cleanup
-///   attempts to remove a non-existent path (safe no-op)
-///
-/// The guard does NOT clean up on normal success without cancellation, allowing
-/// diagnostic inspection of temp dirs when processing fails naturally.
-pub struct TempGuard<'a> {
+/// - **Late cancel after commit**: the committed output is never removed by this guard
+pub struct TempGuard {
     path: PathBuf,
-    cancel: &'a CancelFlag,
     committed: bool,
 }
 
-impl<'a> TempGuard<'a> {
-    pub fn new(path: PathBuf, cancel: &'a CancelFlag) -> Self {
+impl TempGuard {
+    pub fn new(path: PathBuf) -> Self {
         Self {
             path,
-            cancel,
             committed: false,
         }
     }
@@ -335,9 +327,9 @@ impl<'a> TempGuard<'a> {
     }
 }
 
-impl Drop for TempGuard<'_> {
+impl Drop for TempGuard {
     fn drop(&mut self) {
-        if self.cancel.is_cancelled() && !self.committed {
+        if !self.committed {
             cleanup_temp(&self.path);
         }
     }
@@ -547,7 +539,7 @@ mod tests {
         fs::write(temp.join("data.txt"), b"committed").expect("write data");
         
         let cancel = CancelFlag::new();
-        let mut guard = TempGuard::new(temp.clone(), &cancel);
+        let mut guard = TempGuard::new(temp.clone());
         
         // Simulate commit: rename succeeds, guard is marked
         fs::rename(&temp, &output).expect("rename temp to output");
@@ -569,7 +561,6 @@ mod tests {
     #[test]
     fn commits_staged_output_from_owned_temp_directory() {
         use super::{commit_rename, TempGuard};
-        use crate::cancel::CancelFlag;
         use crate::protocol::Emitter;
 
         let root = temp_root("staged-commit");
@@ -579,8 +570,7 @@ mod tests {
         fs::create_dir(&staged).expect("create staged output");
         fs::write(staged.join("tileset.json"), b"{}").expect("write tileset");
 
-        let cancel = CancelFlag::new();
-        let mut guard = TempGuard::new(temp.clone(), &cancel);
+        let mut guard = TempGuard::new(temp.clone());
         let emitter = Emitter::new("task-staged");
         commit_rename(&emitter, &staged, &temp, &output, Some(&mut guard))
             .expect("commit staged model output");
@@ -595,7 +585,6 @@ mod tests {
     #[test]
     fn refuses_to_commit_staged_output_outside_owned_temp_directory() {
         use super::{commit_rename, TempGuard};
-        use crate::cancel::CancelFlag;
         use crate::protocol::Emitter;
 
         let root = temp_root("staged-outside");
@@ -605,8 +594,7 @@ mod tests {
         fs::create_dir(&foreign).expect("create foreign output");
         fs::write(foreign.join("tileset.json"), b"{}").expect("write tileset");
 
-        let cancel = CancelFlag::new();
-        let mut guard = TempGuard::new(temp.clone(), &cancel);
+        let mut guard = TempGuard::new(temp.clone());
         let emitter = Emitter::new("task-staged-outside");
         let error = commit_rename(&emitter, &foreign, &temp, &output, Some(&mut guard))
             .expect_err("foreign output must not be committed");
@@ -614,6 +602,77 @@ mod tests {
         assert!(error.contains("direct child"));
         assert!(!output.exists());
         cleanup_temp(&temp);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn existing_final_output_is_preserved_when_commit_is_refused() {
+        use super::{commit_rename, TempGuard};
+        use crate::protocol::Emitter;
+
+        let root = temp_root("final-exists");
+        let output = root.join("output");
+        fs::create_dir(&output).expect("create existing output");
+        fs::write(output.join("sentinel.txt"), b"keep existing output")
+            .expect("write output sentinel");
+
+        let temp = prepare_temp(&output, "task-final-exists").expect("prepare owned temp");
+        let staged = temp.join("staged");
+        fs::create_dir(&staged).expect("create staged output");
+        fs::write(staged.join("tileset.json"), b"{}")
+            .expect("write staged tileset");
+
+        let mut guard = TempGuard::new(temp.clone());
+        let emitter = Emitter::new("task-final-exists");
+        let error = commit_rename(&emitter, &staged, &temp, &output, Some(&mut guard))
+            .expect_err("existing final output must not be replaced");
+
+        assert!(!error.is_empty());
+        assert_eq!(fs::read(output.join("sentinel.txt")).unwrap(), b"keep existing output");
+        assert!(staged.join("tileset.json").is_file());
+        cleanup_temp(&temp);
+        drop(guard);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn missing_staged_output_is_not_committed() {
+        use super::{commit_rename, TempGuard};
+        use crate::protocol::Emitter;
+
+        let root = temp_root("staged-missing");
+        let output = root.join("output");
+        let temp = prepare_temp(&output, "task-staged-missing").expect("prepare owned temp");
+        let staged = temp.join("staged");
+
+        let mut guard = TempGuard::new(temp.clone());
+        let emitter = Emitter::new("task-staged-missing");
+        let error = commit_rename(&emitter, &staged, &temp, &output, Some(&mut guard))
+            .expect_err("missing staged output must not commit");
+
+        assert!(error.contains("staged output is missing"), "{error}");
+        assert!(!output.exists());
+        cleanup_temp(&temp);
+        drop(guard);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn uncommitted_temp_is_removed_on_error_scope_exit() {
+        use super::TempGuard;
+
+        let root = temp_root("failed-task-cleanup");
+        let output = root.join("output");
+        let temp = prepare_temp(&output, "task-failed-cleanup").expect("prepare owned temp");
+        fs::write(temp.join("partial-output"), b"incomplete")
+            .expect("write partial output");
+
+        {
+            let _guard = TempGuard::new(temp.clone());
+            // Returning an error from any pipeline stage drops the guard.
+        }
+
+        assert!(!temp.exists(), "failed task must not leave its owned temp directory");
         let _ = fs::remove_dir_all(root);
     }
 }

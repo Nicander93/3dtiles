@@ -344,17 +344,33 @@ pub fn select_model_file(app: AppHandle) -> Result<Option<String>, String> {
   }
 }
 
+#[tauri::command]
+pub fn select_texture_root(app: AppHandle) -> Result<Option<String>, String> {
+  let picked = app
+    .dialog()
+    .file()
+    .set_title("选择外部贴图目录")
+    .blocking_pick_folder();
+  match picked {
+    Some(path) => Ok(Some(file_path_to_string(path)?)),
+    None => Ok(None),
+  }
+}
+
 /// FBX/OBJ preflight via the processor. Only diagnostics cross the Tauri
 /// boundary; mesh data stays in the native converter process.
 #[tauri::command]
-pub fn scan_model(path: String) -> Result<Value, String> {
+pub fn scan_model(path: String, texture_roots: Option<Vec<String>>) -> Result<Value, String> {
   let bin = ProcessManager::processor_bin().ok_or_else(|| {
     "找不到 processor 组件，无法扫描。请修复安装或设置环境变量 GEOFORGE_PROCESSOR。".to_string()
   })?;
   let mut command = Command::new(&bin);
   ProcessManager::apply_runtime_env(&mut command);
+  command.args(["scan-model", "--path", &path]);
+  for root in texture_roots.unwrap_or_default() {
+    command.arg("--texture-root").arg(root);
+  }
   let output = command
-    .args(["scan-model", "--path", &path])
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())
     .output()

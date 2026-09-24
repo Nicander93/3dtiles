@@ -20,4 +20,4 @@ pub use stages::scan::scan_osgb;
 pub use validation::{check_frontier_coverage, check_ge_monotonicity, check_subtree_retention, 
                       FrontierCoverageResult, GeMonotonicityResult, SubtreeRetentionResult};
 pub use validator::{validate_tileset_tree, ValidationCode, ValidationIssue, ValidationReport};
-pub use stages::model::scan_model;
+pub use stages::model::{scan_model, scan_model_with_roots};

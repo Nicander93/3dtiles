@@ -1,11 +1,11 @@
 {
   "name": "geoforge-converter",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "source": "https://github.com/Nicander93/geoforge-converter",
   "upstream": "https://github.com/fanvanzh/3dtiles",
   "upstreamCommit": "GeoForge engines/3dtiles-converter snapshot bdb8b7fd31c1eaa7ef65ad9f3419c6ab8c56c149",
   "windowsX64": {
-    "url": "https://github.com/Nicander93/geoforge-converter/releases/download/v0.1.0/geoforge-converter-0.1.0-windows-x64.zip",
-    "sha256": "77cadd01941add0297a52a22ce26918d8d22c3729a0ae564556fce14327b5c5b"
+    "url": "https://github.com/Nicander93/geoforge-converter/releases/download/v0.2.1/geoforge-converter-0.2.1-windows-x64.zip",
+    "sha256": "86de5812946586e41eb15ca50c691ce1c01d0e4d65b1dcd822e5850701d7d0af"
   }
 }

@@ -10,6 +10,8 @@ use std::sync::{Arc, OnceLock};
 use std::thread;
 
 const MAX_DISPLAY_LINE_BYTES: usize = 64 * 1024;
+const DEFAULT_PROCESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
+const MAX_PROCESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 #[derive(Debug, Clone)]
 pub struct ToolPaths {
@@ -343,6 +345,34 @@ pub fn run_logged_env_result(
     cwd: Option<&Path>,
     extra_env: &[(&str, PathBuf)],
 ) -> Result<CommandResult, String> {
+    run_logged_env_result_with_timeout(
+        emitter,
+        cancel,
+        cmd,
+        cwd,
+        extra_env,
+        configured_process_timeout(),
+    )
+}
+
+fn configured_process_timeout() -> std::time::Duration {
+    std::env::var("GEOFORGE_PROCESS_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|seconds| *seconds > 0)
+        .map(std::time::Duration::from_secs)
+        .map(|timeout| timeout.min(MAX_PROCESS_TIMEOUT))
+        .unwrap_or(DEFAULT_PROCESS_TIMEOUT)
+}
+
+fn run_logged_env_result_with_timeout(
+    emitter: &Arc<Emitter>,
+    cancel: &CancelFlag,
+    cmd: &[String],
+    cwd: Option<&Path>,
+    extra_env: &[(&str, PathBuf)],
+    timeout: std::time::Duration,
+) -> Result<CommandResult, String> {
     if cmd.is_empty() {
         return Err("cannot run an empty command".into());
     }
@@ -423,6 +453,8 @@ pub fn run_logged_env_result(
 
     let mut peak_memory_bytes = 0u64;
     let mut wait_error = None;
+    let process_started = std::time::Instant::now();
+    let mut timed_out = false;
     loop {
         if let Some(bytes) = process_peak_memory_bytes(child.id()) {
             peak_memory_bytes = peak_memory_bytes.max(bytes);
@@ -433,7 +465,21 @@ pub fn run_logged_env_result(
         }
         match child.try_wait() {
             Ok(Some(_)) => break,
-            Ok(None) => thread::sleep(std::time::Duration::from_millis(100)),
+            Ok(None) => {
+                let elapsed = process_started.elapsed();
+                if elapsed >= timeout {
+                    timed_out = true;
+                    emitter.log(&format!(
+                        "[process] timed out after {} seconds; terminating child",
+                        timeout.as_secs()
+                    ));
+                    terminate_child(&mut child);
+                    break;
+                }
+                thread::sleep(
+                    std::time::Duration::from_millis(100).min(timeout.saturating_sub(elapsed)),
+                );
+            }
             Err(e) => {
                 terminate_child(&mut child);
                 wait_error = Some(format!("wait error: {e}"));
@@ -448,13 +494,26 @@ pub fn run_logged_env_result(
     if let Some(error) = wait_error {
         return Err(error);
     }
-    let exit_code = status
-        .code()
-        .unwrap_or(if cancel.is_cancelled() { 130 } else { 1 });
-    let stderr_tail = stderr_tail
+    let exit_code = if timed_out {
+        124
+    } else if cancel.is_cancelled() {
+        130
+    } else {
+        status.code().unwrap_or(1)
+    };
+    let mut stderr_tail = stderr_tail
         .lock()
         .map(|tail| tail.iter().cloned().collect::<Vec<_>>().join("\n"))
         .unwrap_or_default();
+    if timed_out {
+        if !stderr_tail.is_empty() {
+            stderr_tail.push('\n');
+        }
+        stderr_tail.push_str(&format!(
+            "process timed out after {} seconds",
+            timeout.as_secs()
+        ));
+    }
     Ok(CommandResult {
         exit_code,
         stderr_tail,
@@ -579,10 +638,14 @@ fn libc_kill(_pid: i32, _sig: i32) {}
 
 #[cfg(test)]
 mod tests {
-    use super::{bin_names, for_each_bounded_line, run_logged_env_result, MAX_DISPLAY_LINE_BYTES};
+    use super::{
+        bin_names, for_each_bounded_line, run_logged_env_result,
+        run_logged_env_result_with_timeout, MAX_DISPLAY_LINE_BYTES,
+    };
     use crate::cancel::CancelFlag;
     use crate::protocol::Emitter;
     use std::sync::Arc;
+    use std::thread;
 
     #[test]
     fn bin_names_include_exe_suffix() {
@@ -631,5 +694,62 @@ mod tests {
         .expect("run controlled converter fixture");
         assert_eq!(result.exit_code, 7);
         assert!(result.stderr_tail.contains("converter diagnostic"));
+    }
+
+    #[test]
+    fn command_timeout_terminates_child_and_returns_diagnostic() {
+        let command = if cfg!(windows) {
+            vec![
+                "pwsh".to_string(),
+                "-NoProfile".to_string(),
+                "-Command".to_string(),
+                "Start-Sleep -Seconds 10".to_string(),
+            ]
+        } else {
+            vec!["sh".to_string(), "-c".to_string(), "sleep 10".to_string()]
+        };
+        let result = run_logged_env_result_with_timeout(
+            &Arc::new(Emitter::new("util-timeout-test")),
+            &CancelFlag::new(),
+            &command,
+            None,
+            &[],
+            std::time::Duration::from_millis(100),
+        )
+        .expect("run timeout fixture");
+
+        assert_eq!(result.exit_code, 124);
+        assert!(result.stderr_tail.contains("process timed out"));
+    }
+
+    #[test]
+    fn command_cancel_terminates_child() {
+        let command = if cfg!(windows) {
+            vec![
+                "pwsh".to_string(),
+                "-NoProfile".to_string(),
+                "-Command".to_string(),
+                "Start-Sleep -Seconds 10".to_string(),
+            ]
+        } else {
+            vec!["sh".to_string(), "-c".to_string(), "sleep 10".to_string()]
+        };
+        let cancel = CancelFlag::new();
+        let request_cancel = cancel.clone();
+        let requester = thread::spawn(move || {
+            thread::sleep(std::time::Duration::from_millis(100));
+            request_cancel.request();
+        });
+        let result = run_logged_env_result(
+            &Arc::new(Emitter::new("util-cancel-test")),
+            &cancel,
+            &command,
+            None,
+            &[],
+        )
+        .expect("run cancellable fixture");
+        requester.join().expect("cancel requester thread");
+
+        assert_eq!(result.exit_code, 130);
     }
 }

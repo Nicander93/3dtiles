@@ -34,6 +34,7 @@ if (-not $SkipBuild) {
 
 $ConverterOut = Join-Path $OutDir "converter"
 $converterArgs = @(
+  "-NoProfile", "-ExecutionPolicy", "Bypass",
   "-File", (Join-Path $PSScriptRoot "prepare-converter.ps1"),
   "-OutDir", $ConverterOut
 )
@@ -46,7 +47,12 @@ if ($ConverterZip) {
   $converterArgs += @("-LocalZip", $resolvedConverterZip.Path)
   $converterSourceNote = "Converter comes from a caller-supplied local zip via -ConverterZip."
 }
-& pwsh -NoProfile @converterArgs
+$powerShellExe = if ($PSVersionTable.PSEdition -eq "Core") {
+  Join-Path $PSHOME "pwsh.exe"
+} else {
+  Join-Path $PSHOME "powershell.exe"
+}
+& $powerShellExe @converterArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $ProductBin = Join-Path $OutDir "bin"

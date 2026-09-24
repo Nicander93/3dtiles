@@ -6,6 +6,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub fn scan_model(path: &str) -> Value {
+    scan_model_with_roots(path, &[])
+}
+
+pub fn scan_model_with_roots(path: &str, texture_roots: &[PathBuf]) -> Value {
     let input = PathBuf::from(path);
     let mut errors: Vec<String> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
@@ -30,7 +34,7 @@ pub fn scan_model(path: &str) -> Value {
             Ok(libraries) => {
                 let root = input.parent().unwrap_or_else(|| Path::new("."));
                 for library in libraries {
-                    let resolved = root.join(&library);
+                    let resolved = resolve_resource(root, &library, texture_roots);
                     let exists = resolved.is_file();
                     if !exists {
                         errors.push(format!("Referenced OBJ material file is missing: {}", resolved.display()));
@@ -40,7 +44,11 @@ pub fn scan_model(path: &str) -> Value {
                             Ok(references) => references
                                 .into_iter()
                                 .map(|reference| {
-                                    let texture_path = resolved.parent().unwrap_or(root).join(&reference);
+                                    let texture_path = resolve_resource(
+                                        resolved.parent().unwrap_or(root),
+                                        &reference,
+                                        texture_roots,
+                                    );
                                     let texture_exists = texture_path.is_file();
                                     if !texture_exists {
                                         errors.push(format!("Referenced MTL texture is missing: {}", texture_path.display()));
@@ -82,6 +90,24 @@ pub fn scan_model(path: &str) -> Value {
     })
 }
 
+fn resolve_resource(base: &Path, reference: &str, texture_roots: &[PathBuf]) -> PathBuf {
+    let requested = PathBuf::from(reference);
+    if requested.is_absolute() {
+        return requested;
+    }
+
+    let mut candidates = vec![base.join(&requested), base.join(requested.file_name().unwrap_or_default())];
+    for root in texture_roots {
+        candidates.push(root.join(&requested));
+        candidates.push(root.join(requested.file_name().unwrap_or_default()));
+    }
+    candidates
+        .iter()
+        .find(|candidate| candidate.is_file())
+        .cloned()
+        .unwrap_or_else(|| base.join(requested))
+}
+
 fn read_mtl_texture_references(path: &Path) -> Result<Vec<String>, String> {
     const MAX_BYTES: u64 = 8 * 1024 * 1024;
     let metadata = fs::metadata(path).map_err(|error| format!("Cannot inspect MTL file: {error}"))?;
@@ -97,13 +123,38 @@ fn read_mtl_texture_references(path: &Path) -> Result<Vec<String>, String> {
 
 fn mtl_texture_reference(line: &str) -> Option<String> {
     let line = line.split('#').next()?.trim();
-    let (_, value) = line.split_once(char::is_whitespace)?;
-    let command = line.split_whitespace().next()?.to_ascii_lowercase();
-    if !matches!(command.as_str(), "map_kd" | "map_ks" | "map_d" | "map_bump" | "bump" | "norm" | "disp" | "decal") {
+    let mut tokens = line.split_whitespace();
+    let command = tokens.next()?.to_ascii_lowercase();
+    if !matches!(command.as_str(), "map_ka" | "map_kd" | "map_ks" | "map_ke" | "map_ns" | "map_d" | "map_bump" | "bump" | "norm" | "disp" | "decal" | "refl") {
         return None;
     }
-    let value = value.trim().trim_matches('"');
-    (!value.is_empty()).then(|| value.to_string())
+
+    let remaining = line
+        .split_once(char::is_whitespace)
+        .map(|(_, value)| value.trim())?;
+    let mut parts = remaining.split_whitespace().peekable();
+    while parts.peek().is_some_and(|part| part.starts_with('-')) {
+        let option = parts.next()?;
+        match option {
+            "-o" | "-s" | "-t" => {
+                let mut values = 0;
+                while values < 3 && parts.peek().is_some_and(|value| value.parse::<f64>().is_ok()) {
+                    parts.next();
+                    values += 1;
+                }
+                if values == 0 {
+                    return None;
+                }
+            }
+            "-mm" => { parts.next()?; parts.next()?; }
+            "-blendu" | "-blendv" | "-cc" | "-clamp" | "-imfchan" | "-type" | "-texres" | "-bm" | "-boost" | "-colorspace" => { parts.next()?; }
+            _ => return None,
+        }
+    }
+
+    let filename = parts.collect::<Vec<_>>().join(" ");
+    let filename = filename.trim_matches('"');
+    (!filename.is_empty()).then(|| filename.to_string())
 }
 
 fn read_obj_material_libraries(path: &Path) -> Result<Vec<String>, String> {
@@ -124,7 +175,7 @@ fn read_obj_material_libraries(path: &Path) -> Result<Vec<String>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::scan_model;
+    use super::{mtl_texture_reference, scan_model, scan_model_with_roots};
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -139,6 +190,31 @@ mod tests {
         assert!(!result["valid"].as_bool().unwrap_or(true));
         assert!(result["errors"][0].as_str().unwrap_or_default().contains("missing"));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn resolves_obj_mtl_textures_from_configured_roots() {
+        let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("geoforge-model-texture-root-{stamp}"));
+        let model_dir = root.join("model");
+        let texture_root = root.join("shared-assets");
+        fs::create_dir_all(&model_dir).unwrap();
+        fs::create_dir_all(texture_root.join("nested")).unwrap();
+        let obj = model_dir.join("building.obj");
+        fs::write(&obj, "mtllib building.mtl\nv 0 0 0\n").unwrap();
+        fs::write(model_dir.join("building.mtl"), "newmtl m\nmap_Kd nested/roof.png\n").unwrap();
+        fs::write(texture_root.join("nested/roof.png"), "fixture").unwrap();
+
+        let result = scan_model_with_roots(&obj.to_string_lossy(), &[texture_root]);
+        assert!(result["valid"].as_bool().unwrap_or(false), "{result}");
+    }
+
+    #[test]
+    fn parses_mtl_map_options_and_filenames_with_spaces() {
+        assert_eq!(
+            mtl_texture_reference("map_Kd -s 1 1 1 \"texture set/roof.png\""),
+            Some("texture set/roof.png".into())
+        );
     }
 
     #[test]

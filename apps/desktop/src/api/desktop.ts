@@ -107,11 +107,16 @@ export const desktop = {
     return tauriInvoke<string | null>('select_model_file');
   },
 
-  scanModel: async (path: string): Promise<ModelScanResult> => {
+  selectTextureRoot: async (): Promise<string | null> => {
+    if (!isTauri()) return null;
+    return tauriInvoke<string | null>('select_texture_root');
+  },
+
+  scanModel: async (path: string, textureRoots: string[] = []): Promise<ModelScanResult> => {
     if (!isTauri()) {
       throw new ApiError('model preflight requires Tauri desktop', 0);
     }
-    return tauriInvoke<ModelScanResult>('scan_model', { path });
+    return tauriInvoke<ModelScanResult>('scan_model', { path, textureRoots });
   },
 
   listTasks: async (): Promise<Task[]> => {

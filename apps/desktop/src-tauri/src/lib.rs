@@ -78,6 +78,7 @@ pub fn run() {
       commands::select_output_directory,
       commands::select_tileset_file,
       commands::select_model_file,
+      commands::select_texture_root,
       commands::submit_task,
       commands::cancel_task,
       commands::get_task,

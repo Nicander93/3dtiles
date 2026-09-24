@@ -70,6 +70,15 @@ fn run_convert_model(
 ) -> Result<PathBuf, String> {
     let options = config.model_options()?;
     options.validate()?;
+    for root in &options.model.texture_roots {
+        let texture_root = Path::new(root);
+        if !texture_root.is_dir() {
+            return Err(format!(
+                "model.textureRoots directory does not exist: {}",
+                texture_root.display()
+            ));
+        }
+    }
     let input_file = Path::new(config.input_path());
     if !input_file.is_file() {
         return Err(format!("model input must be a file: {}", input_file.display()));
@@ -101,7 +110,7 @@ fn run_convert_model(
 
     let final_out = validated.output.clone();
     let temp = commit::prepare_temp(&final_out, &config.task_id)?;
-    let mut temp_guard = commit::TempGuard::new(temp.clone(), cancel);
+    let mut temp_guard = commit::TempGuard::new(temp.clone());
     let staged = temp.join("staged");
     let model_config_path = temp.join("model-config.json");
     let mut model_config = serde_json::to_value(&options).map_err(|error| error.to_string())?;
@@ -134,7 +143,11 @@ fn run_convert_model(
     check_cancel(cancel)?;
     commit::write_checkpoint(&temp, commit::Checkpoint::Committing)?;
     commit::commit_rename(emitter, &staged, &temp, &final_out, Some(&mut temp_guard))?;
-    commit::write_checkpoint(&temp, commit::Checkpoint::Committed)?;
+    if let Err(error) = commit::write_checkpoint(&temp, commit::Checkpoint::Committed) {
+        emitter.log(&format!(
+            "[commit] output is committed; final checkpoint could not be written: {error}"
+        ));
+    }
     emitter.metric("output.bytes", json!(directory_size_bytes(&final_out)));
     commit::cleanup_temp(&temp);
     Ok(final_out)
@@ -217,7 +230,7 @@ fn run_convert_osgb(
     report_output_space(emitter, validated.output_parent_free_bytes);
     let final_out = validated.output.clone();
     let temp = commit::prepare_temp(&final_out, &config.task_id)?;
-    let mut temp_guard = commit::TempGuard::new(temp.clone(), cancel);
+    let mut temp_guard = commit::TempGuard::new(temp.clone());
     // Work subdirs inside temp
     let convert_dir = temp.join("convert");
     std::fs::create_dir_all(&convert_dir).map_err(|e| e.to_string())?;
@@ -383,7 +396,7 @@ fn run_process_tileset(
 
     let final_out = validated.output.clone();
     let temp = commit::prepare_temp(&final_out, &config.task_id)?;
-    let mut temp_guard = commit::TempGuard::new(temp.clone(), cancel);
+    let mut temp_guard = commit::TempGuard::new(temp.clone());
     let work = temp.join("work");
 
     if want_rebuild {
