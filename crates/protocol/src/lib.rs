@@ -304,6 +304,7 @@ pub struct ExecutionOptions {
     pub cpu_workers: CpuWorkers,
     pub memory_budget_mib: Option<u64>,
     pub io_workers: Option<u32>,
+    pub resume_policy: ResumePolicy,
 }
 
 impl Default for ExecutionOptions {
@@ -312,7 +313,22 @@ impl Default for ExecutionOptions {
             cpu_workers: CpuWorkers::Auto,
             memory_budget_mib: None,
             io_workers: None,
+            resume_policy: ResumePolicy::Off,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ResumePolicy {
+    Off,
+    RetainOnFailure,
+    Resume,
+}
+
+impl Default for ResumePolicy {
+    fn default() -> Self {
+        Self::Off
     }
 }
 
@@ -385,6 +401,15 @@ impl ExecutionOptions {
                     return Err("execution.ioWorkers exceeds maximum value".into());
                 }
                 exec_opts.io_workers = Some(io as u32);
+            }
+
+            if let Some(resume) = exec.get("resumePolicy").and_then(|v| v.as_str()) {
+                exec_opts.resume_policy = match resume {
+                    "off" => ResumePolicy::Off,
+                    "retain-on-failure" => ResumePolicy::RetainOnFailure,
+                    "resume" => ResumePolicy::Resume,
+                    _ => return Err(format!("invalid execution.resumePolicy: {}", resume)),
+                };
             }
         }
 

@@ -11,6 +11,7 @@ pub mod stages;
 pub mod util;
 pub mod validation;
 pub mod validator;
+pub mod work_manifest;
 
 pub use cancel::CancelFlag;
 pub use capabilities::{capabilities_json, converter_supports_execution_protocol_v1};
