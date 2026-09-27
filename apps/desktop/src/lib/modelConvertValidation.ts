@@ -20,6 +20,33 @@ function samePath(left: string, right: string): boolean {
   return Boolean(left.trim()) && normalize(left) === normalize(right);
 }
 
+export function buildModelOutputPath(modelFile: string, outputParent: string, outputId: string): string {
+  const fileName = modelFile.trim().split(/[/\\]/).pop() || '';
+  const parent = outputParent.trim();
+  if (!fileName || !parent || !outputId) return '';
+
+  const stem = fileName.replace(/\.(fbx|obj)$/i, '');
+  const separator = parent.includes('\\') ? '\\' : '/';
+  const base = parent.replace(/[/\\]+$/, '');
+  return `${base}${separator}${stem}_tiles_${outputId}`;
+}
+
+export function modelOutputPathError(modelFile: string, output: string): string | null {
+  if (!modelFile.trim() || !output.trim()) return null;
+  if (samePath(modelFile, output)) return '成果目录不能与模型文件相同。';
+
+  const normalize = (path: string) => path.trim().replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  const modelDirectory = normalize(modelFile).replace(/\/[^/]+$/, '');
+  const outputDirectory = normalize(output);
+  if (modelDirectory && (outputDirectory === modelDirectory || outputDirectory.startsWith(`${modelDirectory}/`))) {
+    return '成果目录不能位于模型文件所在目录内。请选择其他保存位置。';
+  }
+  if (outputDirectory && modelDirectory.startsWith(`${outputDirectory}/`)) {
+    return '成果目录不能包含模型文件所在目录。请选择其他保存位置。';
+  }
+  return null;
+}
+
 function finiteNumber(value: string): number | null {
   if (!value.trim()) return null;
   const parsed = Number(value);
@@ -27,8 +54,9 @@ function finiteNumber(value: string): number | null {
 }
 
 export function modelConvertValidationError(input: ModelConvertValidationInput): string | null {
-  if (!input.input.trim() || !input.output.trim()) return '请填写模型文件和输出目录。';
-  if (samePath(input.input, input.output)) return '输出目录不能与模型文件相同。';
+  if (!input.input.trim() || !input.output.trim()) return '请选择模型文件和保存位置。';
+  const outputError = modelOutputPathError(input.input, input.output);
+  if (outputError) return outputError;
   if (input.format === 'obj' && (input.unit === 'fromMetadata' || input.axes === 'fromMetadata')) {
     return 'OBJ 不可靠地声明单位和轴向，请明确选择。';
   }

@@ -29,9 +29,14 @@ cargo test -p processor --lib
 # 桌面
 cd apps/desktop
 npm install
-npm run prepare:sidecars
 npm run tauri:dev
 ```
+
+开发版默认使用固定版本的 Converter Release。修改了相邻 `geoforge-converter` 仓库后，
+先在该仓库运行 `cargo build`，再把 `GEOFORGE_3DTILE` 指向其
+`target/debug/_3dtile.exe`，最后重启 `npm run tauri:dev` 并创建新任务。
+完整 PowerShell 命令见 [桌面开发说明](./apps/desktop/README.md)。
+`tauri:build` 不会编译转换器源码。
 
 可选环境变量（开发覆盖；正式安装包应自带 runtime，一般不必设置）：
 

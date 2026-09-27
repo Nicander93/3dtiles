@@ -7,8 +7,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use tauri::AppHandle;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 
 fn file_path_to_string(path: FilePath) -> Result<String, String> {
@@ -33,11 +32,15 @@ pub fn select_input_directory(app: AppHandle) -> Result<Option<String>, String> 
 
 #[tauri::command]
 pub fn select_output_directory(app: AppHandle) -> Result<Option<String>, String> {
-  let picked = app
+  let picker = app
     .dialog()
     .file()
-    .set_title("选择输出目录")
-    .blocking_pick_folder();
+    .set_title("选择保存位置（将在其中新建成果目录）");
+  let picker = match app.path().document_dir() {
+    Ok(directory) => picker.set_directory(directory),
+    Err(_) => picker,
+  };
+  let picked = picker.blocking_pick_folder();
   match picked {
     Some(path) => Ok(Some(file_path_to_string(path)?)),
     None => Ok(None),

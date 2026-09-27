@@ -9,6 +9,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
+Import-Module Microsoft.PowerShell.Archive -ErrorAction Stop
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..\..")
 $ManifestPath = Join-Path $RepoRoot "third_party\3dtiles-converter.json"
 if (-not (Test-Path $ManifestPath)) {
