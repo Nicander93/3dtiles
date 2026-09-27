@@ -1,0 +1,428 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "GeoForge Large Data Benchmark Result",
+  "description": "Schema for GeoForge large-scale oblique data processing benchmark results",
+  "type": "object",
+  "required": [
+    "benchmark_version",
+    "timestamp",
+    "environment",
+    "codebase",
+    "configuration",
+    "sample",
+    "results"
+  ],
+  "properties": {
+    "benchmark_version": {
+      "type": "string",
+      "description": "Benchmark schema version",
+      "enum": ["1.0.0"]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Benchmark execution timestamp (ISO 8601)"
+    },
+    "environment": {
+      "type": "object",
+      "required": ["os", "cpu", "memory_mb", "disk_type"],
+      "properties": {
+        "os": {
+          "type": "string",
+          "description": "Operating system (e.g., 'Windows 11', 'Linux 6.12.94+')"
+        },
+        "os_version": {
+          "type": "string",
+          "description": "Detailed OS version"
+        },
+        "cpu": {
+          "type": "string",
+          "description": "CPU model"
+        },
+        "cpu_cores": {
+          "type": "integer",
+          "description": "Physical CPU cores"
+        },
+        "cpu_threads": {
+          "type": "integer",
+          "description": "Logical CPU threads (including hyperthreading)"
+        },
+        "memory_mb": {
+          "type": "integer",
+          "description": "Total system memory in MB"
+        },
+        "disk_type": {
+          "type": "string",
+          "enum": ["SSD", "HDD", "NVMe", "Unknown"],
+          "description": "Storage device type"
+        },
+        "disk_total_gb": {
+          "type": "number",
+          "description": "Total disk space in GB"
+        }
+      }
+    },
+    "codebase": {
+      "type": "object",
+      "required": ["main_repo", "converter_repo"],
+      "properties": {
+        "main_repo": {
+          "type": "object",
+          "required": ["url", "branch", "commit"],
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "Main repository URL"
+            },
+            "branch": {
+              "type": "string",
+              "description": "Branch name"
+            },
+            "commit": {
+              "type": "string",
+              "description": "Commit SHA (short or full)"
+            },
+            "dirty": {
+              "type": "boolean",
+              "description": "Whether working tree has uncommitted changes"
+            }
+          }
+        },
+        "converter_repo": {
+          "type": "object",
+          "required": ["url", "version", "commit"],
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "Converter repository URL"
+            },
+            "version": {
+              "type": "string",
+              "description": "Converter version (e.g., 'v0.2.2')"
+            },
+            "commit": {
+              "type": "string",
+              "description": "Converter commit SHA"
+            },
+            "binary_sha256": {
+              "type": "string",
+              "description": "SHA256 hash of converter executable"
+            }
+          }
+        },
+        "converter_runtime_config": {
+          "type": "string",
+          "description": "Path to converter-runtime.json"
+        }
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "required": ["threads"],
+      "properties": {
+        "threads": {
+          "type": "integer",
+          "description": "Number of conversion threads (0 = auto)"
+        },
+        "thread_source": {
+          "type": "string",
+          "enum": ["explicit", "env", "default"],
+          "description": "How thread count was determined"
+        },
+        "memory_budget_mb": {
+          "type": "integer",
+          "description": "Memory budget in MB (if applicable)"
+        },
+        "texture_mode": {
+          "type": "string",
+          "enum": ["keep", "ktx2", "both"],
+          "description": "Texture processing mode"
+        },
+        "additional_options": {
+          "type": "object",
+          "description": "Other task configuration options"
+        }
+      }
+    },
+    "sample": {
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Sample dataset name"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["osgb", "fbx", "obj"],
+          "description": "Input data type"
+        },
+        "description": {
+          "type": "string",
+          "description": "Sample dataset description"
+        },
+        "input_size_mb": {
+          "type": "number",
+          "description": "Total input data size in MB (compressed on disk)"
+        },
+        "block_count": {
+          "type": "integer",
+          "description": "Number of Blocks"
+        },
+        "max_block_size_mb": {
+          "type": "number",
+          "description": "Size of largest Block in MB"
+        },
+        "texture_count": {
+          "type": "integer",
+          "description": "Total texture file count"
+        },
+        "max_texture_pixels": {
+          "type": "integer",
+          "description": "Maximum texture resolution in pixels"
+        },
+        "lod_levels": {
+          "type": "integer",
+          "description": "Number of LOD levels"
+        },
+        "grid_sparse": {
+          "type": "boolean",
+          "description": "Whether grid has missing blocks"
+        }
+      }
+    },
+    "results": {
+      "type": "object",
+      "required": ["status", "timing"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["success", "partial_success", "failed", "cancelled"],
+          "description": "Overall execution status"
+        },
+        "timing": {
+          "type": "object",
+          "required": ["total_seconds"],
+          "properties": {
+            "total_seconds": {
+              "type": "number",
+              "description": "Total execution time in seconds"
+            },
+            "scan_seconds": {
+              "type": "number",
+              "description": "Scan stage time"
+            },
+            "convert_seconds": {
+              "type": "number",
+              "description": "Convert stage time"
+            },
+            "rebuild_seconds": {
+              "type": "number",
+              "description": "Rebuild stage time"
+            },
+            "texture_seconds": {
+              "type": "number",
+              "description": "Texture processing stage time"
+            },
+            "validate_seconds": {
+              "type": "number",
+              "description": "Validation stage time"
+            },
+            "commit_seconds": {
+              "type": "number",
+              "description": "Commit stage time"
+            }
+          }
+        },
+        "memory": {
+          "type": "object",
+          "required": ["measurement_method"],
+          "properties": {
+            "measurement_method": {
+              "type": "string",
+              "enum": [
+                "windows_private_bytes",
+                "windows_working_set",
+                "linux_rss",
+                "linux_pss"
+              ],
+              "description": "Memory measurement method"
+            },
+            "peak_total_mb": {
+              "type": "number",
+              "description": "Peak memory of entire process tree (MB)"
+            },
+            "peak_main_process_mb": {
+              "type": "number",
+              "description": "Peak memory of main process (MB)"
+            },
+            "peak_converter_mb": {
+              "type": "number",
+              "description": "Peak memory of converter subprocess (MB)"
+            },
+            "peak_timestamp": {
+              "type": "string",
+              "description": "When peak occurred (relative to start or absolute)"
+            },
+            "notes": {
+              "type": "string",
+              "description": "Additional memory measurement notes"
+            }
+          }
+        },
+        "cpu": {
+          "type": "object",
+          "properties": {
+            "average_utilization_percent": {
+              "type": "number",
+              "description": "Average CPU utilization (%)"
+            },
+            "convert_utilization_percent": {
+              "type": "number",
+              "description": "CPU utilization during convert stage (%)"
+            },
+            "rebuild_utilization_percent": {
+              "type": "number",
+              "description": "CPU utilization during rebuild stage (%)"
+            },
+            "texture_utilization_percent": {
+              "type": "number",
+              "description": "CPU utilization during texture stage (%)"
+            }
+          }
+        },
+        "io": {
+          "type": "object",
+          "properties": {
+            "read_bytes": {
+              "type": "integer",
+              "description": "Total bytes read"
+            },
+            "write_bytes": {
+              "type": "integer",
+              "description": "Total bytes written"
+            },
+            "temp_peak_mb": {
+              "type": "number",
+              "description": "Peak temporary disk usage (MB)"
+            },
+            "output_size_mb": {
+              "type": "number",
+              "description": "Final output size (MB)"
+            }
+          }
+        },
+        "blocks": {
+          "type": "object",
+          "properties": {
+            "total": {
+              "type": "integer",
+              "description": "Total blocks discovered"
+            },
+            "succeeded": {
+              "type": "integer",
+              "description": "Blocks successfully converted"
+            },
+            "failed": {
+              "type": "integer",
+              "description": "Blocks that failed"
+            },
+            "slowest_block": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Block identifier"
+                },
+                "time_seconds": {
+                  "type": "number",
+                  "description": "Processing time in seconds"
+                },
+                "size_mb": {
+                  "type": "number",
+                  "description": "Block size in MB"
+                }
+              }
+            },
+            "largest_block": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Block identifier"
+                },
+                "size_mb": {
+                  "type": "number",
+                  "description": "Block size in MB"
+                },
+                "time_seconds": {
+                  "type": "number",
+                  "description": "Processing time in seconds"
+                }
+              }
+            }
+          }
+        },
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["stage", "reason"],
+            "properties": {
+              "stage": {
+                "type": "string",
+                "enum": ["scan", "convert", "rebuild", "texture", "validate", "commit"],
+                "description": "Stage where failure occurred"
+              },
+              "block": {
+                "type": "string",
+                "description": "Block identifier (if applicable)"
+              },
+              "reason": {
+                "type": "string",
+                "description": "Failure reason"
+              },
+              "error_message": {
+                "type": "string",
+                "description": "Detailed error message"
+              },
+              "timestamp": {
+                "type": "string",
+                "description": "When failure occurred"
+              }
+            }
+          }
+        },
+        "validation": {
+          "type": "object",
+          "properties": {
+            "structure_valid": {
+              "type": "boolean",
+              "description": "Tileset structure valid"
+            },
+            "coverage_valid": {
+              "type": "boolean",
+              "description": "Coverage preservation valid"
+            },
+            "coordinate_valid": {
+              "type": "boolean",
+              "description": "Coordinate consistency valid"
+            },
+            "texture_valid": {
+              "type": "boolean",
+              "description": "Texture correctness valid"
+            },
+            "geometric_error_valid": {
+              "type": "boolean",
+              "description": "Geometric error monotonicity valid"
+            }
+          }
+        },
+        "notes": {
+          "type": "string",
+          "description": "Additional notes about this benchmark run"
+        }
+      }
+    }
+  }
+}
