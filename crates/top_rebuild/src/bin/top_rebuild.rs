@@ -75,6 +75,14 @@ struct Args {
     /// Fixture/debug only: synthesize box mesh when content is missing or unreadable
     #[arg(long, default_value_t = false)]
     synthesize_if_empty: bool,
+
+    /// P5: Number of parallel rebuild workers (0 = auto = half physical cores, max 8)
+    #[arg(long, default_value_t = 0)]
+    workers: u32,
+
+    /// P5: Working memory budget in MiB for proxy building
+    #[arg(long, default_value_t = 2048)]
+    working_memory_mib: u64,
 }
 
 fn main() {
@@ -113,6 +121,8 @@ fn run(args: Args) -> top_rebuild::Result<()> {
         strict_budget: args.strict_budget,
         inject_test_textures: args.inject_test_textures,
         gap_warn_meters: args.gap_warn_meters,
+        rebuild_workers: args.workers,
+        working_memory_budget_mib: args.working_memory_mib,
     };
 
     if args.ktx2 {

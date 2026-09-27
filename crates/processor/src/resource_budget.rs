@@ -28,7 +28,7 @@ impl ResourceBudget {
     }
 
     pub fn rebuild_workers(&self) -> u32 {
-        2.min(self.resolved.cpu_workers)
+        self.resolved.cpu_workers
     }
 
     pub fn texture_file_workers(&self) -> u32 {
@@ -75,14 +75,14 @@ mod tests {
     }
 
     #[test]
-    fn rebuild_workers_conservative() {
+    fn rebuild_workers_uses_cpu_workers() {
         let opts = ExecutionOptions {
             cpu_workers: CpuWorkers::Count(8),
             memory_budget_mib: None,
             io_workers: None,
         };
         let budget = ResourceBudget::new(&opts);
-        assert_eq!(budget.rebuild_workers(), 2);
+        assert_eq!(budget.rebuild_workers(), 8);
     }
 
     #[test]
