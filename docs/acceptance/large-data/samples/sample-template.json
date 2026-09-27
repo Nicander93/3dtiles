@@ -1,0 +1,51 @@
+{
+  "name": "sample-template",
+  "description": "Template for documenting sample datasets. Copy and fill in actual values.",
+  "source": {
+    "project": "PLACEHOLDER",
+    "region": "PLACEHOLDER",
+    "capture_date": "YYYY-MM",
+    "provider": "PLACEHOLDER"
+  },
+  "format": "osgb",
+  "size": {
+    "compressed_mb": 0,
+    "uncompressed_mb": 0,
+    "block_count": 0,
+    "max_block_mb": 0
+  },
+  "content": {
+    "texture_count": 0,
+    "max_texture_resolution": "0x0",
+    "lod_levels": 0,
+    "grid_sparse": false,
+    "has_missing_blocks": false
+  },
+  "location": {
+    "internal_path": "UNMEASURED - No sample data available",
+    "notes": "PLACEHOLDER - Obtain sample data and update this file"
+  },
+  "baseline_results": {
+    "note": "Run benchmark-large-dataset.sh to populate",
+    "threads_1": {
+      "total_seconds": 0,
+      "peak_memory_mb": 0,
+      "status": "unmeasured"
+    },
+    "threads_2": {
+      "total_seconds": 0,
+      "peak_memory_mb": 0,
+      "status": "unmeasured"
+    },
+    "threads_4": {
+      "total_seconds": 0,
+      "peak_memory_mb": 0,
+      "status": "unmeasured"
+    },
+    "threads_8": {
+      "total_seconds": 0,
+      "peak_memory_mb": 0,
+      "status": "unmeasured"
+    }
+  }
+}
