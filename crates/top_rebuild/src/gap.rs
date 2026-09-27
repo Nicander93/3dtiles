@@ -86,6 +86,74 @@ fn nearest_dist(p: [f32; 3], cloud: &[[f32; 3]]) -> f64 {
     best
 }
 
+struct SpatialIndex {
+    grid: std::collections::HashMap<(i32, i32, i32), Vec<usize>>,
+    points: Vec<[f32; 3]>,
+    cell_size: f32,
+}
+
+impl SpatialIndex {
+    fn new(points: &[[f32; 3]], cell_size: f32) -> Self {
+        let mut grid = std::collections::HashMap::new();
+        let indexed_points = points.to_vec();
+        
+        for (idx, p) in indexed_points.iter().enumerate() {
+            let key = (
+                (p[0] / cell_size).floor() as i32,
+                (p[1] / cell_size).floor() as i32,
+                (p[2] / cell_size).floor() as i32,
+            );
+            grid.entry(key).or_insert_with(Vec::new).push(idx);
+        }
+        
+        Self {
+            grid,
+            points: indexed_points,
+            cell_size,
+        }
+    }
+    
+    fn nearest_dist(&self, p: [f32; 3]) -> f64 {
+        let center_key = (
+            (p[0] / self.cell_size).floor() as i32,
+            (p[1] / self.cell_size).floor() as i32,
+            (p[2] / self.cell_size).floor() as i32,
+        );
+        
+        let mut best = f64::MAX;
+        
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    let key = (
+                        center_key.0 + dx,
+                        center_key.1 + dy,
+                        center_key.2 + dz,
+                    );
+                    if let Some(indices) = self.grid.get(&key) {
+                        for &idx in indices {
+                            let q = self.points[idx];
+                            let dx = (p[0] - q[0]) as f64;
+                            let dy = (p[1] - q[1]) as f64;
+                            let dz = (p[2] - q[2]) as f64;
+                            let d = (dx * dx + dy * dy + dz * dz).sqrt();
+                            if d < best {
+                                best = d;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        if best == f64::MAX {
+            nearest_dist(p, &self.points)
+        } else {
+            best
+        }
+    }
+}
+
 fn percentile_95(sorted: &[f64]) -> f64 {
     if sorted.is_empty() {
         return 0.0;
@@ -97,6 +165,8 @@ fn percentile_95(sorted: &[f64]) -> f64 {
 /// Compare border clouds of N child meshes already in the same parent-local frame.
 /// Adjacent pairs: AABB centers within `adjacency_factor * mean_extent` and sharing
 /// an axis-aligned face band (`band_frac` of extent).
+///
+/// P4 optimization: Uses spatial index for nearest boundary point queries.
 pub fn compute_gap_metrics(
     child_positions: &[Vec<[f32; 3]>],
     child_indices: &[Vec<u32>],
@@ -105,6 +175,7 @@ pub fn compute_gap_metrics(
     let mut notes = vec![
         "LockBorder protects topological borders during meshoptimizer simplify (no cross-tile weld).".into(),
         "Gaps measured as nearest-neighbor distance between border verts near shared mid-plane.".into(),
+        "P4: Spatial index acceleration for large boundary point sets.".into(),
     ];
     if child_positions.len() != child_indices.len() {
         notes.push("position/index child count mismatch; gap metrics skipped".into());
@@ -197,21 +268,23 @@ pub fn compute_gap_metrics(
             let ca = filter(&borders[a]);
             let cb = filter(&borders[b]);
             if ca.is_empty() || cb.is_empty() {
-                // Fall back to full border clouds if mid-band empty (coarse meshes)
                 let ca = &borders[a];
                 let cb = &borders[b];
                 if ca.is_empty() || cb.is_empty() {
                     continue;
                 }
+                let mean_ext = ((ext_a[0] + ext_a[1] + ext_a[2]) + (ext_b[0] + ext_b[1] + ext_b[2])) / 6.0;
+                let cell_size = mean_ext.max(1.0);
+                let index_b = SpatialIndex::new(cb, cell_size);
                 let mut dists = Vec::new();
                 for p in ca {
-                    dists.push(nearest_dist(*p, cb));
+                    dists.push(index_b.nearest_dist(*p));
                 }
+                let index_a = SpatialIndex::new(ca, cell_size);
                 for p in cb {
-                    dists.push(nearest_dist(*p, ca));
+                    dists.push(index_a.nearest_dist(*p));
                 }
                 dists.sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
-                // fix Equal -> Equal
                 let max_gap = dists.last().copied().unwrap_or(0.0);
                 let p95 = percentile_95(&dists);
                 pairs.push(GapPair {
@@ -223,12 +296,16 @@ pub fn compute_gap_metrics(
                 });
                 continue;
             }
+            let mean_ext = ((ext_a[0] + ext_a[1] + ext_a[2]) + (ext_b[0] + ext_b[1] + ext_b[2])) / 6.0;
+            let cell_size = mean_ext.max(1.0);
+            let index_b = SpatialIndex::new(&cb, cell_size);
             let mut dists = Vec::new();
             for p in &ca {
-                dists.push(nearest_dist(*p, &cb));
+                dists.push(index_b.nearest_dist(*p));
             }
+            let index_a = SpatialIndex::new(&ca, cell_size);
             for p in &cb {
-                dists.push(nearest_dist(*p, &ca));
+                dists.push(index_a.nearest_dist(*p));
             }
             dists.sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
             let max_gap = dists.last().copied().unwrap_or(0.0);
