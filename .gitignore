@@ -13,7 +13,7 @@
 data
 output/target/
 .runtime/
-samples/
+/samples/
 examples/preview/tiles/
 *.zip
 examples/preview/tiles_rebuild/
@@ -42,3 +42,13 @@ apps/desktop/src-tauri/resources/runtime/**
 
 # Acceptance test bulky outputs (only lean reports are committed)
 acceptance-results/
+
+# Large-data benchmark outputs and sample data
+benchmark-output-*/
+benchmark-results/
+docs/acceptance/large-data/results.csv
+# Keep sample metadata .json files, but exclude actual OSGB data
+docs/acceptance/large-data/samples/**/*.osgb
+docs/acceptance/large-data/samples/**/Data/**
+!docs/acceptance/large-data/samples/**/*.json
+!docs/acceptance/large-data/samples/**/*.md
