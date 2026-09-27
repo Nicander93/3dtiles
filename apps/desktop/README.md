@@ -16,11 +16,34 @@ Qt shell / OSGB native viewer removed. Legacy Python API is under `tools/experim
 
 ```bash
 # from repo root
-cargo build -p processor
 cd apps/desktop
 npm install
 npm run tauri:dev
 ```
+
+On Windows, `tauri:dev` incrementally builds the local `processor` and `top_rebuild`.
+The converter defaults to the pinned Release in `apps/desktop/config/converter-runtime.json`;
+the launcher does not build or search for a converter source checkout. The first run
+may download the Release, while later runs reuse the SHA256-checked cache. Use
+`GEOFORGE_3DTILE` to select a local converter explicitly:
+
+```powershell
+# From the GeoForge repository root, with a sibling converter checkout:
+Push-Location ..\geoforge-converter
+cargo build
+$env:GEOFORGE_3DTILE = (Resolve-Path .\target\debug\_3dtile.exe).Path
+Pop-Location
+cd apps\desktop
+npm run tauri:dev
+```
+
+The converter build needs MSVC, CMake, and vcpkg configured as described in the
+converter repository. Rebuild it after converter source changes, then restart the
+desktop app and submit a new task; existing outputs do not change. Remove the
+override with `Remove-Item Env:GEOFORGE_3DTILE` to use the pinned Release again.
+`npm run tauri:dev -- --prepare-only` prints the selected paths without opening the app.
+`npm run tauri:build` does not compile or stage converter source; Windows packaging
+uses `npm run package:windows` after updating the pinned converter Release.
 
 Compile-only / CI-friendly:
 

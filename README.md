@@ -14,9 +14,11 @@ GeoForge 使用**预构建**的 Converter Runtime（[`Nicander93/geoforge-conver
 | `crates/protocol` | 任务配置与事件契约（`geoforge-protocol`） |
 | `crates/processor` | 任务进程：扫描、转换、重建、纹理、校验、提交 |
 | `crates/top_rebuild` | 自研顶层重建（Proxy HLOD） |
-| `third_party/3dtiles-converter.json` | 固定 Converter Release URL + SHA256 |
+| `apps/desktop/config/converter-runtime.json` | 固定 Converter Release URL + SHA256 |
 | `tools/texture_ktx2` | KTX2 后处理（可封装为 `geoforge-texture`） |
 | `docs/product/` | 产品、重构与 V1 补齐说明 |
+
+完整目录职责、历史内容和迁移路径见 [仓库目录结构](docs/REPOSITORY_LAYOUT.md)。
 
 ## 快速开始（产品核心）
 
@@ -29,9 +31,14 @@ cargo test -p processor --lib
 # 桌面
 cd apps/desktop
 npm install
-npm run prepare:sidecars
 npm run tauri:dev
 ```
+
+开发版默认使用固定版本的 Converter Release。修改了相邻 `geoforge-converter` 仓库后，
+先在该仓库运行 `cargo build`，再把 `GEOFORGE_3DTILE` 指向其
+`target/debug/_3dtile.exe`，最后重启 `npm run tauri:dev` 并创建新任务。
+完整 PowerShell 命令见 [桌面开发说明](./apps/desktop/README.md)。
+`tauri:build` 不会编译转换器源码。
 
 可选环境变量（开发覆盖；正式安装包应自带 runtime，一般不必设置）：
 
@@ -52,7 +59,7 @@ cargo run -p processor -- capabilities --json
 
 ## 转换器 Runtime
 
-正式打包由 `prepare-converter.ps1` 按 `third_party/3dtiles-converter.json` 下载固定版本。
+正式打包由 `prepare-converter.ps1` 按 `apps/desktop/config/converter-runtime.json` 下载固定版本。
 
 ```powershell
 powershell -File apps/desktop/scripts/prepare-converter.ps1

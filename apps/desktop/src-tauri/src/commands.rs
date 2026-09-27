@@ -7,8 +7,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use tauri::AppHandle;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 
 fn file_path_to_string(path: FilePath) -> Result<String, String> {
@@ -33,11 +32,15 @@ pub fn select_input_directory(app: AppHandle) -> Result<Option<String>, String> 
 
 #[tauri::command]
 pub fn select_output_directory(app: AppHandle) -> Result<Option<String>, String> {
-  let picked = app
+  let picker = app
     .dialog()
     .file()
-    .set_title("选择输出目录")
-    .blocking_pick_folder();
+    .set_title("选择保存位置（将在其中新建成果目录）");
+  let picker = match app.path().document_dir() {
+    Ok(directory) => picker.set_directory(directory),
+    Err(_) => picker,
+  };
+  let picked = picker.blocking_pick_folder();
   match picked {
     Some(path) => Ok(Some(file_path_to_string(path)?)),
     None => Ok(None),
@@ -96,8 +99,20 @@ pub fn submit_task(state: State<'_, AppState>, config: SubmitTaskConfig) -> Resu
   let options = config.options.unwrap_or(json!({}));
   // Preflight path policy (same rules as processor); provisional id for validation only
   let provisional_id = "task-preflight0";
+  let input_path = config.input.path();
+  let path_policy_input = if config.operation == "convert-model" {
+    let model_file = std::path::Path::new(&input_path);
+    if !model_file.is_file() {
+      return Err(format!("路径校验失败: 模型输入必须是文件: {}", model_file.display()));
+    }
+    model_file
+      .parent()
+      .ok_or_else(|| "路径校验失败: 模型输入没有父目录".to_string())?
+  } else {
+    std::path::Path::new(&input_path)
+  };
   processor::validate_io_paths(
-    std::path::Path::new(&config.input.path()),
+    path_policy_input,
     std::path::Path::new(&config.output.path()),
     provisional_id,
   )
@@ -313,6 +328,64 @@ pub fn scan_osgb(path: String) -> Result<Value, String> {
   serde_json::from_str(stdout.trim()).map_err(|e| {
     format!(
       "解析扫描结果失败: {e}; stderr={stderr}; stdout={}",
+      stdout.chars().take(400).collect::<String>()
+    )
+  })
+}
+
+#[tauri::command]
+pub fn select_model_file(app: AppHandle) -> Result<Option<String>, String> {
+  let picked = app
+    .dialog()
+    .file()
+    .set_title("选择 FBX 或 OBJ 模型")
+    .add_filter("3D 模型", &["fbx", "obj"])
+    .blocking_pick_file();
+  match picked {
+    Some(path) => Ok(Some(file_path_to_string(path)?)),
+    None => Ok(None),
+  }
+}
+
+#[tauri::command]
+pub fn select_texture_root(app: AppHandle) -> Result<Option<String>, String> {
+  let picked = app
+    .dialog()
+    .file()
+    .set_title("选择外部贴图目录")
+    .blocking_pick_folder();
+  match picked {
+    Some(path) => Ok(Some(file_path_to_string(path)?)),
+    None => Ok(None),
+  }
+}
+
+/// FBX/OBJ preflight via the processor. Only diagnostics cross the Tauri
+/// boundary; mesh data stays in the native converter process.
+#[tauri::command]
+pub fn scan_model(path: String, texture_roots: Option<Vec<String>>) -> Result<Value, String> {
+  let bin = ProcessManager::processor_bin().ok_or_else(|| {
+    "找不到 processor 组件，无法扫描。请修复安装或设置环境变量 GEOFORGE_PROCESSOR。".to_string()
+  })?;
+  let mut command = Command::new(&bin);
+  ProcessManager::apply_runtime_env(&mut command);
+  command.args(["scan-model", "--path", &path]);
+  for root in texture_roots.unwrap_or_default() {
+    command.arg("--texture-root").arg(root);
+  }
+  let output = command
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .output()
+    .map_err(|error| format!("启动 processor 模型扫描失败: {error}"))?;
+  let stdout = String::from_utf8_lossy(&output.stdout);
+  let stderr = String::from_utf8_lossy(&output.stderr);
+  if stdout.trim().is_empty() {
+    return Err(format!("processor 模型扫描无输出 (exit {:?}): {stderr}", output.status.code()));
+  }
+  serde_json::from_str(stdout.trim()).map_err(|error| {
+    format!(
+      "解析模型扫描结果失败: {error}; stderr={stderr}; stdout={}",
       stdout.chars().take(400).collect::<String>()
     )
   })

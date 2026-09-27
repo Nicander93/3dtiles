@@ -77,6 +77,8 @@ pub fn run() {
       commands::select_input_directory,
       commands::select_output_directory,
       commands::select_tileset_file,
+      commands::select_model_file,
+      commands::select_texture_root,
       commands::submit_task,
       commands::cancel_task,
       commands::get_task,
@@ -90,6 +92,7 @@ pub fn run() {
       commands::update_settings,
       commands::get_resource_server_info,
       commands::scan_osgb,
+      commands::scan_model,
       commands::health,
       commands::capabilities,
     ])
@@ -110,6 +113,7 @@ mod capability_tests {
       "capabilities",
       "get_resource_server_info",
       "scan_osgb",
+      "scan_model",
     ] {
       assert!(
         COMMAND_PERMISSIONS.contains(&format!("\"{command}\"")),

@@ -13,3 +13,4 @@ import { desktop } from '../api/desktop';
 export const selectInputDirectory = () => desktop.selectInputDirectory();
 export const selectOutputDirectory = () => desktop.selectOutputDirectory();
 export const selectTilesetFile = () => desktop.selectTilesetFile();
+export const selectModelFile = () => desktop.selectModelFile();

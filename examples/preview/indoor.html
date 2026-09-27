@@ -267,7 +267,7 @@
     let tileset;
     async function loadTileset() {
       try {
-        tileset = await Cesium.Cesium3DTileset.fromUrl('./output/tileset.json', {
+        tileset = await Cesium.Cesium3DTileset.fromUrl('../../output/tileset.json', {
           maximumScreenSpaceError: 16,
           skipLevelOfDetail: true,
           baseScreenSpaceError: 1024,
@@ -740,7 +740,7 @@
     async function fetchTilesetInfo() {
         try {
             // 1. Fetch tileset.json
-            const response = await fetch('./output/tileset.json');
+            const response = await fetch('../../output/tileset.json');
             if (!response.ok) throw new Error('Failed to fetch tileset.json');
             const tilesetJson = await response.json();
 
@@ -769,8 +769,8 @@
 
             if (b3dmUrl) {
                  // Resolve path relative to tileset.json
-                 // Assuming tileset.json is at ./output/tileset.json and uris are relative to it
-                 const fullUrl = './output/' + b3dmUrl;
+                 // Keep the sample output at the repository root after moving this page.
+                 const fullUrl = '../../output/' + b3dmUrl;
 
                  const b3dmResp = await fetch(fullUrl);
                  if (!b3dmResp.ok) throw new Error('Failed to fetch B3DM');

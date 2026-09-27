@@ -28,12 +28,14 @@ const statusFilter: Record<StatusFilter, (t: Task) => boolean> = {
 
 function opLabel(op?: string): string {
   if (op === 'convert-osgb') return 'OSGB 转换';
+  if (op === 'convert-model') return '通用模型转换';
   if (op === 'process-tileset') return 'Tiles 处理';
   return op || '—';
 }
 
 function TaskIcon({ operation }: { operation?: string }) {
   if (operation === 'convert-osgb') return <Stack size={18} />;
+  if (operation === 'convert-model') return <Cube size={18} />;
   if (operation === 'process-tileset') return <Cube size={18} />;
   return <Image size={18} />;
 }
@@ -80,6 +82,7 @@ function rebuildHref(t: Task): string {
   if (t.name) params.set('name', t.name);
   const q = params.toString();
   if (t.operation === 'process-tileset') return `/tiles/process?${q}`;
+  if (t.operation === 'convert-model') return `/model/convert?${q}`;
   return `/osgb/convert?${q}`;
 }
 
@@ -298,6 +301,7 @@ export function Processing() {
         >
           <option value="all">全部</option>
           <option value="convert-osgb">OSGB 转换</option>
+          <option value="convert-model">通用模型转换</option>
           <option value="process-tileset">Tiles 处理</option>
         </select>
       </div>

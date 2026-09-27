@@ -1,12 +1,13 @@
 import type { Icon } from '@phosphor-icons/react';
 import {
   Cube,
+  CubeTransparent,
   Eye,
   Image,
   Stack,
 } from '@phosphor-icons/react';
 
-export type ToolId = 'osgb-convert' | 'tiles-preview' | 'tiles-rebuild' | 'tiles-texture';
+export type ToolId = 'osgb-convert' | 'model-convert' | 'tiles-preview' | 'tiles-rebuild' | 'tiles-texture';
 
 export type ToolDef = {
   id: ToolId;
@@ -33,6 +34,13 @@ export const toolGroups: ToolGroup[] = [
         desc: '将 OSGB 数据转换为 3D Tiles',
         to: '/osgb/convert',
         icon: Stack,
+      },
+      {
+        id: 'model-convert',
+        title: '通用模型转换',
+        desc: '将 FBX 或 OBJ 模型转换为 3D Tiles',
+        to: '/model/convert',
+        icon: CubeTransparent,
       },
     ],
   },

@@ -16,7 +16,7 @@
     "test": "node scripts/test-form-utils.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev",
+    "tauri:dev": "node scripts/run-tauri-dev.mjs",
     "pretauri:build": "npm run prepare:sidecars",
     "tauri:build": "tauri build",
     "pretauri:check": "npm run prepare:sidecars",

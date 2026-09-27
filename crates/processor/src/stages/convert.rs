@@ -3,6 +3,7 @@
 use crate::cancel::CancelFlag;
 use crate::protocol::{Emitter, Stage};
 use crate::util::{run_logged_env_result, tool_paths, CommandResult};
+use geoforge_protocol::ModelFormat;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -217,6 +218,70 @@ pub fn run_convert(
     Ok(())
 }
 
+/// Invoke the converter's explicit FBX/OBJ route. Model-specific settings are
+/// validated by the task pipeline; this boundary deliberately does not reuse
+/// the OSGB-only `-c` configuration contract.
+pub fn run_model_convert(
+    emitter: &Arc<Emitter>,
+    cancel: &CancelFlag,
+    input_file: &Path,
+    out_dir: &Path,
+    format: ModelFormat,
+    model_config: &Path,
+    longitude: Option<f64>,
+    latitude: Option<f64>,
+    height: Option<f64>,
+) -> Result<(), String> {
+    std::fs::create_dir_all(out_dir).map_err(|error| error.to_string())?;
+    let tools = tool_paths();
+    if !tools.convert_bin.is_file() {
+        return Err(format!(
+            "找不到转换器 _3dtile（查过 {}）。请运行 apps/desktop/scripts/prepare-converter.ps1，或设置 GEOFORGE_3DTILE。",
+            tools.convert_bin.display()
+        ));
+    }
+
+    emitter.stage(Stage::Convert, "Model → 3D Tiles");
+    let mut command = vec![
+        tools.convert_bin.to_string_lossy().into_owned(),
+        "-f".into(),
+        format.extension().into(),
+        "-i".into(),
+        strip_verbatim_str(&input_file.to_string_lossy()),
+        "-o".into(),
+        strip_verbatim_str(&out_dir.to_string_lossy()),
+        "--model-config".into(),
+        strip_verbatim_str(&model_config.to_string_lossy()),
+    ];
+    if let (Some(longitude), Some(latitude), Some(height)) = (longitude, latitude, height) {
+        command.extend([
+            "--lon".into(),
+            longitude.to_string(),
+            "--lat".into(),
+            latitude.to_string(),
+            "--alt".into(),
+            height.to_string(),
+        ]);
+    }
+
+    let cwd = tools.convert_bin.parent();
+    let env = converter_environment(cwd);
+    let env_refs: Vec<(&str, PathBuf)> = env;
+    let started = std::time::Instant::now();
+    let result = run_logged_env_result(emitter, cancel, &command, cwd, &env_refs)?;
+    emitter.metric("converter.elapsedMs", json!(started.elapsed().as_millis()));
+    if cancel.is_cancelled() {
+        return Err("cancelled".into());
+    }
+    if result.exit_code != 0 {
+        return Err(format!("convert exited {}: {}", result.exit_code, result.stderr_tail));
+    }
+    if !out_dir.join("tileset.json").is_file() {
+        return Err(format!("tileset.json missing under {}", out_dir.display()));
+    }
+    Ok(())
+}
+
 fn convert_flags(emitter: &Arc<Emitter>, options: &Value, cfg_json: Option<&str>) -> Vec<String> {
     let mut extra = Vec::new();
     let conv = options.get("convert").cloned().unwrap_or(Value::Null);
@@ -274,22 +339,7 @@ fn run_native(
     ];
     cmd.extend(extra.iter().cloned());
     let cwd = bin.parent();
-    let mut env = Vec::new();
-    if let Some(dir) = cwd {
-        let plugins = dir.join("osgPlugins-3.6.5");
-        if plugins.is_dir() {
-            env.push(("OSG_LIBRARY_PATH", plugins));
-        }
-        let gdal = dir.join("gdal");
-        if gdal.is_dir() {
-            env.push(("GDAL_DATA", gdal));
-        }
-        let proj = dir.join("proj");
-        if proj.is_dir() {
-            env.push(("PROJ_DATA", proj.clone()));
-            env.push(("PROJ_LIB", proj));
-        }
-    }
+    let mut env = converter_environment(cwd);
     if let Some(threads) = thread_override {
         if threads == 0 {
             emitter.log("[convert] forcing thread mode to auto (0)");
@@ -307,6 +357,25 @@ fn run_native(
     }
     let env_refs: Vec<(&str, PathBuf)> = env;
     run_logged_env_result(emitter, cancel, &cmd, cwd, &env_refs)
+}
+
+fn converter_environment(cwd: Option<&Path>) -> Vec<(&'static str, PathBuf)> {
+    let mut env = Vec::new();
+    let Some(dir) = cwd else { return env };
+    let plugins = dir.join("osgPlugins-3.6.5");
+    if plugins.is_dir() {
+        env.push(("OSG_LIBRARY_PATH", plugins));
+    }
+    let gdal = dir.join("gdal");
+    if gdal.is_dir() {
+        env.push(("GDAL_DATA", gdal));
+    }
+    let proj = dir.join("proj");
+    if proj.is_dir() {
+        env.push(("PROJ_DATA", proj.clone()));
+        env.push(("PROJ_LIB", proj));
+    }
+    env
 }
 
 fn retry_single_thread(result: &CommandResult) -> bool {
