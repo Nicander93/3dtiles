@@ -6,7 +6,7 @@ GeoForge does **not** compile `_3dtile` in the product workspace.
 | --- | --- |
 | Runtime source | https://github.com/Nicander93/geoforge-converter |
 | Upstream lineage | https://github.com/fanvanzh/3dtiles |
-| Pin file | [`third_party/3dtiles-converter.json`](../../third_party/3dtiles-converter.json) |
+| Pin file | [`apps/desktop/config/converter-runtime.json`](../../apps/desktop/config/converter-runtime.json) |
 | Fetch script | `apps/desktop/scripts/prepare-converter.ps1` |
 
 ## CLI contract

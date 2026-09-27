@@ -50,7 +50,7 @@ resources/runtime/bin/msvcp140.dll
 resources/runtime/bin/vcruntime140.dll
 ```
 
-不要把本机候选 hash 写入 `third_party/3dtiles-converter.json`；正式清单只有在 converter zip 已经发布到固定 URL 后才能更新。
+不要把本机候选 hash 写入 `apps/desktop/config/converter-runtime.json`；正式清单只有在 converter zip 已经发布到固定 URL 后才能更新。
 
 ## 3. 安装版运行时检查
 

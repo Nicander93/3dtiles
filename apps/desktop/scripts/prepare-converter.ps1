@@ -1,7 +1,7 @@
 # Download and stage prebuilt geoforge-converter Windows runtime.
 # Usage:
 #   powershell -File apps/desktop/scripts/prepare-converter.ps1 [-OutDir path]
-# Reads third_party/3dtiles-converter.json
+# Reads apps/desktop/config/converter-runtime.json
 
 param(
   [string]$OutDir = "",
@@ -12,7 +12,7 @@ $ErrorActionPreference = "Stop"
 Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
 Import-Module Microsoft.PowerShell.Archive -ErrorAction Stop
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..\..")
-$ManifestPath = Join-Path $RepoRoot "third_party\3dtiles-converter.json"
+$ManifestPath = Join-Path $RepoRoot "apps\desktop\config\converter-runtime.json"
 if (-not (Test-Path $ManifestPath)) {
   Write-Error "Missing $ManifestPath"
 }

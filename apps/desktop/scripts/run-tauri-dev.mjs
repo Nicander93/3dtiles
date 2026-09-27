@@ -58,7 +58,7 @@ child.on('exit', (code, signal) => {
 });
 
 function prepareWindowsConverter() {
-  const pin = JSON.parse(readFileSync(resolve(repoDir, 'third_party', '3dtiles-converter.json'), 'utf8'));
+  const pin = JSON.parse(readFileSync(resolve(appDir, 'config', 'converter-runtime.json'), 'utf8'));
   const version = pin.version;
   const sha256 = pin.windowsX64?.sha256?.toLowerCase();
   if (!version || !/^[a-f0-9]{64}$/.test(sha256 ?? '')) {

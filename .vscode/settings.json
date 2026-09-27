@@ -5,6 +5,13 @@
   "cmake.configureArgs": [
     "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
   ],
+  "files.exclude": {
+    "**/.cache": true,
+    "**/.cursor": true,
+    "**/dist": true,
+    "**/node_modules": true,
+    "**/target": true
+  },
   "clangd.arguments": [
     "--compile-commands-dir=${workspaceFolder}/build"
   ]

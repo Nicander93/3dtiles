@@ -22,7 +22,7 @@ npm run tauri:dev
 ```
 
 On Windows, `tauri:dev` incrementally builds the local `processor` and `top_rebuild`.
-The converter defaults to the pinned Release in `third_party/3dtiles-converter.json`;
+The converter defaults to the pinned Release in `apps/desktop/config/converter-runtime.json`;
 the launcher does not build or search for a converter source checkout. The first run
 may download the Release, while later runs reuse the SHA256-checked cache. Use
 `GEOFORGE_3DTILE` to select a local converter explicitly:

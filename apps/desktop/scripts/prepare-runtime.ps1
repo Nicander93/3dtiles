@@ -38,7 +38,7 @@ $converterArgs = @(
   "-File", (Join-Path $PSScriptRoot "prepare-converter.ps1"),
   "-OutDir", $ConverterOut
 )
-$converterSourceNote = "Converter comes from third_party/3dtiles-converter.json Release; no local OSG/vcpkg build."
+$converterSourceNote = "Converter comes from apps/desktop/config/converter-runtime.json Release; no local OSG/vcpkg build."
 if ($ConverterZip) {
   $resolvedConverterZip = Resolve-Path -LiteralPath $ConverterZip -ErrorAction Stop
   if ((Get-Item -LiteralPath $resolvedConverterZip.Path).PSIsContainer) {
