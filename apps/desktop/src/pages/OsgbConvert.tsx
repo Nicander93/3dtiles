@@ -118,6 +118,7 @@ export function OsgbConvert() {
   const [error, setError] = useState<string | null>(null);
   const [caps, setCaps] = useState<CapabilitiesResponse | null>(null);
   const [defaultOutputRoot, setDefaultOutputRoot] = useState('');
+  const [executionSettings, setExecutionSettings] = useState<{ resourceMode: 'auto' | 'custom', cpuWorkers?: number, memoryBudgetMiB?: number, ioWorkers?: number } | null>(null);
   const scanSeq = useRef(0);
   const debouncedInput = useDebouncedValue(form.input, 500);
 
@@ -125,6 +126,7 @@ export function OsgbConvert() {
     void api.capabilities().then(setCaps).catch(() => setCaps(null));
     void api.getSettings().then((s) => {
       setDefaultOutputRoot(s.defaultOutputRoot || '');
+      setExecutionSettings(s.execution || null);
       if (s.defaultConvertThreads !== undefined) {
         setForm((f) => ({ ...f, convertThreads: s.defaultConvertThreads ?? 1 }));
       }
@@ -314,6 +316,20 @@ export function OsgbConvert() {
         geo.origin = `${form.originX.trim()},${form.originY.trim()},${form.originZ.trim()}`;
       }
       const preset = rebuildQualityOptions(form.quality, ktx2Etc1sEnabled(caps));
+      
+      const executionOptions: Record<string, unknown> = {};
+      if (executionSettings?.resourceMode === 'custom') {
+        if (executionSettings.cpuWorkers !== undefined) {
+          executionOptions.cpuWorkers = executionSettings.cpuWorkers;
+        }
+        if (executionSettings.memoryBudgetMiB !== undefined) {
+          executionOptions.memoryBudgetMiB = executionSettings.memoryBudgetMiB;
+        }
+        if (executionSettings.ioWorkers !== undefined) {
+          executionOptions.ioWorkers = executionSettings.ioWorkers;
+        }
+      }
+      
       const res = await api.createTask({
         operation: 'convert-osgb',
         input: { path: form.input.trim() },
@@ -332,6 +348,7 @@ export function OsgbConvert() {
           convert: {
             threads: form.convertThreads,
           },
+          ...(Object.keys(executionOptions).length > 0 ? { execution: executionOptions } : {}),
           geo,
           geographicExport: form.geographicExport,
         },

@@ -5,6 +5,7 @@ pub mod capabilities;
 pub mod geo;
 pub mod path_policy;
 pub mod pipeline;
+pub mod progress_throttle;
 pub mod protocol;
 pub mod resource_budget;
 pub mod stages;

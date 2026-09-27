@@ -73,6 +73,24 @@ impl Emitter {
         }));
     }
 
+    pub fn progress_with_detail(&self, stage: Stage, completed: u64, total: u64, parallelism: Option<u32>, resource_wait: bool) {
+        let mut ev = json!({
+            "type": "progress",
+            "stage": stage.as_str(),
+            "completed": completed,
+            "total": total,
+        });
+        if let Some(obj) = ev.as_object_mut() {
+            if let Some(p) = parallelism {
+                obj.insert("parallelism".into(), json!(p));
+            }
+            if resource_wait {
+                obj.insert("resourceWait".into(), json!(true));
+            }
+        }
+        self.emit(ev);
+    }
+
     pub fn log(&self, message: &str) {
         self.emit(json!({
             "type": "log",

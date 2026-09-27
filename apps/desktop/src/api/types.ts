@@ -27,6 +27,19 @@ export interface TaskStageInfo {
   message?: string;
 }
 
+export interface TaskProgressDetail {
+  completed?: number;
+  total?: number;
+  stage?: string;
+  message?: string;
+  parallelism?: number;
+  resourceWait?: boolean;
+  errorCode?: string;
+  errorMessage?: string;
+  failedStage?: string;
+  [key: string]: unknown;
+}
+
 export interface Task {
   id: string;
   name: string;
@@ -36,7 +49,7 @@ export interface Task {
   input: string;
   output: string;
   options?: Record<string, unknown>;
-  progress?: number | Record<string, unknown>;
+  progress?: number | TaskProgressDetail;
   stage?: string;
   stages?: TaskStageInfo[];
   log?: string;

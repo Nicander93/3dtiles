@@ -42,6 +42,15 @@ async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
   return invoke<T>(cmd, args);
 }
 
+export type ResourceMode = 'auto' | 'custom';
+
+export interface ExecutionSettings {
+  resourceMode: ResourceMode;
+  cpuWorkers?: number;
+  memoryBudgetMiB?: number;
+  ioWorkers?: number;
+}
+
 export interface DesktopSettings {
   defaultOutputRoot: string;
   defaultRebuildTop: boolean;
@@ -50,6 +59,16 @@ export interface DesktopSettings {
   defaultConvertThreads?: number;
   pythonServerUrl: string;
   resourceServerPort: number;
+  execution?: ExecutionSettings;
+}
+
+export type ResourceMode = 'auto' | 'custom';
+
+export interface ExecutionSettings {
+  resourceMode: ResourceMode;
+  cpuWorkers?: number;
+  memoryBudgetMiB?: number;
+  ioWorkers?: number;
 }
 
 const settingsDefaults: DesktopSettings = {
@@ -60,6 +79,9 @@ const settingsDefaults: DesktopSettings = {
   defaultConvertThreads: 1,
   pythonServerUrl: 'http://127.0.0.1:8787',
   resourceServerPort: 0,
+  execution: {
+    resourceMode: 'auto',
+  },
 };
 
 export const desktop = {

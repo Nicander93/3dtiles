@@ -1202,6 +1202,12 @@ fn apply_event(tasks: &TaskStore, task_id: &str, ev: &Value, result_path: &mut O
         if let Some(st) = ev.get("stage") {
           prog.insert("stage".into(), st.clone());
         }
+        if let Some(p) = ev.get("parallelism") {
+          prog.insert("parallelism".into(), p.clone());
+        }
+        if let Some(rw) = ev.get("resourceWait") {
+          prog.insert("resourceWait".into(), rw.clone());
+        }
         t.progress = Value::Object(prog);
       });
     }

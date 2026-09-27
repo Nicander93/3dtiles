@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, friendlyError, isTauri, type DesktopSettings } from "../api/desktop";
+import { api, friendlyError, isTauri, type DesktopSettings, type ResourceMode } from "../api/desktop";
 import { Alert } from "../components/Alert";
 import { FormSection } from "../components/FormSection";
 import { PathField } from "../components/PathField";
@@ -14,6 +14,9 @@ const defaults: DesktopSettings = {
   defaultConvertThreads: 1,
   pythonServerUrl: "http://127.0.0.1:8787",
   resourceServerPort: 0,
+  execution: {
+    resourceMode: 'auto',
+  },
 };
 
 export function Settings() {
@@ -162,6 +165,104 @@ export function Settings() {
             </select>
             <div className="field-hint">M1 试用版建议使用 1 worker 以确保稳定性</div>
           </div>
+        </FormSection>
+
+        <FormSection title="资源配置">
+          <div className="field">
+            <label>资源模式</label>
+            <select
+              className="select"
+              value={form.execution?.resourceMode ?? 'auto'}
+              onChange={(e) => {
+                const mode = e.target.value as ResourceMode;
+                setForm({
+                  ...form,
+                  execution: {
+                    ...form.execution,
+                    resourceMode: mode,
+                  },
+                });
+              }}
+            >
+              <option value="auto">自动</option>
+              <option value="custom">自定义</option>
+            </select>
+            <div className="field-hint">
+              {form.execution?.resourceMode === 'auto'
+                ? '系统自动分配 CPU、内存和 I/O 资源'
+                : '手动指定资源配额'}
+            </div>
+          </div>
+          {form.execution?.resourceMode === 'custom' && (
+            <>
+              <div className="field">
+                <label>CPU 并发数</label>
+                <input
+                  className="input"
+                  type="number"
+                  min="1"
+                  max="64"
+                  value={form.execution?.cpuWorkers ?? ''}
+                  placeholder="自动"
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      execution: {
+                        ...form.execution,
+                        resourceMode: 'custom',
+                        cpuWorkers: e.target.value ? Number(e.target.value) : undefined,
+                      },
+                    })
+                  }
+                />
+                <div className="field-hint">空白表示自动（CPU 核心数一半）</div>
+              </div>
+              <div className="field">
+                <label>内存预算 (MiB)</label>
+                <input
+                  className="input"
+                  type="number"
+                  min="512"
+                  max="524288"
+                  value={form.execution?.memoryBudgetMiB ?? ''}
+                  placeholder="自动"
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      execution: {
+                        ...form.execution,
+                        resourceMode: 'custom',
+                        memoryBudgetMiB: e.target.value ? Number(e.target.value) : undefined,
+                      },
+                    })
+                  }
+                />
+                <div className="field-hint">处理进程树的工作内存预算，空白表示自动</div>
+              </div>
+              <div className="field">
+                <label>I/O 并发数</label>
+                <input
+                  className="input"
+                  type="number"
+                  min="1"
+                  max="16"
+                  value={form.execution?.ioWorkers ?? ''}
+                  placeholder="自动"
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      execution: {
+                        ...form.execution,
+                        resourceMode: 'custom',
+                        ioWorkers: e.target.value ? Number(e.target.value) : undefined,
+                      },
+                    })
+                  }
+                />
+                <div className="field-hint">同时读写大文件的数量，空白表示自动</div>
+              </div>
+            </>
+          )}
           <div className="actions">
             <button type="button" className="btn btn-primary" onClick={() => void save()}>
               保存
