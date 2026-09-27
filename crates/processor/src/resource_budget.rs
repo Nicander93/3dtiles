@@ -34,6 +34,12 @@ impl ResourceBudget {
     pub fn texture_file_workers(&self) -> u32 {
         self.resolved.io_workers.min(2)
     }
+
+    pub fn texture_encoder_threads(&self) -> u32 {
+        let total_cpu = self.resolved.cpu_workers;
+        let file_workers = self.texture_file_workers();
+        (total_cpu / file_workers.max(1)).max(1).min(4)
+    }
 }
 
 #[cfg(test)]

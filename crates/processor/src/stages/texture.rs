@@ -145,10 +145,13 @@ pub fn finish_texture(
         return Ok(());
     }
 
+    let file_workers = budget.map(|b| b.texture_file_workers()).unwrap_or(1);
+    let encoder_threads = budget.map(|b| b.texture_encoder_threads()).unwrap_or(1);
+    
     if let Some(budget) = budget {
         emitter.log(&format!(
-            "[texture] resource budget: {} file workers",
-            budget.texture_file_workers()
+            "[texture] resource budget: {} file workers, {} encoder threads per file",
+            file_workers, encoder_threads
         ));
     }
 
@@ -167,7 +170,7 @@ pub fn finish_texture(
     emitter.stage_extra(
         Stage::Texture,
         &format!("post-process basisu mode={mode}"),
-        serde_json::json!({ "textureMode": mode, "postprocess": true }),
+        serde_json::json!({ "textureMode": mode, "postprocess": true, "fileWorkers": file_workers, "encoderThreads": encoder_threads }),
     );
 
     let mut cmd: Vec<String> = Vec::new();
@@ -182,6 +185,10 @@ pub fn finish_texture(
             cmd.push("--basisu".into());
             cmd.push(tools.basisu.to_string_lossy().into_owned());
         }
+        cmd.push("--file-workers".into());
+        cmd.push(file_workers.to_string());
+        cmd.push("--encoder-threads".into());
+        cmd.push(encoder_threads.to_string());
     } else {
         cmd.push(tools.python.to_string_lossy().into_owned());
         cmd.push(tools.texture_py.to_string_lossy().into_owned());
@@ -193,6 +200,10 @@ pub fn finish_texture(
             cmd.push("--basisu".into());
             cmd.push(tools.basisu.to_string_lossy().into_owned());
         }
+        cmd.push("--file-workers".into());
+        cmd.push(file_workers.to_string());
+        cmd.push("--encoder-threads".into());
+        cmd.push(encoder_threads.to_string());
     }
 
     let cwd = Some(tools.repo_root.as_path());

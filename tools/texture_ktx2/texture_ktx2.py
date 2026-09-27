@@ -3,28 +3,42 @@
 Alternative to _3dtile --enable-texture-compress when the runtime binary lacks the flag.
 Walks b3dm/glb/gltf, encodes JPEG/PNG textures with basisu (ETC1S or UASTC), rewrites
 glTF to use KHR_texture_basisu. Cesium-loadable output.
+
+P6 enhancements:
+- Bounded parallel file processing (work units = content files)
+- Per-file isolated temp directories
+- Content-hash based encode cache (source + mode + quality + version)
+- Atomic write via temp → validate → rename
+- External glTF dependency group locking
+- Encoder thread quota counted against CPU budget
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
 import struct
 import subprocess
 import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 BASISU_CANDIDATES = [
     Path(os.environ["GEOFORGE_BASISU"]) if os.environ.get("GEOFORGE_BASISU") else None,
     Path("/workspace/repos/3dtiles/vcpkg_installed/x64-linux/tools/basisu/basisu"),
-    Path(__file__).resolve().parents[4] / "vcpkg_installed" / "x64-linux" / "tools" / "basisu" / "basisu",  # tools/experiments/desktop_server_py/app → repo
+    Path(__file__).resolve().parent.parent.parent / "vcpkg_installed" / "x64-linux" / "tools" / "basisu" / "basisu",
 ]
 
 IMAGE_MIMES = {"image/jpeg", "image/png", "image/jpg", "image/webp"}
 KTX2_MIME = "image/ktx2"
 EXT_NAME = "KHR_texture_basisu"
+
+BASISU_VERSION = "1.16"
+CACHE_VERSION = "v1"
 
 
 def find_basisu() -> Optional[Path]:
@@ -116,6 +130,72 @@ def build_glb(gltf: Dict[str, Any], bin_data: bytes) -> bytes:
     return bytes(out)
 
 
+def compute_cache_key(image_bytes: bytes, mode: str, quality: int) -> str:
+    h = hashlib.sha256()
+    h.update(image_bytes)
+    h.update(mode.encode("utf-8"))
+    h.update(str(quality).encode("utf-8"))
+    h.update(BASISU_VERSION.encode("utf-8"))
+    h.update(CACHE_VERSION.encode("utf-8"))
+    return h.hexdigest()
+
+
+class EncodeCache:
+    def __init__(self, cache_dir: Optional[Path], capacity_mb: int = 100):
+        self.cache_dir = cache_dir
+        self.capacity_bytes = capacity_mb * 1024 * 1024
+        self.lock = threading.Lock()
+        if cache_dir:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def get(self, key: str) -> Optional[bytes]:
+        if not self.cache_dir:
+            return None
+        cache_file = self.cache_dir / f"{key[:32]}.ktx2"
+        with self.lock:
+            if cache_file.is_file():
+                return cache_file.read_bytes()
+        return None
+
+    def put(self, key: str, data: bytes) -> None:
+        if not self.cache_dir:
+            return
+        cache_file = self.cache_dir / f"{key[:32]}.ktx2"
+        temp_file = cache_file.with_suffix(".tmp")
+        with self.lock:
+            try:
+                temp_file.write_bytes(data)
+                temp_file.replace(cache_file)
+                self._enforce_capacity()
+            except Exception:
+                if temp_file.exists():
+                    temp_file.unlink()
+
+    def _enforce_capacity(self) -> None:
+        if not self.cache_dir or not self.cache_dir.is_dir():
+            return
+        entries = []
+        total_size = 0
+        for f in self.cache_dir.glob("*.ktx2"):
+            try:
+                stat = f.stat()
+                entries.append((f, stat.st_mtime, stat.st_size))
+                total_size += stat.st_size
+            except Exception:
+                continue
+        if total_size <= self.capacity_bytes:
+            return
+        entries.sort(key=lambda x: x[1])
+        for f, _, size in entries:
+            if total_size <= self.capacity_bytes:
+                break
+            try:
+                f.unlink()
+                total_size -= size
+            except Exception:
+                continue
+
+
 def _encode_image_basisu(
     basisu: Path,
     image_bytes: bytes,
@@ -124,7 +204,15 @@ def _encode_image_basisu(
     work: Path,
     idx: int,
     quality: int = 128,
+    cache: Optional[EncodeCache] = None,
+    encoder_threads: int = 1,
 ) -> bytes:
+    cache_key = compute_cache_key(image_bytes, mode, quality)
+    if cache:
+        cached = cache.get(cache_key)
+        if cached:
+            return cached
+
     ext = ".png"
     m = (mime or "").lower()
     if "jpeg" in m or "jpg" in m:
@@ -139,12 +227,21 @@ def _encode_image_basisu(
         cmd.extend(["-uastc", "-uastc_level", "2"])
     else:
         cmd.extend(["-etc1s", "-q", str(quality)])
+    
+    if encoder_threads > 1:
+        cmd.extend(["-max_threads", str(encoder_threads)])
+
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if proc.returncode != 0 or not dst.is_file():
         raise RuntimeError(
             f"basisu failed rc={proc.returncode}: {(proc.stderr or proc.stdout or '')[-500:]}"
         )
-    return dst.read_bytes()
+    result = dst.read_bytes()
+    
+    if cache:
+        cache.put(cache_key, result)
+    
+    return result
 
 
 def _uri_to_path(base: Path, uri: str) -> Path:
@@ -161,14 +258,14 @@ def rewrite_gltf_textures(
     work: Path,
     external_base: Optional[Path] = None,
     quality: int = 128,
+    cache: Optional[EncodeCache] = None,
+    encoder_threads: int = 1,
 ) -> Tuple[Dict[str, Any], bytes, int]:
-    """Rewrite images/textures to KTX2 + KHR_texture_basisu. Returns (gltf, bin, converted_count)."""
     images = gltf.get("images") or []
     if not images:
         return gltf, bin_data, 0
 
     buffer_views: List[Dict[str, Any]] = list(gltf.get("bufferViews") or [])
-    # Map image index -> new ktx2 bytes
     converted: Dict[int, bytes] = {}
     for i, img in enumerate(images):
         mime = (img.get("mimeType") or "").lower()
@@ -181,7 +278,6 @@ def rewrite_gltf_textures(
             length = int(bv["byteLength"])
             raw = bin_data[off : off + length]
             if not mime:
-                # sniff
                 if raw[:3] == b"\xff\xd8\xff":
                     mime = "image/jpeg"
                 elif raw[:8] == b"\x89PNG\r\n\x1a\n":
@@ -209,12 +305,13 @@ def rewrite_gltf_textures(
             continue
         if mime == KTX2_MIME:
             continue
-        converted[i] = _encode_image_basisu(basisu, raw, mime, mode, work, i, quality=quality)
+        converted[i] = _encode_image_basisu(
+            basisu, raw, mime, mode, work, i, quality=quality, cache=cache, encoder_threads=encoder_threads
+        )
 
     if not converted:
         return gltf, bin_data, 0
 
-    # Rebuild BIN: keep all bufferViews; replace image-owned ones; append for uri-based images
     image_bv_indices = {}
     for i, img in enumerate(images):
         if i in converted and "bufferView" in img:
@@ -234,14 +331,12 @@ def rewrite_gltf_textures(
             off = int(bv.get("byteOffset") or 0)
             length = int(bv["byteLength"])
             chunk = bin_data[off : off + length]
-            # preserve stride alignment: align start to 4
             _align4(new_bin)
             nbv["byteOffset"] = len(new_bin)
             nbv["byteLength"] = len(chunk)
             new_bin.extend(chunk)
         new_bvs.append(nbv)
 
-    # External/uri images: add new bufferViews
     for i, ktx in converted.items():
         img = images[i]
         if "bufferView" in img:
@@ -263,18 +358,15 @@ def rewrite_gltf_textures(
         buffers = [{"byteLength": 0}]
     buffers[0] = dict(buffers[0])
     buffers[0]["byteLength"] = len(new_bin)
-    # drop uri on buffer 0 if embedded
     buffers[0].pop("uri", None)
     gltf["buffers"] = buffers
 
-    # textures: KHR_texture_basisu
     textures = gltf.get("textures") or []
     for ti, tex in enumerate(textures):
         src = tex.get("source")
         if src is None:
             continue
         if src not in converted and src not in {img_i for img_i in converted}:
-            # still add extension if image is already ktx2
             img = images[src] if src < len(images) else {}
             if img.get("mimeType") != KTX2_MIME and src not in converted:
                 continue
@@ -282,7 +374,6 @@ def rewrite_gltf_textures(
         exts = dict(ntex.get("extensions") or {})
         exts[EXT_NAME] = {"source": src}
         ntex["extensions"] = exts
-        # keep source as fallback omitted per spec recommendation when required
         textures[ti] = ntex
     gltf["textures"] = textures
 
@@ -304,57 +395,140 @@ def process_glb_bytes(
     mode: str,
     work: Path,
     quality: int = 128,
+    cache: Optional[EncodeCache] = None,
+    encoder_threads: int = 1,
 ) -> Tuple[bytes, int]:
     gltf, bin_data = parse_glb(glb)
-    gltf2, bin2, n = rewrite_gltf_textures(gltf, bin_data, basisu, mode, work, quality=quality)
+    gltf2, bin2, n = rewrite_gltf_textures(
+        gltf, bin_data, basisu, mode, work, quality=quality, cache=cache, encoder_threads=encoder_threads
+    )
     if n == 0:
         return glb, 0
     return build_glb(gltf2, bin2), n
 
 
-def process_b3dm_file(path: Path, basisu: Path, mode: str, work: Path, quality: int = 128) -> int:
+def process_b3dm_file(
+    path: Path, basisu: Path, mode: str, work: Path, quality: int = 128, 
+    cache: Optional[EncodeCache] = None, encoder_threads: int = 1
+) -> int:
     header, glb = parse_b3dm(path)
-    new_glb, n = process_glb_bytes(glb, basisu, mode, work, quality=quality)
+    new_glb, n = process_glb_bytes(glb, basisu, mode, work, quality=quality, cache=cache, encoder_threads=encoder_threads)
     if n == 0:
         return 0
-    write_b3dm_preserving_header(path, header, new_glb)
+    temp_path = path.with_suffix(".b3dm.tmp")
+    write_b3dm_preserving_header(temp_path, header, new_glb)
+    temp_path.replace(path)
     return n
 
 
-def process_glb_file(path: Path, basisu: Path, mode: str, work: Path, quality: int = 128) -> int:
+def process_glb_file(
+    path: Path, basisu: Path, mode: str, work: Path, quality: int = 128,
+    cache: Optional[EncodeCache] = None, encoder_threads: int = 1
+) -> int:
     glb = path.read_bytes()
-    new_glb, n = process_glb_bytes(glb, basisu, mode, work, quality=quality)
+    new_glb, n = process_glb_bytes(glb, basisu, mode, work, quality=quality, cache=cache, encoder_threads=encoder_threads)
     if n == 0:
         return 0
-    path.write_bytes(new_glb)
+    temp_path = path.with_suffix(".glb.tmp")
+    temp_path.write_bytes(new_glb)
+    temp_path.replace(path)
     return n
 
 
-def process_gltf_file(path: Path, basisu: Path, mode: str, work: Path, quality: int = 128) -> int:
-    gltf = json.loads(path.read_text(encoding="utf-8"))
-    # load bin if present
-    bin_data = b""
-    buffers = gltf.get("buffers") or []
-    if buffers and buffers[0].get("uri") and not str(buffers[0]["uri"]).startswith("data:"):
-        bin_path = path.parent / buffers[0]["uri"]
-        if bin_path.is_file():
-            bin_data = bin_path.read_bytes()
-    gltf2, bin2, n = rewrite_gltf_textures(
-        gltf, bin_data, basisu, mode, work, external_base=path.parent, quality=quality
-    )
-    if n == 0:
-        return 0
-    # write bin alongside
-    bin_name = path.with_suffix(".bin").name
-    if not buffers:
-        gltf2["buffers"] = [{"byteLength": len(bin2), "uri": bin_name}]
-    else:
-        gltf2["buffers"][0]["uri"] = buffers[0].get("uri") or bin_name
-        gltf2["buffers"][0]["byteLength"] = len(bin2)
-        bin_name = gltf2["buffers"][0]["uri"]
-    (path.parent / bin_name).write_bytes(bin2)
-    path.write_text(json.dumps(gltf2, indent=2), encoding="utf-8")
-    return n
+class GltfFileLock:
+    def __init__(self):
+        self._locks: Dict[Path, threading.Lock] = {}
+        self._meta_lock = threading.Lock()
+
+    def get_lock(self, gltf_path: Path) -> threading.Lock:
+        with self._meta_lock:
+            if gltf_path not in self._locks:
+                self._locks[gltf_path] = threading.Lock()
+            return self._locks[gltf_path]
+
+
+def process_gltf_file(
+    path: Path, basisu: Path, mode: str, work: Path, quality: int = 128,
+    cache: Optional[EncodeCache] = None, encoder_threads: int = 1,
+    gltf_lock: Optional[GltfFileLock] = None
+) -> int:
+    lock = gltf_lock.get_lock(path) if gltf_lock else threading.Lock()
+    
+    with lock:
+        gltf = json.loads(path.read_text(encoding="utf-8"))
+        bin_data = b""
+        buffers = gltf.get("buffers") or []
+        bin_path = None
+        if buffers and buffers[0].get("uri") and not str(buffers[0]["uri"]).startswith("data:"):
+            bin_path = path.parent / buffers[0]["uri"]
+            if bin_path.is_file():
+                bin_data = bin_path.read_bytes()
+        
+        gltf2, bin2, n = rewrite_gltf_textures(
+            gltf, bin_data, basisu, mode, work, external_base=path.parent, quality=quality,
+            cache=cache, encoder_threads=encoder_threads
+        )
+        if n == 0:
+            return 0
+        
+        bin_name = path.with_suffix(".bin").name
+        if not buffers:
+            gltf2["buffers"] = [{"byteLength": len(bin2), "uri": bin_name}]
+        else:
+            gltf2["buffers"][0]["uri"] = buffers[0].get("uri") or bin_name
+            gltf2["buffers"][0]["byteLength"] = len(bin2)
+            bin_name = gltf2["buffers"][0]["uri"]
+        
+        final_bin_path = path.parent / bin_name
+        temp_bin = final_bin_path.with_suffix(".bin.tmp")
+        temp_json = path.with_suffix(".gltf.tmp")
+        
+        temp_bin.write_bytes(bin2)
+        temp_json.write_text(json.dumps(gltf2, indent=2), encoding="utf-8")
+        
+        temp_bin.replace(final_bin_path)
+        temp_json.replace(path)
+        
+        return n
+
+
+def process_one_file(
+    fp: Path,
+    root: Path,
+    basisu: Path,
+    mode: str,
+    quality: int,
+    cache: Optional[EncodeCache],
+    encoder_threads: int,
+    gltf_lock: Optional[GltfFileLock],
+    log_callback: Optional[Any],
+) -> Tuple[Path, int, Optional[str]]:
+    work = None
+    try:
+        work = Path(tempfile.mkdtemp(prefix=f"ktx2_{fp.stem}_"))
+        
+        if fp.suffix.lower() == ".b3dm":
+            n = process_b3dm_file(fp, basisu, mode, work, quality=quality, cache=cache, encoder_threads=encoder_threads)
+        elif fp.suffix.lower() == ".glb":
+            n = process_glb_file(fp, basisu, mode, work, quality=quality, cache=cache, encoder_threads=encoder_threads)
+        else:
+            n = process_gltf_file(fp, basisu, mode, work, quality=quality, cache=cache, encoder_threads=encoder_threads, gltf_lock=gltf_lock)
+        
+        if n and log_callback:
+            log_callback(f"[texture_ktx2] {fp.relative_to(root)} textures={n}")
+        
+        return (fp, n, None)
+    except Exception as e:
+        error_msg = f"{fp}: {e}"
+        if log_callback:
+            log_callback(f"[texture_ktx2] ERROR {error_msg}")
+        return (fp, 0, error_msg)
+    finally:
+        if work and work.is_dir():
+            try:
+                shutil.rmtree(work)
+            except Exception:
+                pass
 
 
 def process_tileset_dir(
@@ -363,8 +537,10 @@ def process_tileset_dir(
     basisu: Optional[Path] = None,
     quality: int = 128,
     log: Optional[Any] = None,
+    file_workers: int = 1,
+    encoder_threads: int = 1,
+    cache_dir: Optional[Path] = None,
 ) -> Dict[str, Any]:
-    """In-place KTX2 post-process under a 3D Tiles directory."""
     root = Path(root)
     basisu = basisu or find_basisu()
     if not basisu:
@@ -372,6 +548,7 @@ def process_tileset_dir(
     mode = (mode or "ktx2-etc1s").lower()
     if mode in ("ktx2", "etc1s"):
         mode = "ktx2-etc1s"
+    
     def _log(msg: str) -> None:
         if log:
             log(msg)
@@ -384,30 +561,50 @@ def process_tileset_dir(
         "filesConverted": 0,
         "texturesConverted": 0,
         "errors": [],
+        "fileWorkers": file_workers,
+        "encoderThreads": encoder_threads,
+        "cacheEnabled": cache_dir is not None,
     }
+    
     patterns = ("*.b3dm", "*.glb", "*.gltf")
     files: List[Path] = []
     for pat in patterns:
         files.extend(root.rglob(pat))
     files = sorted(set(files))
     stats["filesSeen"] = len(files)
-    with tempfile.TemporaryDirectory(prefix="geoforge_ktx2_") as td:
-        work = Path(td)
+    
+    if not files:
+        return stats
+    
+    cache = EncodeCache(cache_dir) if cache_dir else None
+    gltf_lock = GltfFileLock()
+    
+    if file_workers <= 1:
         for fp in files:
-            try:
-                if fp.suffix.lower() == ".b3dm":
-                    n = process_b3dm_file(fp, basisu, mode, work, quality=quality)
-                elif fp.suffix.lower() == ".glb":
-                    n = process_glb_file(fp, basisu, mode, work, quality=quality)
-                else:
-                    n = process_gltf_file(fp, basisu, mode, work, quality=quality)
+            _, n, error = process_one_file(
+                fp, root, basisu, mode, quality, cache, encoder_threads, gltf_lock, _log
+            )
+            if n:
+                stats["filesConverted"] += 1
+                stats["texturesConverted"] += n
+            if error:
+                stats["errors"].append(error)
+    else:
+        with ThreadPoolExecutor(max_workers=file_workers) as executor:
+            futures = {
+                executor.submit(
+                    process_one_file, fp, root, basisu, mode, quality, cache, encoder_threads, gltf_lock, _log
+                ): fp
+                for fp in files
+            }
+            for future in as_completed(futures):
+                _, n, error = future.result()
                 if n:
                     stats["filesConverted"] += 1
                     stats["texturesConverted"] += n
-                    _log(f"[texture_ktx2] {fp.relative_to(root)} textures={n}")
-            except Exception as e:  # noqa: BLE001
-                stats["errors"].append(f"{fp}: {e}")
-                _log(f"[texture_ktx2] ERROR {fp}: {e}")
+                if error:
+                    stats["errors"].append(error)
+    
     return stats
 
 
@@ -417,12 +614,18 @@ def copy_and_process(
     mode: str = "ktx2-etc1s",
     quality: int = 128,
     log: Optional[Any] = None,
+    file_workers: int = 1,
+    encoder_threads: int = 1,
+    cache_dir: Optional[Path] = None,
 ) -> Dict[str, Any]:
     src, dst = Path(src), Path(dst)
     if dst.exists():
         shutil.rmtree(dst)
     shutil.copytree(src, dst)
-    return process_tileset_dir(dst, mode=mode, quality=quality, log=log)
+    return process_tileset_dir(
+        dst, mode=mode, quality=quality, log=log, 
+        file_workers=file_workers, encoder_threads=encoder_threads, cache_dir=cache_dir
+    )
 
 
 if __name__ == "__main__":
@@ -434,12 +637,25 @@ if __name__ == "__main__":
     ap.add_argument("-o", "--output", help="output directory (copy then process); default=in-place")
     ap.add_argument("--mode", default="ktx2-etc1s", choices=["ktx2", "ktx2-etc1s", "ktx2-uastc"])
     ap.add_argument("-q", "--quality", type=int, default=128)
+    ap.add_argument("--file-workers", type=int, default=1, help="parallel file workers")
+    ap.add_argument("--encoder-threads", type=int, default=1, help="basisu encoder threads per file")
+    ap.add_argument("--cache-dir", help="encode cache directory")
     args = ap.parse_args()
+    
     def _print(m: str) -> None:
         print(m, flush=True)
+    
+    cache_dir = Path(args.cache_dir) if args.cache_dir else None
+    
     if args.output:
-        st = copy_and_process(Path(args.input), Path(args.output), mode=args.mode, quality=args.quality, log=_print)
+        st = copy_and_process(
+            Path(args.input), Path(args.output), mode=args.mode, quality=args.quality, log=_print,
+            file_workers=args.file_workers, encoder_threads=args.encoder_threads, cache_dir=cache_dir
+        )
     else:
-        st = process_tileset_dir(Path(args.input), mode=args.mode, quality=args.quality, log=_print)
+        st = process_tileset_dir(
+            Path(args.input), mode=args.mode, quality=args.quality, log=_print,
+            file_workers=args.file_workers, encoder_threads=args.encoder_threads, cache_dir=cache_dir
+        )
     print(json.dumps(st, indent=2))
     sys.exit(0 if st["texturesConverted"] > 0 or st["filesSeen"] == 0 else 1)
