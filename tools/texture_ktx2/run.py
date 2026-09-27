@@ -27,6 +27,9 @@ def main() -> int:
     ap.add_argument("-q", "--quality", type=int, default=128)
     ap.add_argument("--basisu", help="absolute path to basisu")
     ap.add_argument("--report", help="write JSON report to this path")
+    ap.add_argument("--file-workers", type=int, default=1, help="parallel file workers (default: 1)")
+    ap.add_argument("--encoder-threads", type=int, default=1, help="basisu encoder threads per file (default: 1)")
+    ap.add_argument("--cache-dir", help="encode cache directory")
     args = ap.parse_args()
 
     def _print(m: str) -> None:
@@ -37,6 +40,8 @@ def main() -> int:
         print("basisu not found (pass --basisu or set GEOFORGE_BASISU)", file=sys.stderr)
         return 2
 
+    cache_dir = Path(args.cache_dir) if args.cache_dir else None
+
     if args.output:
         st = copy_and_process(
             Path(args.input),
@@ -44,6 +49,9 @@ def main() -> int:
             mode=args.mode,
             quality=args.quality,
             log=_print,
+            file_workers=args.file_workers,
+            encoder_threads=args.encoder_threads,
+            cache_dir=cache_dir,
         )
     else:
         st = process_tileset_dir(
@@ -52,6 +60,9 @@ def main() -> int:
             basisu=Path(basisu),
             quality=args.quality,
             log=_print,
+            file_workers=args.file_workers,
+            encoder_threads=args.encoder_threads,
+            cache_dir=cache_dir,
         )
 
     # Fail if any per-file errors
