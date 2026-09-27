@@ -7,9 +7,11 @@ import {
   Image,
   Stack,
   XCircle,
+  ArrowClockwise,
+  HourglassHigh,
 } from '@phosphor-icons/react';
 import { api, friendlyError, isActiveStatus, isDoneStatus } from '../api/desktop';
-import type { Task, TaskStatus } from '../api/types';
+import type { Task, TaskStatus, TaskProgressDetail } from '../api/types';
 import { Alert } from '../components/Alert';
 import { EmptyState } from '../components/EmptyState';
 import { StageStepper } from '../components/StageStepper';
@@ -49,10 +51,26 @@ function fmtTime(v?: string | number) {
 
 function statusLine(t: Task): { text: string; pct: number | null } {
   const pct = realProgressPercent(t.progress, t.status);
+  const prog = typeof t.progress === 'object' ? (t.progress as TaskProgressDetail) : undefined;
+  
   if (t.status === 'running' || t.status === 'cancelling') {
     const stage = t.stage ? String(t.stage) : '处理中';
-    if (pct != null) return { text: `${stage} · ${pct}%`, pct };
-    return { text: stage, pct: null };
+    let text = stage;
+    
+    if (prog?.completed !== undefined) {
+      const completed = prog.completed;
+      const total = prog.total;
+      
+      if (total !== undefined && total > 0) {
+        text = `${stage} · ${completed}/${total}`;
+      } else {
+        text = `${stage} · 已完成 ${completed}`;
+      }
+    } else if (pct != null) {
+      text = `${stage} · ${pct}%`;
+    }
+    
+    return { text, pct };
   }
   if (t.status === 'queued') return { text: '排队中', pct: null };
   if (t.status === 'completed' || t.status === 'succeeded') return { text: '已完成', pct: 100 };
@@ -399,6 +417,42 @@ export function Processing() {
             <div className="section-title">处理阶段</div>
             <StageStepper stages={selected.stages} orientation="horizontal" />
 
+            {isActiveStatus(selected.status) && typeof selected.progress === 'object' && (
+              <div className="summary-box" style={{ marginTop: 16, marginBottom: 16, background: 'var(--surface-hover)' }}>
+                <dl>
+                  {(selected.progress as TaskProgressDetail).completed !== undefined && (
+                    <>
+                      <dt>进度</dt>
+                      <dd>
+                        {(selected.progress as TaskProgressDetail).completed}
+                        {(selected.progress as TaskProgressDetail).total !== undefined &&
+                        (selected.progress as TaskProgressDetail).total! > 0
+                          ? ` / ${(selected.progress as TaskProgressDetail).total}`
+                          : ' 个单元'}
+                      </dd>
+                    </>
+                  )}
+                  {(selected.progress as TaskProgressDetail).parallelism !== undefined && (
+                    <>
+                      <dt>并行数</dt>
+                      <dd>{(selected.progress as TaskProgressDetail).parallelism} worker(s)</dd>
+                    </>
+                  )}
+                  {(selected.progress as TaskProgressDetail).resourceWait && (
+                    <>
+                      <dt>状态</dt>
+                      <dd>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <HourglassHigh size={14} />
+                          等待资源
+                        </span>
+                      </dd>
+                    </>
+                  )}
+                </dl>
+              </div>
+            )}
+
             <div className="summary-box" style={{ marginTop: 16, marginBottom: 16 }}>
               <dl>
                 <dt>操作</dt>
@@ -460,6 +514,20 @@ export function Processing() {
                   {selected.status === 'cancelling' || cancellingId === selected.id
                     ? '取消中…'
                     : '取消任务'}
+                </button>
+              ) : null}
+              {(selected.status === 'failed' || selected.status === 'cancelled' || selected.status === 'interrupted') &&
+               typeof selected.progress === 'object' &&
+               (selected.progress as TaskProgressDetail).completed !== undefined &&
+               (selected.progress as TaskProgressDetail).completed! > 0 ? (
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => navigate(rebuildHref(selected))}
+                  title="从断点恢复处理"
+                >
+                  <ArrowClockwise size={16} style={{ marginRight: 4 }} />
+                  恢复处理
                 </button>
               ) : null}
               {isDoneStatus(selected.status) ? (
