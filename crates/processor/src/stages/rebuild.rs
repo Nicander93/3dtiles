@@ -4,6 +4,7 @@
 //! `GEOFORGE_REBUILD_ENGINE=python` (regression / baseline).
 
 use crate::cancel::CancelFlag;
+use crate::progress_throttle::ProgressThrottle;
 use crate::protocol::{Emitter, Stage};
 use crate::resource_budget::ResourceBudget;
 use crate::util::{run_logged, tool_paths};
@@ -32,6 +33,9 @@ pub fn run_rebuild(
         "[rebuild] resource budget: {} workers",
         budget.rebuild_workers()
     ));
+
+    let progress = ProgressThrottle::new(Arc::clone(emitter));
+    progress.report(Stage::Rebuild, 0, 0, Some(budget.rebuild_workers()), false);
 
     if output_dir.exists() {
         std::fs::remove_dir_all(output_dir).map_err(|e| e.to_string())?;

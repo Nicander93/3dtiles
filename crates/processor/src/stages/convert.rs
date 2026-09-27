@@ -2,6 +2,7 @@
 
 use crate::cancel::CancelFlag;
 use crate::capabilities::converter_supports_execution_protocol_v1;
+use crate::progress_throttle::ProgressThrottle;
 use crate::protocol::{Emitter, Stage};
 use crate::resource_budget::ResourceBudget;
 use crate::util::{run_logged_env_result, tool_paths, CommandResult};
@@ -35,6 +36,9 @@ pub fn run_convert(
         "[convert] resolved CPU workers: {} (execution protocol v1 support: {})",
         threads, supports_v1
     ));
+    
+    let progress = ProgressThrottle::new(Arc::clone(emitter));
+    progress.report(Stage::Convert, 0, 0, Some(threads), false);
     
     let result = if tools.convert_bin.is_file() {
         run_native(

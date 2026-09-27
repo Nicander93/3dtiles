@@ -1,6 +1,7 @@
 //! Texture stage: keep = skip; else geoforge-texture / Python texture_ktx2 / basisu.
 
 use crate::cancel::CancelFlag;
+use crate::progress_throttle::ProgressThrottle;
 use crate::protocol::{Emitter, Stage};
 use crate::resource_budget::ResourceBudget;
 use crate::util::{command_available, run_logged, tool_paths, ToolPaths};
@@ -172,6 +173,9 @@ pub fn finish_texture(
         &format!("post-process basisu mode={mode}"),
         serde_json::json!({ "textureMode": mode, "postprocess": true, "fileWorkers": file_workers, "encoderThreads": encoder_threads }),
     );
+
+    let progress = ProgressThrottle::new(Arc::clone(emitter));
+    progress.report(Stage::Texture, 0, 0, Some(file_workers), false);
 
     let mut cmd: Vec<String> = Vec::new();
 
