@@ -5,6 +5,7 @@
 
 use crate::cancel::CancelFlag;
 use crate::protocol::{Emitter, Stage};
+use crate::resource_budget::ResourceBudget;
 use crate::util::{run_logged, tool_paths};
 use serde_json::{json, Value};
 use std::path::Path;
@@ -22,9 +23,15 @@ pub fn run_rebuild(
     input_dir: &Path,
     output_dir: &Path,
     rebuild: &Value,
+    budget: &ResourceBudget,
 ) -> Result<(), String> {
     precheck_rebuild_input(emitter, input_dir)?;
     let rebuild = apply_quality_preset(rebuild);
+
+    emitter.log(&format!(
+        "[rebuild] resource budget: {} workers",
+        budget.rebuild_workers()
+    ));
 
     if output_dir.exists() {
         std::fs::remove_dir_all(output_dir).map_err(|e| e.to_string())?;

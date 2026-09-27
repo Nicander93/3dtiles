@@ -220,6 +220,14 @@ fn run_convert_osgb(
     cancel: &CancelFlag,
 ) -> Result<PathBuf, String> {
     let options = config.options_obj();
+    let exec_opts = config.execution_options()?;
+    let budget = crate::ResourceBudget::new(&exec_opts);
+    
+    emitter.log(&format!(
+        "[pipeline] execution options: {}",
+        exec_opts.describe_resolution(&budget.resolved)
+    ));
+    
     let tex_mode = texture::texture_mode_from_options(options);
     texture::validate_texture_mode(&tex_mode)?;
     let validated = path_policy::validate_io_paths(
@@ -305,6 +313,7 @@ fn run_convert_osgb(
         &convert_dir,
         options,
         cfg_json.as_deref(),
+        &budget,
     )?;
     commit::write_checkpoint(&temp, commit::Checkpoint::Converted)?;
     check_cancel(cancel)?;
@@ -319,6 +328,7 @@ fn run_convert_osgb(
             &work,
             &rebuild_out,
             &rebuild::rebuild_opts(options),
+            &budget,
         )?;
         commit::write_checkpoint(&temp, commit::Checkpoint::Rebuilt)?;
         check_cancel(cancel)?;
@@ -326,7 +336,7 @@ fn run_convert_osgb(
     }
 
     commit::write_checkpoint(&temp, commit::Checkpoint::Texturing)?;
-    texture::finish_texture(emitter, cancel, &work, &tex_mode)?;
+    texture::finish_texture(emitter, cancel, &work, &tex_mode, Some(&budget))?;
     commit::write_checkpoint(&temp, commit::Checkpoint::Textured)?;
     check_cancel(cancel)?;
 
@@ -368,6 +378,13 @@ fn run_process_tileset(
     cancel: &CancelFlag,
 ) -> Result<PathBuf, String> {
     let options = config.options_obj();
+    let exec_opts = config.execution_options()?;
+    let budget = crate::ResourceBudget::new(&exec_opts);
+    
+    emitter.log(&format!(
+        "[pipeline] execution options: {}",
+        exec_opts.describe_resolution(&budget.resolved)
+    ));
     let rebuild_opts = rebuild::rebuild_opts(options);
     let want_rebuild = rebuild::rebuild_enabled(options);
     let tex_mode = texture::texture_mode_from_options(options);
@@ -401,7 +418,7 @@ fn run_process_tileset(
 
     if want_rebuild {
         commit::write_checkpoint(&temp, commit::Checkpoint::Rebuilding)?;
-        rebuild::run_rebuild(emitter, cancel, &in_dir, &work, &rebuild_opts)?;
+        rebuild::run_rebuild(emitter, cancel, &in_dir, &work, &rebuild_opts, &budget)?;
         commit::write_checkpoint(&temp, commit::Checkpoint::Rebuilt)?;
     } else {
         // texture-only: copy input tree (work is outside input_root by path_policy)
@@ -416,11 +433,11 @@ fn run_process_tileset(
 
     if want_texture {
         commit::write_checkpoint(&temp, commit::Checkpoint::Texturing)?;
-        texture::finish_texture(emitter, cancel, &work, &tex_mode)?;
+        texture::finish_texture(emitter, cancel, &work, &tex_mode, Some(&budget))?;
         commit::write_checkpoint(&temp, commit::Checkpoint::Textured)?;
         check_cancel(cancel)?;
     } else {
-        texture::finish_texture(emitter, cancel, &work, "keep")?;
+        texture::finish_texture(emitter, cancel, &work, "keep", None)?;
     }
 
     commit::write_checkpoint(&temp, commit::Checkpoint::Validating)?;

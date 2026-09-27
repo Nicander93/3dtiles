@@ -298,6 +298,192 @@ impl Default for ModelTiling {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ExecutionOptions {
+    pub cpu_workers: CpuWorkers,
+    pub memory_budget_mib: Option<u64>,
+    pub io_workers: Option<u32>,
+}
+
+impl Default for ExecutionOptions {
+    fn default() -> Self {
+        Self {
+            cpu_workers: CpuWorkers::Auto,
+            memory_budget_mib: None,
+            io_workers: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum CpuWorkers {
+    Auto,
+    Count(u32),
+}
+
+impl Default for CpuWorkers {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+impl CpuWorkers {
+    pub fn is_auto(self) -> bool {
+        matches!(self, CpuWorkers::Auto)
+    }
+
+    pub fn as_explicit(self) -> Option<u32> {
+        match self {
+            CpuWorkers::Auto => None,
+            CpuWorkers::Count(n) => Some(n),
+        }
+    }
+}
+
+impl From<u32> for CpuWorkers {
+    fn from(value: u32) -> Self {
+        if value == 0 {
+            CpuWorkers::Auto
+        } else {
+            CpuWorkers::Count(value)
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedExecutionOptions {
+    pub cpu_workers: u32,
+    pub memory_budget_mib: u64,
+    pub io_workers: u32,
+}
+
+impl ExecutionOptions {
+    pub fn parse(options: &Value) -> Result<Self, String> {
+        let mut exec_opts = ExecutionOptions::default();
+        
+        let exec_value = options.get("execution");
+        let legacy_threads = options
+            .get("convert")
+            .and_then(|v| v.get("threads"));
+
+        if let Some(exec) = exec_value {
+            if let Some(workers) = exec.get("cpuWorkers").and_then(|v| v.as_u64()) {
+                if workers > u32::MAX as u64 {
+                    return Err("execution.cpuWorkers exceeds maximum value".into());
+                }
+                exec_opts.cpu_workers = CpuWorkers::from(workers as u32);
+            }
+
+            if let Some(mem) = exec.get("memoryBudgetMiB").and_then(|v| v.as_u64()) {
+                exec_opts.memory_budget_mib = Some(mem);
+            }
+
+            if let Some(io) = exec.get("ioWorkers").and_then(|v| v.as_u64()) {
+                if io > u32::MAX as u64 {
+                    return Err("execution.ioWorkers exceeds maximum value".into());
+                }
+                exec_opts.io_workers = Some(io as u32);
+            }
+        }
+
+        if let Some(threads_val) = legacy_threads {
+            let legacy_count = if let Some(n) = threads_val.as_u64() {
+                if n > u32::MAX as u64 {
+                    return Err("convert.threads exceeds maximum value".into());
+                }
+                Some(n as u32)
+            } else {
+                None
+            };
+
+            if let Some(legacy) = legacy_count {
+                match exec_opts.cpu_workers {
+                    CpuWorkers::Auto => {
+                        exec_opts.cpu_workers = CpuWorkers::from(legacy);
+                    }
+                    CpuWorkers::Count(_explicit) => {
+                    }
+                }
+            }
+        }
+
+        exec_opts.validate()?;
+        Ok(exec_opts)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some(mem) = self.memory_budget_mib {
+            if mem == 0 {
+                return Err("execution.memoryBudgetMiB must be positive when specified".into());
+            }
+        }
+        if let Some(io) = self.io_workers {
+            if io == 0 {
+                return Err("execution.ioWorkers must be positive when specified".into());
+            }
+        }
+        Ok(())
+    }
+
+    pub fn resolve(&self) -> ResolvedExecutionOptions {
+        let available_parallelism = std::thread::available_parallelism()
+            .map(|n| n.get() as u32)
+            .unwrap_or(4);
+
+        let cpu_workers = match self.cpu_workers {
+            CpuWorkers::Auto => {
+                let auto_value = (available_parallelism / 2).max(1).min(8);
+                auto_value
+            }
+            CpuWorkers::Count(n) => n.max(1).min(available_parallelism),
+        };
+
+        let memory_budget_mib = self.memory_budget_mib.unwrap_or_else(|| {
+            4096
+        });
+
+        let io_workers = self.io_workers.unwrap_or(2).max(1);
+
+        ResolvedExecutionOptions {
+            cpu_workers,
+            memory_budget_mib,
+            io_workers,
+        }
+    }
+
+    pub fn describe_resolution(&self, resolved: &ResolvedExecutionOptions) -> String {
+        let cpu_desc = match self.cpu_workers {
+            CpuWorkers::Auto => format!("auto → {}", resolved.cpu_workers),
+            CpuWorkers::Count(n) => {
+                if n == resolved.cpu_workers {
+                    format!("{} (explicit)", n)
+                } else {
+                    format!("{} (requested) → {} (capped)", n, resolved.cpu_workers)
+                }
+            }
+        };
+
+        let mem_desc = if let Some(req) = self.memory_budget_mib {
+            format!("{} MiB (explicit)", req)
+        } else {
+            format!("{} MiB (default)", resolved.memory_budget_mib)
+        };
+
+        let io_desc = if let Some(req) = self.io_workers {
+            format!("{} (explicit)", req)
+        } else {
+            format!("{} (default)", resolved.io_workers)
+        };
+
+        format!(
+            "cpu_workers: {}, memory_budget: {}, io_workers: {}",
+            cpu_desc, mem_desc, io_desc
+        )
+    }
+}
+
 impl TaskConfig {
     pub fn input_path(&self) -> &str {
         &self.input.path
@@ -315,6 +501,10 @@ impl TaskConfig {
         let options = serde_json::from_value(self.options.clone())
             .map_err(|error| format!("invalid convert-model options: {error}"))?;
         Ok(options)
+    }
+
+    pub fn execution_options(&self) -> Result<ExecutionOptions, String> {
+        ExecutionOptions::parse(&self.options)
     }
 
     /// Reject unsupported schema versions. Missing version is treated as v1 (legacy).
@@ -435,5 +625,144 @@ mod tests {
             .and_then(|options| options.validate())
             .expect_err("OBJ metadata is insufficient");
         assert!(error.contains("model.unit"));
+    }
+
+    #[test]
+    fn execution_options_default() {
+        let cfg = TaskConfig {
+            schema_version: Some(1),
+            task_id: "exec-001".into(),
+            operation: "convert-osgb".into(),
+            input: PathRef { path: "data".into() },
+            output: PathRef { path: "out".into() },
+            options: json!({}),
+        };
+        let exec = cfg.execution_options().unwrap();
+        assert!(exec.cpu_workers.is_auto());
+        assert!(exec.memory_budget_mib.is_none());
+        assert!(exec.io_workers.is_none());
+    }
+
+    #[test]
+    fn execution_options_explicit_cpu_workers() {
+        let cfg = TaskConfig {
+            schema_version: Some(1),
+            task_id: "exec-002".into(),
+            operation: "convert-osgb".into(),
+            input: PathRef { path: "data".into() },
+            output: PathRef { path: "out".into() },
+            options: json!({ "execution": { "cpuWorkers": 4 } }),
+        };
+        let exec = cfg.execution_options().unwrap();
+        assert_eq!(exec.cpu_workers.as_explicit(), Some(4));
+    }
+
+    #[test]
+    fn execution_options_explicit_auto() {
+        let cfg = TaskConfig {
+            schema_version: Some(1),
+            task_id: "exec-003".into(),
+            operation: "convert-osgb".into(),
+            input: PathRef { path: "data".into() },
+            output: PathRef { path: "out".into() },
+            options: json!({ "execution": { "cpuWorkers": 0 } }),
+        };
+        let exec = cfg.execution_options().unwrap();
+        assert!(exec.cpu_workers.is_auto());
+    }
+
+    #[test]
+    fn execution_options_legacy_threads() {
+        let cfg = TaskConfig {
+            schema_version: Some(1),
+            task_id: "exec-004".into(),
+            operation: "convert-osgb".into(),
+            input: PathRef { path: "data".into() },
+            output: PathRef { path: "out".into() },
+            options: json!({ "convert": { "threads": 2 } }),
+        };
+        let exec = cfg.execution_options().unwrap();
+        assert_eq!(exec.cpu_workers.as_explicit(), Some(2));
+    }
+
+    #[test]
+    fn execution_options_explicit_wins_over_legacy() {
+        let cfg = TaskConfig {
+            schema_version: Some(1),
+            task_id: "exec-005".into(),
+            operation: "convert-osgb".into(),
+            input: PathRef { path: "data".into() },
+            output: PathRef { path: "out".into() },
+            options: json!({
+                "convert": { "threads": 2 },
+                "execution": { "cpuWorkers": 4 }
+            }),
+        };
+        let exec = cfg.execution_options().unwrap();
+        assert_eq!(exec.cpu_workers.as_explicit(), Some(4));
+    }
+
+    #[test]
+    fn execution_options_invalid_zero_memory() {
+        let cfg = TaskConfig {
+            schema_version: Some(1),
+            task_id: "exec-006".into(),
+            operation: "convert-osgb".into(),
+            input: PathRef { path: "data".into() },
+            output: PathRef { path: "out".into() },
+            options: json!({ "execution": { "memoryBudgetMiB": 0 } }),
+        };
+        let err = cfg.execution_options().expect_err("zero memory should fail");
+        assert!(err.contains("memoryBudgetMiB"));
+    }
+
+    #[test]
+    fn execution_options_invalid_zero_io_workers() {
+        let cfg = TaskConfig {
+            schema_version: Some(1),
+            task_id: "exec-007".into(),
+            operation: "convert-osgb".into(),
+            input: PathRef { path: "data".into() },
+            output: PathRef { path: "out".into() },
+            options: json!({ "execution": { "ioWorkers": 0 } }),
+        };
+        let err = cfg.execution_options().expect_err("zero io workers should fail");
+        assert!(err.contains("ioWorkers"));
+    }
+
+    #[test]
+    fn execution_options_resolve_auto() {
+        let exec = ExecutionOptions::default();
+        let resolved = exec.resolve();
+        assert!(resolved.cpu_workers >= 1 && resolved.cpu_workers <= 8);
+        assert!(resolved.memory_budget_mib > 0);
+        assert!(resolved.io_workers >= 1);
+    }
+
+    #[test]
+    fn execution_options_resolve_explicit() {
+        let exec = ExecutionOptions {
+            cpu_workers: CpuWorkers::Count(4),
+            memory_budget_mib: Some(8192),
+            io_workers: Some(2),
+        };
+        let resolved = exec.resolve();
+        assert_eq!(resolved.cpu_workers, 4);
+        assert_eq!(resolved.memory_budget_mib, 8192);
+        assert_eq!(resolved.io_workers, 2);
+    }
+
+    #[test]
+    fn execution_options_describe_resolution() {
+        let exec = ExecutionOptions {
+            cpu_workers: CpuWorkers::Count(4),
+            memory_budget_mib: Some(8192),
+            io_workers: Some(2),
+        };
+        let resolved = exec.resolve();
+        let desc = exec.describe_resolution(&resolved);
+        assert!(desc.contains("cpu_workers"));
+        assert!(desc.contains("memory_budget"));
+        assert!(desc.contains("io_workers"));
     }
 }

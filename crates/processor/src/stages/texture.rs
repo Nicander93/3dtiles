@@ -2,6 +2,7 @@
 
 use crate::cancel::CancelFlag;
 use crate::protocol::{Emitter, Stage};
+use crate::resource_budget::ResourceBudget;
 use crate::util::{command_available, run_logged, tool_paths, ToolPaths};
 use serde_json::Value;
 use std::path::Path;
@@ -131,6 +132,7 @@ pub fn finish_texture(
     cancel: &CancelFlag,
     out_dir: &Path,
     tex_mode: &str,
+    budget: Option<&ResourceBudget>,
 ) -> Result<(), String> {
     let mode = normalize_mode(Some(tex_mode));
     if is_keep(&mode) {
@@ -141,6 +143,13 @@ pub fn finish_texture(
         );
         emitter.log("[texture] mode=keep — skipped");
         return Ok(());
+    }
+
+    if let Some(budget) = budget {
+        emitter.log(&format!(
+            "[texture] resource budget: {} file workers",
+            budget.texture_file_workers()
+        ));
     }
 
     let tools = tool_paths();
