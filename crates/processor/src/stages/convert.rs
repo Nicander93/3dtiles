@@ -1,86 +1,14 @@
 //! Invoke prebuilt `_3dtile` / `GEOFORGE_3DTILE` (no Docker fallback).
 
 use crate::cancel::CancelFlag;
+use crate::capabilities::converter_supports_execution_protocol_v1;
 use crate::protocol::{Emitter, Stage};
+use crate::resource_budget::ResourceBudget;
 use crate::util::{run_logged_env_result, tool_paths, CommandResult};
 use geoforge_protocol::ModelFormat;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
-#[derive(Debug, Clone)]
-struct ThreadConfig {
-    requested: String,
-    override_value: Option<usize>,
-}
-
-impl ThreadConfig {
-    fn to_override(&self) -> Option<usize> {
-        self.override_value
-    }
-}
-
-fn resolve_thread_config(options: &Value) -> ThreadConfig {
-    let threads_value = options
-        .get("convert")
-        .and_then(|v| v.get("threads"));
-    
-    match threads_value {
-        Some(Value::Number(n)) if n.is_u64() => {
-            let val = n.as_u64().unwrap() as usize;
-            if val == 0 {
-                ThreadConfig {
-                    requested: "0 (explicit auto)".to_string(),
-                    override_value: Some(0),
-                }
-            } else if val >= 1 && val <= 16 {
-                ThreadConfig {
-                    requested: format!("{} (explicit)", val),
-                    override_value: Some(val),
-                }
-            } else {
-                ThreadConfig {
-                    requested: format!("{} (invalid, > 16)", val),
-                    override_value: None,
-                }
-            }
-        }
-        Some(v) => {
-            ThreadConfig {
-                requested: format!("invalid type: {}", v),
-                override_value: None,
-            }
-        }
-        None => {
-            if let Ok(env_val) = std::env::var("GEOFORGE_CONVERT_THREADS") {
-                if let Ok(parsed) = env_val.parse::<usize>() {
-                    if parsed > 0 && parsed <= 16 {
-                        ThreadConfig {
-                            requested: format!("from env: {}", parsed),
-                            override_value: Some(parsed),
-                        }
-                    } else {
-                        ThreadConfig {
-                            requested: format!("from env: {} (invalid)", parsed),
-                            override_value: None,
-                        }
-                    }
-                } else {
-                    ThreadConfig {
-                        requested: format!("from env: {} (parse error)", env_val),
-                        override_value: None,
-                    }
-                }
-            } else {
-                ThreadConfig {
-                    requested: "default (omitted, no env)".to_string(),
-                    override_value: None,
-                }
-            }
-        }
-    }
-}
-
 
 pub fn run_convert(
     emitter: &Arc<Emitter>,
@@ -89,6 +17,7 @@ pub fn run_convert(
     out_dir: &Path,
     options: &Value,
     cfg_json: Option<&str>,
+    budget: &ResourceBudget,
 ) -> Result<(), String> {
     std::fs::create_dir_all(out_dir).map_err(|e| e.to_string())?;
     let extra = convert_flags(emitter, options, cfg_json);
@@ -97,24 +26,14 @@ pub fn run_convert(
     emitter.stage(Stage::Convert, "OSGB → 3D Tiles");
     let started = std::time::Instant::now();
     
-    let thread_config = resolve_thread_config(options);
-    emitter.metric("converter.threads.requested", json!(thread_config.requested));
-    emitter.log(&format!(
-        "[convert] thread config requested: {}",
-        thread_config.requested
-    ));
+    let threads = budget.convert_threads();
+    let supports_v1 = converter_supports_execution_protocol_v1();
     
-    let thread_override = thread_config.to_override();
-    emitter.metric("converter.threads.override", json!(thread_override));
+    emitter.metric("converter.threads.resolved", json!(threads));
+    emitter.metric("converter.executionProtocol.supported", json!(supports_v1));
     emitter.log(&format!(
-        "[convert] thread override passed to subprocess: {}",
-        thread_override.map_or("none (converter default)".to_string(), |t| {
-            if t == 0 {
-                "0 (auto)".to_string()
-            } else {
-                t.to_string()
-            }
-        })
+        "[convert] resolved CPU workers: {} (execution protocol v1 support: {})",
+        threads, supports_v1
     ));
     
     let result = if tools.convert_bin.is_file() {
@@ -125,7 +44,7 @@ pub fn run_convert(
             osgb_root,
             out_dir,
             &extra,
-            thread_override,
+            threads,
         )
     } else if tools.packaged {
         return Err(format!(
@@ -148,15 +67,15 @@ pub fn run_convert(
     };
 
     let should_retry = result.exit_code != 0
-        && thread_override != Some(1)
+        && threads != 1
         && !cancel.is_cancelled()
         && retry_single_thread(&result);
     
     if should_retry {
         emitter.log(&format!(
-            "[convert] multi-threaded converter failed (exit_code={}, thread_override={:?}); stderr tail:\n{}",
+            "[convert] multi-threaded converter failed (exit_code={}, threads={}); stderr tail:\n{}",
             result.exit_code,
-            thread_override,
+            threads,
             if result.stderr_tail.is_empty() { "(empty)" } else { &result.stderr_tail }
         ));
         emitter.log("[convert] retrying once with one worker thread");
@@ -183,7 +102,7 @@ pub fn run_convert(
             osgb_root,
             out_dir,
             &extra,
-            Some(1),
+            1,
         )?;
         if result.exit_code == 0 {
             emitter.log("[convert] single-threaded retry succeeded");
@@ -326,7 +245,7 @@ fn run_native(
     osgb_root: &str,
     out_dir: &Path,
     extra: &[String],
-    thread_override: Option<usize>,
+    threads: u32,
 ) -> Result<CommandResult, String> {
     let mut cmd = vec![
         bin.to_string_lossy().into_owned(),
@@ -340,21 +259,21 @@ fn run_native(
     cmd.extend(extra.iter().cloned());
     let cwd = bin.parent();
     let mut env = converter_environment(cwd);
-    if let Some(threads) = thread_override {
-        if threads == 0 {
-            emitter.log("[convert] forcing thread mode to auto (0)");
-            env.push((
-                "GEOFORGE_CONVERT_THREADS",
-                PathBuf::from("0"),
-            ));
-        } else {
-            emitter.log(&format!("[convert] forcing thread count to {}", threads));
-            env.push((
-                "GEOFORGE_CONVERT_THREADS",
-                PathBuf::from(threads.to_string()),
-            ));
-        }
+    
+    if threads == 0 {
+        emitter.log("[convert] forcing thread mode to auto (0)");
+        env.push((
+            "GEOFORGE_CONVERT_THREADS",
+            PathBuf::from("0"),
+        ));
+    } else {
+        emitter.log(&format!("[convert] setting thread count to {}", threads));
+        env.push((
+            "GEOFORGE_CONVERT_THREADS",
+            PathBuf::from(threads.to_string()),
+        ));
     }
+    
     let env_refs: Vec<(&str, PathBuf)> = env;
     run_logged_env_result(emitter, cancel, &cmd, cwd, &env_refs)
 }
@@ -405,10 +324,8 @@ fn strip_verbatim_str(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_thread_config, retry_single_thread};
+    use super::retry_single_thread;
     use crate::util::CommandResult;
-    use serde_json::json;
-    use serial_test::serial;
 
     fn result(exit_code: i32, stderr_tail: &str) -> CommandResult {
         CommandResult {
@@ -438,96 +355,5 @@ mod tests {
             1,
             "failed to read metadata.xml"
         )));
-    }
-
-    #[test]
-    fn thread_config_explicit_1() {
-        let options = json!({"convert": {"threads": 1}});
-        let config = resolve_thread_config(&options);
-        assert_eq!(config.to_override(), Some(1));
-        assert_eq!(config.requested, "1 (explicit)");
-    }
-
-    #[test]
-    fn thread_config_explicit_2() {
-        let options = json!({"convert": {"threads": 2}});
-        let config = resolve_thread_config(&options);
-        assert_eq!(config.to_override(), Some(2));
-        assert_eq!(config.requested, "2 (explicit)");
-    }
-
-    #[test]
-    fn thread_config_explicit_4() {
-        let options = json!({"convert": {"threads": 4}});
-        let config = resolve_thread_config(&options);
-        assert_eq!(config.to_override(), Some(4));
-        assert_eq!(config.requested, "4 (explicit)");
-    }
-
-    #[test]
-    fn thread_config_explicit_auto() {
-        let options = json!({"convert": {"threads": 0}});
-        let config = resolve_thread_config(&options);
-        assert_eq!(config.to_override(), Some(0));
-        assert_eq!(config.requested, "0 (explicit auto)");
-    }
-
-    #[test]
-    fn thread_config_invalid_high() {
-        let options = json!({"convert": {"threads": 32}});
-        let config = resolve_thread_config(&options);
-        assert_eq!(config.to_override(), None);
-        assert!(config.requested.contains("invalid"));
-    }
-
-    #[test]
-    fn thread_config_invalid_type() {
-        let options = json!({"convert": {"threads": "auto"}});
-        let config = resolve_thread_config(&options);
-        assert_eq!(config.to_override(), None);
-        assert!(config.requested.contains("invalid type"));
-    }
-
-    #[test]
-    #[serial]
-    fn thread_config_omitted_no_env() {
-        std::env::remove_var("GEOFORGE_CONVERT_THREADS");
-        let options = json!({"convert": {}});
-        let config = resolve_thread_config(&options);
-        assert_eq!(config.to_override(), None);
-        assert_eq!(config.requested, "default (omitted, no env)");
-    }
-
-    #[test]
-    #[serial]
-    fn thread_config_from_env() {
-        std::env::set_var("GEOFORGE_CONVERT_THREADS", "4");
-        let options = json!({"convert": {}});
-        let config = resolve_thread_config(&options);
-        assert_eq!(config.to_override(), Some(4));
-        assert_eq!(config.requested, "from env: 4");
-        std::env::remove_var("GEOFORGE_CONVERT_THREADS");
-    }
-
-    #[test]
-    #[serial]
-    fn thread_config_env_invalid() {
-        std::env::set_var("GEOFORGE_CONVERT_THREADS", "999");
-        let options = json!({"convert": {}});
-        let config = resolve_thread_config(&options);
-        assert_eq!(config.to_override(), None);
-        assert!(config.requested.contains("invalid"));
-        std::env::remove_var("GEOFORGE_CONVERT_THREADS");
-    }
-
-    #[test]
-    #[serial]
-    fn thread_config_explicit_wins_over_env() {
-        std::env::set_var("GEOFORGE_CONVERT_THREADS", "8");
-        let options = json!({"convert": {"threads": 2}});
-        let config = resolve_thread_config(&options);
-        assert_eq!(config.to_override(), Some(2));
-        assert_eq!(config.requested, "2 (explicit)");
-        std::env::remove_var("GEOFORGE_CONVERT_THREADS");
     }
 }

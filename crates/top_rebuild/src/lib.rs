@@ -18,6 +18,23 @@ pub mod tileset_writer;
 pub mod tree_builder;
 pub mod types;
 
+#[derive(Debug, Clone)]
+pub struct ExecutionParams {
+    pub workers: u32,
+}
+
+impl Default for ExecutionParams {
+    fn default() -> Self {
+        Self { workers: 2 }
+    }
+}
+
+impl ExecutionParams {
+    pub fn new(workers: u32) -> Self {
+        Self { workers: workers.max(1) }
+    }
+}
+
 pub use adapter::load_source_blocks;
 pub use dump::{format_level_counts, format_tree_detail, print_acceptance};
 pub use error::{Result, TopRebuildError};

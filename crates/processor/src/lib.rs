@@ -6,16 +6,18 @@ pub mod geo;
 pub mod path_policy;
 pub mod pipeline;
 pub mod protocol;
+pub mod resource_budget;
 pub mod stages;
 pub mod util;
 pub mod validation;
 pub mod validator;
 
 pub use cancel::CancelFlag;
-pub use capabilities::capabilities_json;
+pub use capabilities::{capabilities_json, converter_supports_execution_protocol_v1};
 pub use path_policy::{validate_io_paths, ValidatedPaths};
 pub use pipeline::{run_task, RunOutcome};
 pub use protocol::{Emitter, Stage, TaskConfig, EXIT_CANCELLED, EXIT_FAILED, EXIT_OK};
+pub use resource_budget::ResourceBudget;
 pub use stages::scan::scan_osgb;
 pub use validation::{check_frontier_coverage, check_ge_monotonicity, check_subtree_retention, 
                       FrontierCoverageResult, GeMonotonicityResult, SubtreeRetentionResult};

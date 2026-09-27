@@ -81,7 +81,7 @@ pub fn capabilities_json() -> Value {
 
 fn probe_model_capabilities(path: &Path) -> Value {
     if !path.is_file() {
-        return json!({ "ready": false, "reason": "converter missing" });
+        return json!({ "ready": false, "reason": "converter missing", "executionVersion": Value::Null });
     }
     let mut command = Command::new(path);
     command
@@ -94,12 +94,13 @@ fn probe_model_capabilities(path: &Path) -> Value {
         Ok(output) => return json!({
             "ready": false,
             "reason": format!("--capabilities-json exited with {:?}", output.status.code()),
+            "executionVersion": Value::Null,
         }),
-        Err(error) => return json!({ "ready": false, "reason": error.to_string() }),
+        Err(error) => return json!({ "ready": false, "reason": error.to_string(), "executionVersion": Value::Null }),
     };
     let parsed: Value = match serde_json::from_slice(&output.stdout) {
         Ok(parsed) => parsed,
-        Err(error) => return json!({ "ready": false, "reason": format!("invalid capability JSON: {error}") }),
+        Err(error) => return json!({ "ready": false, "reason": format!("invalid capability JSON: {error}"), "executionVersion": Value::Null }),
     };
     model_capability_value(&parsed)
 }
@@ -113,14 +114,29 @@ fn model_capability_value(parsed: &Value) -> Value {
         .map(|formats| formats.iter().any(|format| format.as_str() == Some("obj")))
         .unwrap_or(false);
     let config_version = parsed.get("modelConfigVersion").and_then(Value::as_u64);
+    let execution_version = parsed.get("executionVersion").and_then(Value::as_u64);
+    
     json!({
         "ready": supports_fbx && supports_obj && config_version == Some(1),
         "formats": formats.cloned().unwrap_or_default(),
         "modelConfigVersion": config_version,
+        "executionVersion": execution_version,
         "georeferenceModes": parsed.get("georeferenceModes").cloned().unwrap_or_default(),
         "projectedGeoreference": parsed.get("projectedGeoreference").cloned().unwrap_or(Value::Bool(false)),
         "reason": if supports_fbx && supports_obj && config_version == Some(1) { Value::Null } else { json!("converter does not support FBX, OBJ, and modelConfigVersion=1") },
     })
+}
+
+pub fn converter_supports_execution_protocol_v1() -> bool {
+    let tools = tool_paths();
+    if !tools.convert_bin.is_file() {
+        return false;
+    }
+    let caps = probe_model_capabilities(&tools.convert_bin);
+    caps.get("executionVersion")
+        .and_then(Value::as_u64)
+        .map(|v| v >= 1)
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
