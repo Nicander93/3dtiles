@@ -5,7 +5,8 @@ use crate::geo::{build_tile_config_json, missing_crs_message, resolve_effective_
 use crate::path_policy;
 use crate::protocol::{Emitter, Stage, TaskConfig, EXIT_CANCELLED, EXIT_FAILED, EXIT_OK};
 use crate::stages::{commit, convert, rebuild, scan, texture, validate};
-use geoforge_protocol::GeoReferenceOptions;
+use crate::work_manifest::{manifest_path, WorkManifest};
+use geoforge_protocol::{GeoReferenceOptions, ResumePolicy};
 use serde_json::json;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -214,6 +215,49 @@ fn check_cancel(cancel: &CancelFlag) -> Result<(), String> {
     }
 }
 
+fn prepare_temp_with_resume(
+    final_output: &Path,
+    task_id: &str,
+    resume_policy: ResumePolicy,
+) -> Result<(PathBuf, bool), String> {
+    let temp = commit::temp_work_dir(final_output, task_id);
+    
+    if !temp.exists() {
+        let temp = commit::prepare_temp(final_output, task_id)?;
+        return Ok((temp, false));
+    }
+
+    match resume_policy {
+        ResumePolicy::Off => {
+            Err(format!(
+                "temporary work directory already exists (refusing to overwrite): {} \
+                 Use execution.resumePolicy='resume' to continue from previous state, or \
+                 manually remove the directory to start fresh.",
+                temp.display()
+            ))
+        }
+        ResumePolicy::RetainOnFailure => {
+            Err(format!(
+                "temporary work directory already exists: {} \
+                 execution.resumePolicy='retain-on-failure' only retains on failure, not resume. \
+                 Use 'resume' to continue from previous state, or manually remove the directory.",
+                temp.display()
+            ))
+        }
+        ResumePolicy::Resume => {
+            let manifest_file = manifest_path(&temp);
+            if manifest_file.exists() {
+                let mut manifest = WorkManifest::load(&manifest_file)?;
+                manifest.reset_running_to_pending();
+                manifest.save(&manifest_file)?;
+                Ok((temp, true))
+            } else {
+                Ok((temp, false))
+            }
+        }
+    }
+}
+
 fn run_convert_osgb(
     config: &TaskConfig,
     emitter: &Arc<Emitter>,
@@ -237,8 +281,10 @@ fn run_convert_osgb(
     )?;
     report_output_space(emitter, validated.output_parent_free_bytes);
     let final_out = validated.output.clone();
-    let temp = commit::prepare_temp(&final_out, &config.task_id)?;
-    let mut temp_guard = commit::TempGuard::new(temp.clone());
+    
+    let (temp, resuming) = prepare_temp_with_resume(&final_out, &config.task_id, exec_opts.resume_policy)?;
+    let retain_on_failure = matches!(exec_opts.resume_policy, geoforge_protocol::ResumePolicy::RetainOnFailure | geoforge_protocol::ResumePolicy::Resume);
+    let mut temp_guard = commit::TempGuard::new(temp.clone()).with_retain_on_failure(retain_on_failure);
     // Work subdirs inside temp
     let convert_dir = temp.join("convert");
     std::fs::create_dir_all(&convert_dir).map_err(|e| e.to_string())?;
@@ -306,6 +352,22 @@ fn run_convert_osgb(
         emitter.log(&format!("[geo] {n}"));
     }
 
+    let manifest_file = manifest_path(&temp);
+    let mut manifest = if resuming && manifest_file.exists() {
+        WorkManifest::load(&manifest_file)?
+    } else {
+        WorkManifest::new(config.task_id.clone())
+    };
+
+    if resuming {
+        let pending_count = manifest.pending_or_failed_units().len();
+        let succeeded_count = manifest.units.values().filter(|u| u.status == crate::work_manifest::UnitStatus::Succeeded).count();
+        emitter.log(&format!(
+            "[resume] loaded manifest: {} succeeded, {} pending/failed",
+            succeeded_count, pending_count
+        ));
+    }
+
     convert::run_convert(
         emitter,
         cancel,
@@ -315,6 +377,8 @@ fn run_convert_osgb(
         cfg_json.as_deref(),
         &budget,
     )?;
+    
+    manifest.save(&manifest_file)?;
     commit::write_checkpoint(&temp, commit::Checkpoint::Converted)?;
     check_cancel(cancel)?;
 
@@ -540,8 +604,11 @@ fn report_output_space(emitter: &Emitter, free_bytes: Option<u64>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{copy_dir, error_code_for_message};
+    use super::{copy_dir, error_code_for_message, prepare_temp_with_resume};
     use crate::cancel::CancelFlag;
+    use crate::stages::commit;
+    use crate::work_manifest::{manifest_path, UnitStatus, UnitType, WorkManifest, WorkUnit};
+    use geoforge_protocol::ResumePolicy;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -613,5 +680,76 @@ mod tests {
         assert_eq!(error, "cancelled");
         assert!(!destination.exists());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepare_temp_with_resume_off_refuses_existing() {
+        let root = temp_dir("resume-off");
+        let output = root.join("output");
+        let temp = commit::prepare_temp(&output, "task-resume-off").expect("prepare temp");
+        
+        let error = prepare_temp_with_resume(&output, "task-resume-off", ResumePolicy::Off)
+            .expect_err("should refuse existing temp");
+        assert!(error.contains("already exists"));
+        assert!(error.contains("resumePolicy"));
+        
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepare_temp_with_resume_policy_loads_and_resets_manifest() {
+        let root = temp_dir("resume-load");
+        let output = root.join("output");
+        let temp = commit::prepare_temp(&output, "task-resume").expect("prepare temp");
+        
+        let mut manifest = WorkManifest::new("task-resume".to_string());
+        manifest.add_unit("unit-1".to_string(), WorkUnit::new("unit-1".to_string(), UnitType::Convert));
+        manifest.add_unit("unit-2".to_string(), WorkUnit::new("unit-2".to_string(), UnitType::Convert));
+        manifest.mark_running("unit-1");
+        manifest.mark_succeeded("unit-2", None);
+        
+        let manifest_file = manifest_path(&temp);
+        manifest.save(&manifest_file).expect("save manifest");
+        
+        let (resumed_temp, resuming) = prepare_temp_with_resume(&output, "task-resume", ResumePolicy::Resume)
+            .expect("resume should succeed");
+        assert!(resuming);
+        assert_eq!(resumed_temp, temp);
+        
+        let loaded = WorkManifest::load(&manifest_file).expect("load manifest");
+        assert_eq!(loaded.units["unit-1"].status, UnitStatus::Pending);
+        assert_eq!(loaded.units["unit-2"].status, UnitStatus::Succeeded);
+        
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepare_temp_with_resume_without_manifest_succeeds() {
+        let root = temp_dir("resume-no-manifest");
+        let output = root.join("output");
+        let temp = commit::prepare_temp(&output, "task-no-manifest").expect("prepare temp");
+        
+        let (resumed_temp, resuming) = prepare_temp_with_resume(&output, "task-no-manifest", ResumePolicy::Resume)
+            .expect("resume without manifest should succeed");
+        assert!(!resuming);
+        assert_eq!(resumed_temp, temp);
+        
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn work_manifest_can_reuse_checks_all_fingerprints() {
+        let mut manifest = WorkManifest::new("task-reuse".to_string());
+        let unit = WorkUnit::new("block-01".to_string(), UnitType::Convert)
+            .with_fingerprints(Some("input-fp".to_string()), Some("param-hash".to_string()));
+        manifest.add_unit("block-01".to_string(), unit);
+        manifest.mark_succeeded("block-01", Some("output-checksum".to_string()));
+        
+        assert!(manifest.can_reuse("block-01", Some("input-fp"), Some("param-hash")));
+        assert!(!manifest.can_reuse("block-01", Some("different-input"), Some("param-hash")));
+        assert!(!manifest.can_reuse("block-01", Some("input-fp"), Some("different-param")));
+        
+        manifest.mark_failed("block-01");
+        assert!(!manifest.can_reuse("block-01", Some("input-fp"), Some("param-hash")));
     }
 }

@@ -306,12 +306,13 @@ fn ensure_owned_temp(temp_dir: &Path) -> Result<(), String> {
 ///
 /// # Semantics
 ///
-/// - **Failure or cancel before commit**: cleanup removes the owned temp directory
+/// - **Failure or cancel before commit**: cleanup behavior depends on retain_on_failure
 /// - **Success after commit**: cleanup is suppressed by `mark_committed()`; output remains
 /// - **Late cancel after commit**: the committed output is never removed by this guard
 pub struct TempGuard {
     path: PathBuf,
     committed: bool,
+    retain_on_failure: bool,
 }
 
 impl TempGuard {
@@ -319,7 +320,13 @@ impl TempGuard {
         Self {
             path,
             committed: false,
+            retain_on_failure: false,
         }
+    }
+
+    pub fn with_retain_on_failure(mut self, retain: bool) -> Self {
+        self.retain_on_failure = retain;
+        self
     }
 
     pub fn mark_committed(&mut self) {
@@ -329,7 +336,7 @@ impl TempGuard {
 
 impl Drop for TempGuard {
     fn drop(&mut self) {
-        if !self.committed {
+        if !self.committed && !self.retain_on_failure {
             cleanup_temp(&self.path);
         }
     }
@@ -669,10 +676,46 @@ mod tests {
 
         {
             let _guard = TempGuard::new(temp.clone());
-            // Returning an error from any pipeline stage drops the guard.
         }
 
         assert!(!temp.exists(), "failed task must not leave its owned temp directory");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn temp_guard_with_retain_on_failure_preserves_directory() {
+        use super::TempGuard;
+
+        let root = temp_root("retain-on-failure");
+        let output = root.join("output");
+        let temp = prepare_temp(&output, "task-retain").expect("prepare owned temp");
+        fs::write(temp.join("partial-output"), b"incomplete")
+            .expect("write partial output");
+
+        {
+            let _guard = TempGuard::new(temp.clone()).with_retain_on_failure(true);
+        }
+
+        assert!(temp.exists(), "temp must be retained on failure");
+        assert!(temp.join("partial-output").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn temp_guard_committed_always_prevents_cleanup() {
+        use super::TempGuard;
+
+        let root = temp_root("committed-no-cleanup");
+        let output = root.join("output");
+        let temp = prepare_temp(&output, "task-committed").expect("prepare owned temp");
+        fs::write(temp.join("data"), b"finished").expect("write data");
+
+        {
+            let mut guard = TempGuard::new(temp.clone());
+            guard.mark_committed();
+        }
+
+        assert!(!temp.exists(), "committed temp is always cleaned up by guard");
         let _ = fs::remove_dir_all(root);
     }
 }

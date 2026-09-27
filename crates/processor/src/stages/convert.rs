@@ -81,20 +81,28 @@ pub fn run_convert(
         emitter.log("[convert] retrying once with one worker thread");
         emitter.metric("converter.retryCount", json!(1));
         emitter.metric("converter.retryThreads", json!(1));
-        if out_dir.exists() {
-            std::fs::remove_dir_all(out_dir).map_err(|error| {
+        
+        let tileset_exists = out_dir.join("tileset.json").is_file();
+        if tileset_exists {
+            emitter.log("[convert] tileset.json found; preserving completed blocks for retry");
+        } else {
+            emitter.log("[convert] no tileset.json; clearing output for clean retry");
+            if out_dir.exists() {
+                std::fs::remove_dir_all(out_dir).map_err(|error| {
+                    format!(
+                        "failed to clear partial converter output before retry {}: {error}",
+                        out_dir.display()
+                    )
+                })?;
+            }
+            std::fs::create_dir_all(out_dir).map_err(|error| {
                 format!(
-                    "failed to clear partial converter output before retry {}: {error}",
+                    "failed to recreate converter output before retry {}: {error}",
                     out_dir.display()
                 )
             })?;
         }
-        std::fs::create_dir_all(out_dir).map_err(|error| {
-            format!(
-                "failed to recreate converter output before retry {}: {error}",
-                out_dir.display()
-            )
-        })?;
+        
         result = run_native(
             emitter,
             cancel,
