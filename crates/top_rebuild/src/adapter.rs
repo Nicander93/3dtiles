@@ -148,6 +148,9 @@ fn grid_xy_in_frame(block: &SourceBlock, frame_inv: &Mat4d) -> Option<(f64, f64)
 
 /// Validate grid indices against world-space centers, compared in the
 /// origin block's local frame (so a shared ECEF root does not distort XY).
+///
+/// P4 optimization: O(N log N) via sorted adjacency instead of O(N²) all-pairs.
+/// Preserves sparse/negative/missing-block rejection rules.
 pub fn validate_grid_spatial(blocks: &[SourceBlock]) -> Result<()> {
     let with_grid: Vec<_> = blocks
         .iter()
@@ -166,41 +169,66 @@ pub fn validate_grid_spatial(blocks: &[SourceBlock]) -> Result<()> {
         .inverse()
         .unwrap_or_else(Mat4d::identity);
 
+    struct BlockInfo<'a> {
+        #[allow(dead_code)]
+        block: &'a SourceBlock,
+        gx: i32,
+        gy: i32,
+        cx: f64,
+        cy: f64,
+    }
+    
+    let mut infos: Vec<BlockInfo> = with_grid
+        .iter()
+        .map(|b| {
+            let (cx, cy) = grid_xy_in_frame(b, &frame_inv).unwrap();
+            BlockInfo {
+                block: b,
+                gx: b.grid_x.unwrap(),
+                gy: b.grid_y.unwrap(),
+                cx,
+                cy,
+            }
+        })
+        .collect();
+
     let mut spacings_x = Vec::new();
     let mut spacings_y = Vec::new();
     let mut collapsed_x = false;
     let mut collapsed_y = false;
 
-    for i in 0..with_grid.len() {
-        for j in (i + 1)..with_grid.len() {
-            let a = with_grid[i];
-            let b = with_grid[j];
-            let (ax, ay) = (a.grid_x.unwrap(), a.grid_y.unwrap());
-            let (bx, by) = (b.grid_x.unwrap(), b.grid_y.unwrap());
-            let (acx, acy) = grid_xy_in_frame(a, &frame_inv).unwrap();
-            let (bcx, bcy) = grid_xy_in_frame(b, &frame_inv).unwrap();
-            let dxg = (bx - ax).abs();
-            let dyg = (by - ay).abs();
-            if dxg > 0 {
-                let sx = (bcx - acx).abs() / dxg as f64;
-                if sx < 1e-3 {
-                    collapsed_x = true;
-                } else {
-                    spacings_x.push(sx);
-                }
-            }
-            if dyg > 0 {
-                let sy = (bcy - acy).abs() / dyg as f64;
-                if sy < 1e-3 {
-                    collapsed_y = true;
-                } else {
-                    spacings_y.push(sy);
-                }
+    infos.sort_by_key(|info| (info.gx, info.gy));
+    for i in 0..infos.len().saturating_sub(1) {
+        let a = &infos[i];
+        let b = &infos[i + 1];
+        let dxg = (b.gx - a.gx).abs();
+        let dyg = (b.gy - a.gy).abs();
+        if dxg == 1 && dyg == 0 {
+            let sx = (b.cx - a.cx).abs();
+            if sx < 1e-3 {
+                collapsed_x = true;
+            } else {
+                spacings_x.push(sx);
             }
         }
     }
 
-    // Distinct grid indices but coincident centers ⇒ mismatch.
+    infos.sort_by_key(|info| (info.gy, info.gx));
+    for i in 0..infos.len().saturating_sub(1) {
+        let a = &infos[i];
+        let b = &infos[i + 1];
+        let dxg = (b.gx - a.gx).abs();
+        let dyg = (b.gy - a.gy).abs();
+        if dyg == 1 && dxg == 0 {
+            let sy = (b.cy - a.cy).abs();
+            if sy < 1e-3 {
+                collapsed_y = true;
+            } else {
+                spacings_y.push(sy);
+            }
+        }
+    }
+
     if (collapsed_x && !spacings_x.is_empty())
         || (collapsed_y && !spacings_y.is_empty())
         || (collapsed_x && collapsed_y)

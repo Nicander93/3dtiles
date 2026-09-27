@@ -21,6 +21,11 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+thread_local! {
+    static CONTENT_PROBE_CACHE: std::cell::RefCell<HashMap<(PathBuf, u64, u64), bool>> = 
+        std::cell::RefCell::new(HashMap::new());
+}
+
 /// Writer / rebuild options (Phases 7–8).
 #[derive(Clone, Debug)]
 pub struct WriteOptions {
@@ -288,21 +293,56 @@ fn probe_mesh_content(path: &Path) -> Result<()> {
     if !path.exists() {
         return Err(TopRebuildError::ContentMissing(path.display().to_string()));
     }
-    let len = fs::metadata(path)?.len();
+    let metadata = fs::metadata(path)?;
+    let len = metadata.len();
     if len == 0 {
         return Err(TopRebuildError::ContentMissing(path.display().to_string()));
     }
-    let loaded = crate::b3dm::load_content(path)
-        .map_err(|e| TopRebuildError::ContentUnreadable(format!("{}: {e}", path.display())))?;
-    crate::glb::load_mesh_from_glb(&loaded.glb).map_err(|e| {
-        let msg = e.to_string();
-        if msg.contains("unsupported") {
-            TopRebuildError::UnsupportedContent(format!("{}: {msg}", path.display()))
+    
+    let mtime = metadata
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    
+    let cache_key = (path.to_path_buf(), len, mtime);
+    
+    let cached = CONTENT_PROBE_CACHE.with(|cache| {
+        cache.borrow().get(&cache_key).copied()
+    });
+    
+    if let Some(valid) = cached {
+        if valid {
+            return Ok(());
         } else {
-            TopRebuildError::ContentUnreadable(format!("{}: {msg}", path.display()))
+            return Err(TopRebuildError::ContentUnreadable(format!(
+                "{}: cached as invalid",
+                path.display()
+            )));
         }
-    })?;
-    Ok(())
+    }
+    
+    let result = (|| {
+        let loaded = crate::b3dm::load_content(path)
+            .map_err(|e| TopRebuildError::ContentUnreadable(format!("{}: {e}", path.display())))?;
+        crate::glb::load_mesh_from_glb(&loaded.glb).map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("unsupported") {
+                TopRebuildError::UnsupportedContent(format!("{}: {msg}", path.display()))
+            } else {
+                TopRebuildError::ContentUnreadable(format!("{}: {msg}", path.display()))
+            }
+        })?;
+        Ok(())
+    })();
+    
+    let is_valid = result.is_ok();
+    CONTENT_PROBE_CACHE.with(|cache| {
+        cache.borrow_mut().insert(cache_key, is_valid);
+    });
+    
+    result
 }
 
 fn write_synthesized_content(
@@ -530,6 +570,11 @@ pub fn rebuild_tileset(
         .map(|(_, s)| (s.source_block_id.clone(), s.clone()))
         .collect();
 
+    let block_by_id: HashMap<String, &SourceBlock> = blocks
+        .iter()
+        .map(|b| (b.id.clone(), b))
+        .collect();
+
     let mut payloads: HashMap<String, NodePayload> = HashMap::new();
     let mut warnings = Vec::new();
     for (_, s) in &selections {
@@ -540,9 +585,9 @@ pub fn rebuild_tileset(
 
     for node in &tree.levels[0] {
         let block_id = node.id.strip_prefix("L0_").unwrap_or(&node.id);
-        let block = blocks
-            .iter()
-            .find(|b| b.id == block_id)
+        let block = block_by_id
+            .get(block_id)
+            .copied()
             .ok_or_else(|| TopRebuildError::Other(format!("missing block {block_id}")))?;
         let sel = sel_by_block
             .get(&block.id)
