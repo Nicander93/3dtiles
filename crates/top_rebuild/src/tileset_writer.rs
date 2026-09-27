@@ -20,6 +20,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 thread_local! {
     static CONTENT_PROBE_CACHE: std::cell::RefCell<HashMap<(PathBuf, u64, u64), bool>> = 
@@ -49,6 +50,10 @@ pub struct WriteOptions {
     pub inject_test_textures: bool,
     /// Gap warning threshold in meters (plan §15.3 calibration).
     pub gap_warn_meters: f64,
+    /// P5: Number of parallel proxy builder workers (0 = auto = half physical cores, max 8)
+    pub rebuild_workers: u32,
+    /// P5: Working memory budget in MiB for proxy build (separate from output budget)
+    pub working_memory_budget_mib: u64,
 }
 
 impl Default for WriteOptions {
@@ -69,6 +74,8 @@ impl Default for WriteOptions {
             strict_budget: false,
             inject_test_textures: false,
             gap_warn_meters: 1.0,
+            rebuild_workers: 0,
+            working_memory_budget_mib: 2048,
         }
     }
 }
@@ -127,6 +134,181 @@ struct NodePayload {
     node: TreeNode,
     /// For L0: external tileset uri. For proxies: None (inline content).
     external_tileset_uri: Option<String>,
+}
+
+/// P5: Summary from building one proxy (no large GLB buffers in flight)
+#[derive(Clone, Debug)]
+struct ProxySummary {
+    node_id: String,
+    content_path: PathBuf,
+    content_uri: String,
+    glb_bytes_len: u64,
+    triangles_before: u64,
+    triangles_after: u64,
+    triangles_target: u64,
+    simplification_error_meters: f64,
+    texture_bytes: u64,
+    warnings: Vec<String>,
+    gap: GapMetrics,
+    texture: TextureMetrics,
+}
+
+/// P5: Simple memory admission controller
+struct MemoryAdmission {
+    working_budget_bytes: u64,
+    used_bytes: Arc<Mutex<u64>>,
+}
+
+impl MemoryAdmission {
+    fn new(budget_mib: u64) -> Self {
+        Self {
+            working_budget_bytes: budget_mib * 1024 * 1024,
+            used_bytes: Arc::new(Mutex::new(0)),
+        }
+    }
+
+    fn acquire(&self, estimated_bytes: u64) -> Result<MemoryPermit> {
+        let mut used = self.used_bytes.lock().unwrap();
+        if *used + estimated_bytes > self.working_budget_bytes {
+            return Err(TopRebuildError::Other(format!(
+                "memory admission: insufficient budget (need {estimated_bytes}, used {used}, total {})",
+                self.working_budget_bytes
+            )));
+        }
+        *used += estimated_bytes;
+        Ok(MemoryPermit {
+            bytes: estimated_bytes,
+            used_bytes: Arc::clone(&self.used_bytes),
+        })
+    }
+
+    fn available(&self) -> u64 {
+        let used = self.used_bytes.lock().unwrap();
+        self.working_budget_bytes.saturating_sub(*used)
+    }
+}
+
+struct MemoryPermit {
+    bytes: u64,
+    used_bytes: Arc<Mutex<u64>>,
+}
+
+impl Drop for MemoryPermit {
+    fn drop(&mut self) {
+        let mut used = self.used_bytes.lock().unwrap();
+        *used = used.saturating_sub(self.bytes);
+    }
+}
+
+/// P5: Resolve worker count from config (0 = auto = half physical cores, clamped 1-8)
+fn resolve_rebuild_workers(config: u32) -> usize {
+    if config == 0 {
+        let physical = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(2);
+        ((physical / 2).max(1).min(8)) as usize
+    } else {
+        (config as usize).max(1).min(32)
+    }
+}
+
+/// P5: Estimate working memory for building a proxy from children (conservative)
+fn estimate_proxy_working_memory(
+    children: &[ChildContent],
+    budget: &ProxyBudget,
+) -> Result<u64> {
+    const BASE_OVERHEAD: u64 = 8 * 1024 * 1024;
+    let mut total = BASE_OVERHEAD;
+    
+    for child in children {
+        let meta = fs::metadata(&child.content_path)
+            .map_err(|e| TopRebuildError::Other(format!("cannot stat {}: {e}", child.content_path.display())))?;
+        let file_size = meta.len();
+        
+        let decoded_estimate = file_size * 3 + budget.max_texture_bytes;
+        total += decoded_estimate;
+    }
+    
+    total += budget.max_glb_bytes * 2;
+    
+    Ok(total)
+}
+
+/// P5: Build one proxy node (extracted from per-layer loop)
+fn build_one_proxy(
+    node: &TreeNode,
+    child_payloads: &HashMap<String, NodePayload>,
+    output: &Path,
+    budget: &ProxyBudget,
+    pack_as_b3dm: bool,
+    gap_warn_meters: f64,
+    _admission: Option<&MemoryAdmission>,
+) -> Result<ProxySummary> {
+    let mut children = Vec::new();
+    let mut child_ges = Vec::new();
+    
+    for cid in &node.child_ids {
+        let p = child_payloads.get(cid).ok_or_else(|| {
+            TopRebuildError::Other(format!("missing payload for child {cid}"))
+        })?;
+        children.push(ChildContent {
+            content_path: p.content_path.clone(),
+            world_transform: p.world_transform.clone(),
+        });
+        child_ges.push(p.geometric_error);
+    }
+
+    let estimated = estimate_proxy_working_memory(&children, budget)?;
+    let _permit = if let Some(adm) = _admission {
+        Some(adm.acquire(estimated)?)
+    } else {
+        None
+    };
+
+    let node_dir = output.join("Data").join(&node.id);
+    fs::create_dir_all(&node_dir)?;
+    
+    let tmp_glb = node_dir.join(format!("{}_tmp.glb", node.id));
+    let built = build_proxy_to_file(&children, &node.world_transform, budget, &tmp_glb)?;
+    
+    let ge = geometric_error_proxy(&child_ges, built.simplification_error_meters, &node.bounds);
+    
+    let (name, bytes) = if pack_as_b3dm {
+        (format!("{}.b3dm", node.id), pack_glb_as_b3dm(&built.glb_bytes)?)
+    } else {
+        (format!("{}.glb", node.id), built.glb_bytes.clone())
+    };
+    let content_path = node_dir.join(&name);
+    fs::write(&content_path, &bytes)?;
+    let content_uri = format!("./Data/{}/{}", node.id, name);
+    
+    let _ = fs::remove_file(&tmp_glb);
+
+    let mut warnings = built.warnings.clone();
+    for w in &built.warnings {
+        warnings.push(format!("{}: {w}", node.id));
+    }
+    if built.gap.max_gap > gap_warn_meters {
+        warnings.push(format!(
+            "{}: GAP_WARN maxGap={:.4} P95Gap={:.4} threshold={}",
+            node.id, built.gap.max_gap, built.gap.p95_gap, gap_warn_meters
+        ));
+    }
+
+    Ok(ProxySummary {
+        node_id: node.id.clone(),
+        content_path,
+        content_uri,
+        glb_bytes_len: bytes.len() as u64,
+        triangles_before: built.triangles_before,
+        triangles_after: built.triangles_after,
+        triangles_target: built.triangles_target,
+        simplification_error_meters: built.simplification_error_meters,
+        texture_bytes: built.texture_bytes,
+        warnings,
+        gap: built.gap,
+        texture: built.texture,
+    })
 }
 
 /// Space diagonal of the OBB (twice the root-sum-square of half-axis lengths).
@@ -618,6 +800,9 @@ pub fn rebuild_tileset(
     };
     let mut agg_texture = TextureMetrics::default();
 
+    let workers = resolve_rebuild_workers(write_opts.rebuild_workers);
+    let admission = MemoryAdmission::new(write_opts.working_memory_budget_mib);
+
     for level_idx in 1..tree.levels.len() {
         let max_tris = if level_idx == 1 {
             write_opts.l1_max_triangles
@@ -636,83 +821,114 @@ pub fn rebuild_tileset(
             inject_test_textures: write_opts.inject_test_textures,
         };
 
-        for node in &tree.levels[level_idx] {
-            let mut children = Vec::new();
-            let mut child_ges = Vec::new();
-            for cid in &node.child_ids {
-                let p = payloads.get(cid).ok_or_else(|| {
-                    TopRebuildError::Other(format!("missing payload for child {cid}"))
-                })?;
-                children.push(ChildContent {
-                    content_path: p.content_path.clone(),
-                    world_transform: p.world_transform.clone(),
-                });
-                child_ges.push(p.geometric_error);
-            }
+        let level_nodes = &tree.levels[level_idx];
+        let pack_as_b3dm = write_opts.pack_as_b3dm;
+        let gap_warn_meters = write_opts.gap_warn_meters;
 
-            let tmp_glb = output
-                .join("Data")
-                .join(&node.id)
-                .join(format!("{}_tmp.glb", node.id));
-            if let Some(parent) = tmp_glb.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            let built: ProxyBuildResult =
-                build_proxy_to_file(&children, &node.world_transform, &budget, &tmp_glb)?;
-            for w in &built.warnings {
-                warnings.push(format!("{}: {w}", node.id));
-            }
-            let ge =
-                geometric_error_proxy(&child_ges, built.simplification_error_meters, &node.bounds);
-            let (content_path, uri) =
-                write_proxy_bytes(output, node, &built.glb_bytes, write_opts.pack_as_b3dm)?;
-            let _ = fs::remove_file(&tmp_glb);
+        let level_summaries = if workers == 1 {
+            level_nodes
+                .iter()
+                .map(|node| {
+                    build_one_proxy(
+                        node,
+                        &payloads,
+                        output,
+                        &budget,
+                        pack_as_b3dm,
+                        gap_warn_meters,
+                        Some(&admission),
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            use rayon::prelude::*;
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(workers)
+                .build()
+                .map_err(|e| TopRebuildError::Other(format!("failed to create thread pool: {e}")))?;
 
-            if built.gap.max_gap > write_opts.gap_warn_meters {
-                warnings.push(format!(
-                    "{}: GAP_WARN maxGap={:.4} P95Gap={:.4} threshold={}",
-                    node.id, built.gap.max_gap, built.gap.p95_gap, write_opts.gap_warn_meters
-                ));
-            }
+            pool.install(|| {
+                level_nodes
+                    .par_iter()
+                    .map(|node| {
+                        build_one_proxy(
+                            node,
+                            &payloads,
+                            output,
+                            &budget,
+                            pack_as_b3dm,
+                            gap_warn_meters,
+                            Some(&admission),
+                        )
+                    })
+                    .collect::<Result<Vec<_>>>()
+            })?
+        };
+
+        for summary in level_summaries {
+            warnings.extend(summary.warnings.clone());
+
+            let child_ges: Vec<f64> = tree.levels[level_idx]
+                .iter()
+                .find(|n| n.id == summary.node_id)
+                .map(|n| {
+                    n.child_ids
+                        .iter()
+                        .filter_map(|cid| payloads.get(cid).map(|p| p.geometric_error))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let node = tree.levels[level_idx]
+                .iter()
+                .find(|n| n.id == summary.node_id)
+                .ok_or_else(|| TopRebuildError::Other(format!("node {} not found", summary.node_id)))?;
+
+            let ge = geometric_error_proxy(
+                &child_ges,
+                summary.simplification_error_meters,
+                &node.bounds,
+            );
+
             proxy_metrics.push(ProxyWriteMetrics {
-                node_id: node.id.clone(),
+                node_id: summary.node_id.clone(),
                 level: node.level,
-                triangles_before: built.triangles_before,
-                triangles_after: built.triangles_after,
-                triangles_target: built.triangles_target,
-                simplification_error_meters: built.simplification_error_meters,
+                triangles_before: summary.triangles_before,
+                triangles_after: summary.triangles_after,
+                triangles_target: summary.triangles_target,
+                simplification_error_meters: summary.simplification_error_meters,
                 geometric_error: ge,
-                content_uri: uri.clone(),
-                texture_bytes: built.texture_bytes,
-                glb_bytes: built.glb_bytes_len,
-                max_gap: built.gap.max_gap,
-                p95_gap: built.gap.p95_gap,
+                content_uri: summary.content_uri.clone(),
+                texture_bytes: summary.texture_bytes,
+                glb_bytes: summary.glb_bytes_len,
+                max_gap: summary.gap.max_gap,
+                p95_gap: summary.gap.p95_gap,
             });
-            // Accumulate texture metrics (last wins for ktx2 flags; sums for bytes)
-            agg_texture.input_count += built.texture.input_count;
-            agg_texture.unique_count += built.texture.unique_count;
-            agg_texture.dedup_removed += built.texture.dedup_removed;
-            agg_texture.total_bytes_before += built.texture.total_bytes_before;
-            agg_texture.total_bytes_after += built.texture.total_bytes_after;
+
+            agg_texture.input_count += summary.texture.input_count;
+            agg_texture.unique_count += summary.texture.unique_count;
+            agg_texture.dedup_removed += summary.texture.dedup_removed;
+            agg_texture.total_bytes_before += summary.texture.total_bytes_before;
+            agg_texture.total_bytes_after += summary.texture.total_bytes_after;
             agg_texture.max_dimension_after = agg_texture
                 .max_dimension_after
-                .max(built.texture.max_dimension_after);
-            agg_texture.ktx2_available = agg_texture.ktx2_available || built.texture.ktx2_available;
-            agg_texture.ktx2_encoded += built.texture.ktx2_encoded;
+                .max(summary.texture.max_dimension_after);
+            agg_texture.ktx2_available = agg_texture.ktx2_available || summary.texture.ktx2_available;
+            agg_texture.ktx2_encoded += summary.texture.ktx2_encoded;
             if agg_texture.basisu_path.is_none() {
-                agg_texture.basisu_path = built.texture.basisu_path.clone();
+                agg_texture.basisu_path = summary.texture.basisu_path.clone();
             }
-            if built.gap.max_gap > agg_gap.max_gap {
-                agg_gap = built.gap.clone();
+            if summary.gap.max_gap > agg_gap.max_gap {
+                agg_gap = summary.gap.clone();
             } else if agg_gap.pair_count == 0 {
-                agg_gap = built.gap.clone();
+                agg_gap = summary.gap.clone();
             }
 
             payloads.insert(
-                node.id.clone(),
+                summary.node_id.clone(),
                 NodePayload {
-                    content_path,
-                    content_uri: uri,
+                    content_path: summary.content_path,
+                    content_uri: summary.content_uri,
                     world_transform: node.world_transform.clone(),
                     geometric_error: ge,
                     bounds: node.bounds.clone(),

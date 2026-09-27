@@ -161,12 +161,12 @@ fn build_proxy_with_work(
         let mut cpos = Vec::new();
         let mut cidx = Vec::new();
         let mut base = 0u32;
-        for p in &mut mesh.primitives {
-            transform_primitive(p, &to_parent);
+        for p in mesh.primitives {
+            transform_primitive(&mut p, &to_parent);
             cpos.extend_from_slice(&p.positions);
             cidx.extend(p.indices.iter().map(|i| i + base));
             base += p.positions.len() as u32;
-            locals.push(p.clone());
+            locals.push(p);
         }
         child_positions.push(cpos);
         child_indices.push(cidx);
@@ -201,14 +201,14 @@ fn build_proxy_with_work(
     let mut max_err: f64 = 0.0;
     let total_tris = triangles_before.max(1);
 
-    for (_key, mut group) in groups {
+    for (_key, group) in groups {
         let share =
             (group.triangle_count() as f64 / total_tris as f64) * budget.max_triangles as f64;
         let target_tris = (share.round() as usize).max(4);
         let target_indices = target_tris * 3;
 
         let (prim, err, warn) = simplify_group(
-            &mut group,
+            group,
             target_indices,
             budget.target_error_meters,
             budget.lock_border,
@@ -356,14 +356,14 @@ fn append_primitive(acc: &mut LoadedPrimitive, other: &LoadedPrimitive) {
 /// Simplify with LockBorder | ErrorAbsolute (plan §14–15).
 /// LockBorder is the V1 border-protection strategy (no cross-tile weld).
 fn simplify_group(
-    group: &mut LoadedPrimitive,
+    group: LoadedPrimitive,
     target_index_count: usize,
     target_error_meters: f64,
     lock_border: bool,
 ) -> (LoadedPrimitive, f32, Option<String>) {
     let index_count = group.indices.len();
     if index_count <= target_index_count || group.positions.is_empty() {
-        return (group.clone(), 0.0, None);
+        return (group, 0.0, None);
     }
 
     let mut result_error = 0.0f32;
@@ -392,7 +392,7 @@ fn simplify_group(
         None
     };
 
-    let compacted = compact_primitive(group, &new_indices);
+    let compacted = compact_primitive(&group, &new_indices);
     (compacted, result_error, warn)
 }
 

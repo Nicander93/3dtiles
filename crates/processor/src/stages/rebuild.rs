@@ -303,6 +303,12 @@ fn run_rebuild_rust(
         cmd.push("--synthesize-if-empty".into());
     }
 
+    cmd.push("--workers".into());
+    cmd.push(budget.rebuild_workers().to_string());
+    
+    cmd.push("--working-memory-mib".into());
+    cmd.push(budget.memory_budget_mib().to_string());
+
     emitter.stage(Stage::Rebuild, "Top-level rebuild (Rust top_rebuild core)");
     emitter.stage(Stage::RebuildIndex, "rebuild-index (top_rebuild)");
     emitter.stage(Stage::RebuildProxy, "rebuild-proxy (top_rebuild)");
