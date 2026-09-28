@@ -767,13 +767,13 @@ mod tests {
     #[test]
     fn execution_options_resolve_explicit() {
         let exec = ExecutionOptions {
-            cpu_workers: CpuWorkers::Count(4),
+            cpu_workers: CpuWorkers::Count(2),
             memory_budget_mib: Some(8192),
             io_workers: Some(2),
             resume_policy: ResumePolicy::Off,
         };
         let resolved = exec.resolve();
-        assert_eq!(resolved.cpu_workers, 4);
+        assert_eq!(resolved.cpu_workers, 2);
         assert_eq!(resolved.memory_budget_mib, 8192);
         assert_eq!(resolved.io_workers, 2);
     }
