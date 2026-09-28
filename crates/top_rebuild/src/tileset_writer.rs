@@ -16,12 +16,14 @@ use crate::selector::{self, Selection, DEFAULT_SOURCE_ERROR_RATIO};
 use crate::texture::TextureMetrics;
 use crate::tree_builder::{build_tree, TreeBuildOptions};
 use crate::types::{BoundingVolume, Mat4d, SourceBlock, TreeNode};
-use rayon::prelude::*;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+
+#[allow(unused_imports)]
+use rayon::prelude::*;
 
 thread_local! {
     static CONTENT_PROBE_CACHE: std::cell::RefCell<HashMap<(PathBuf, u64, u64), bool>> = 
@@ -183,6 +185,7 @@ impl MemoryAdmission {
         })
     }
 
+    #[allow(dead_code)]
     fn available(&self) -> u64 {
         let used = self.used_bytes.lock().unwrap();
         self.working_budget_bytes.saturating_sub(*used)
@@ -654,6 +657,7 @@ fn ensure_leaf_content(
     ))
 }
 
+#[allow(dead_code)]
 fn write_proxy_bytes(
     out_dir: &Path,
     node: &TreeNode,
