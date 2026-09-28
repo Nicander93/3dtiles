@@ -167,6 +167,6 @@ Updated `converter-runtime.json` to lock converter **v0.2.3** (commit `a1b2c3d`)
 
 ---
 
-**文档版本**: P8.1 (初始版本，等待v0.2.3 Release)  
+**文档版本**: P8.2 (v0.2.3 pin 已完成)  
 **维护者**: 协调员  
-**最后更新**: 2026-09-27 (P8 PR提交时)
+**最后更新**: 2026-09-28 (v0.2.3 pin committed)
