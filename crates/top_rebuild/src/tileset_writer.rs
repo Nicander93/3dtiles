@@ -11,11 +11,12 @@ use crate::b3dm::pack_glb_as_b3dm;
 use crate::error::{Result, TopRebuildError};
 use crate::gap::GapMetrics;
 use crate::glb::{make_box_primitive, make_textured_box_glb, transform_primitive, write_glb};
-use crate::proxy_builder::{build_proxy_to_file, ChildContent, ProxyBudget, ProxyBuildResult};
+use crate::proxy_builder::{build_proxy_to_file, ChildContent, ProxyBudget};
 use crate::selector::{self, Selection, DEFAULT_SOURCE_ERROR_RATIO};
 use crate::texture::TextureMetrics;
 use crate::tree_builder::{build_tree, TreeBuildOptions};
 use crate::types::{BoundingVolume, Mat4d, SourceBlock, TreeNode};
+use rayon::prelude::*;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
@@ -271,7 +272,7 @@ fn build_one_proxy(
     let tmp_glb = node_dir.join(format!("{}_tmp.glb", node.id));
     let built = build_proxy_to_file(&children, &node.world_transform, budget, &tmp_glb)?;
     
-    let ge = geometric_error_proxy(&child_ges, built.simplification_error_meters, &node.bounds);
+    let _ge = geometric_error_proxy(&child_ges, built.simplification_error_meters, &node.bounds);
     
     let (name, bytes) = if pack_as_b3dm {
         (format!("{}.b3dm", node.id), pack_glb_as_b3dm(&built.glb_bytes)?)
