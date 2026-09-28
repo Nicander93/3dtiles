@@ -385,6 +385,7 @@ fn run_logged_env_result_with_timeout(
         command.current_dir(c);
     }
     for (k, v) in extra_env {
+        emitter.log(&format!("[env] {}={}", k, v.display()));
         command.env(k, v);
     }
     // `_3dtile`/OSG prints plugin dumps from many threads to stdout; piping that
