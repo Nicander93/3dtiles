@@ -1,7 +1,7 @@
 use geoforge_protocol::{ExecutionOptions, ResolvedExecutionOptions};
 
 #[cfg(test)]
-use geoforge_protocol::{CpuWorkers, ResumePolicy};
+use geoforge_protocol::ResumePolicy;
 
 pub struct ResourceBudget {
     pub resolved: ResolvedExecutionOptions,
