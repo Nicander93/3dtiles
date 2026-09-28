@@ -770,6 +770,7 @@ mod tests {
             cpu_workers: CpuWorkers::Count(4),
             memory_budget_mib: Some(8192),
             io_workers: Some(2),
+            resume_policy: ResumePolicy::Off,
         };
         let resolved = exec.resolve();
         assert_eq!(resolved.cpu_workers, 4);
@@ -783,6 +784,7 @@ mod tests {
             cpu_workers: CpuWorkers::Count(4),
             memory_budget_mib: Some(8192),
             io_workers: Some(2),
+            resume_policy: ResumePolicy::Off,
         };
         let resolved = exec.resolve();
         let desc = exec.describe_resolution(&resolved);
