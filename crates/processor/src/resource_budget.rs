@@ -1,5 +1,8 @@
 use geoforge_protocol::{ExecutionOptions, ResolvedExecutionOptions};
 
+#[cfg(test)]
+use geoforge_protocol::{CpuWorkers, ResumePolicy};
+
 pub struct ResourceBudget {
     pub resolved: ResolvedExecutionOptions,
 }
@@ -62,6 +65,7 @@ mod tests {
             cpu_workers: CpuWorkers::Count(4),
             memory_budget_mib: Some(8192),
             io_workers: Some(2),
+            resume_policy: ResumePolicy::Off,
         };
         let budget = ResourceBudget::new(&opts);
         assert_eq!(budget.cpu_workers(), 4);
@@ -75,6 +79,7 @@ mod tests {
             cpu_workers: CpuWorkers::Count(4),
             memory_budget_mib: None,
             io_workers: None,
+            resume_policy: ResumePolicy::Off,
         };
         let budget = ResourceBudget::new(&opts);
         assert_eq!(budget.convert_threads(), 4);
@@ -86,6 +91,7 @@ mod tests {
             cpu_workers: CpuWorkers::Count(8),
             memory_budget_mib: None,
             io_workers: None,
+            resume_policy: ResumePolicy::Off,
         };
         let budget = ResourceBudget::new(&opts);
         assert_eq!(budget.rebuild_workers(), 8);
@@ -97,6 +103,7 @@ mod tests {
             cpu_workers: CpuWorkers::Count(8),
             memory_budget_mib: None,
             io_workers: Some(8),
+            resume_policy: ResumePolicy::Off,
         };
         let budget = ResourceBudget::new(&opts);
         assert_eq!(budget.texture_file_workers(), 2);
