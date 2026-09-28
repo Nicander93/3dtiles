@@ -353,7 +353,7 @@ fn run_convert_osgb(
     }
 
     let manifest_file = manifest_path(&temp);
-    let mut manifest = if resuming && manifest_file.exists() {
+    let manifest = if resuming && manifest_file.exists() {
         WorkManifest::load(&manifest_file)?
     } else {
         WorkManifest::new(config.task_id.clone())
