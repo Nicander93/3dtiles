@@ -62,15 +62,6 @@ export interface DesktopSettings {
   execution?: ExecutionSettings;
 }
 
-export type ResourceMode = 'auto' | 'custom';
-
-export interface ExecutionSettings {
-  resourceMode: ResourceMode;
-  cpuWorkers?: number;
-  memoryBudgetMiB?: number;
-  ioWorkers?: number;
-}
-
 const settingsDefaults: DesktopSettings = {
   defaultOutputRoot: '',
   defaultRebuildTop: true,
