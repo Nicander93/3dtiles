@@ -26,20 +26,20 @@ pub fn run_convert(
 
     emitter.stage(Stage::Convert, "OSGB → 3D Tiles");
     let started = std::time::Instant::now();
-    
+
     let threads = budget.convert_threads();
     let supports_v1 = converter_supports_execution_protocol_v1();
-    
+
     emitter.metric("converter.threads.resolved", json!(threads));
     emitter.metric("converter.executionProtocol.supported", json!(supports_v1));
     emitter.log(&format!(
         "[convert] resolved CPU workers: {} (execution protocol v1 support: {})",
         threads, supports_v1
     ));
-    
+
     let progress = ProgressThrottle::new(Arc::clone(emitter));
     progress.report(Stage::Convert, 0, 0, Some(threads), false);
-    
+
     let result = if tools.convert_bin.is_file() {
         run_native(
             emitter,
@@ -74,7 +74,7 @@ pub fn run_convert(
         && threads != 1
         && !cancel.is_cancelled()
         && retry_single_thread(&result);
-    
+
     if should_retry {
         emitter.log(&format!(
             "[convert] multi-threaded converter failed (exit_code={}, threads={}); stderr tail:\n{}",
@@ -85,7 +85,7 @@ pub fn run_convert(
         emitter.log("[convert] retrying once with one worker thread");
         emitter.metric("converter.retryCount", json!(1));
         emitter.metric("converter.retryThreads", json!(1));
-        
+
         let tileset_exists = out_dir.join("tileset.json").is_file();
         if tileset_exists {
             emitter.log("[convert] tileset.json found; preserving completed blocks for retry");
@@ -106,7 +106,7 @@ pub fn run_convert(
                 )
             })?;
         }
-        
+
         result = run_native(
             emitter,
             cancel,
@@ -205,7 +205,10 @@ pub fn run_model_convert(
         return Err("cancelled".into());
     }
     if result.exit_code != 0 {
-        return Err(format!("convert exited {}: {}", result.exit_code, result.stderr_tail));
+        return Err(format!(
+            "convert exited {}: {}",
+            result.exit_code, result.stderr_tail
+        ));
     }
     if !out_dir.join("tileset.json").is_file() {
         return Err(format!("tileset.json missing under {}", out_dir.display()));
@@ -271,21 +274,16 @@ fn run_native(
     cmd.extend(extra.iter().cloned());
     let cwd = bin.parent();
     let mut env = converter_environment(cwd);
-    
-    if threads == 0 {
-        emitter.log("[convert] forcing thread mode to auto (0)");
-        env.push((
-            "GEOFORGE_CONVERT_THREADS",
-            PathBuf::from("0"),
-        ));
-    } else {
-        emitter.log(&format!("[convert] setting thread count to {}", threads));
-        env.push((
-            "GEOFORGE_CONVERT_THREADS",
-            PathBuf::from(threads.to_string()),
-        ));
-    }
-    
+
+    env.push((
+        "GEOFORGE_CONVERT_THREADS",
+        PathBuf::from(threads.to_string()),
+    ));
+    emitter.log(&format!(
+        "[convert] injecting GEOFORGE_CONVERT_THREADS={} into converter environment",
+        threads
+    ));
+
     let env_refs: Vec<(&str, PathBuf)> = env;
     run_logged_env_result(emitter, cancel, &cmd, cwd, &env_refs)
 }

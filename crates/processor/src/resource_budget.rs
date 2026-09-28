@@ -102,10 +102,22 @@ mod tests {
         let opts = ExecutionOptions {
             cpu_workers: CpuWorkers::Count(8),
             memory_budget_mib: None,
-            io_workers: Some(8),
+            io_workers: None,
             resume_policy: ResumePolicy::Off,
         };
         let budget = ResourceBudget::new(&opts);
         assert_eq!(budget.texture_file_workers(), 2);
+    }
+
+    #[test]
+    fn convert_threads_honors_explicit_one() {
+        let opts = ExecutionOptions {
+            cpu_workers: CpuWorkers::Count(1),
+            memory_budget_mib: None,
+            io_workers: None,
+            resume_policy: ResumePolicy::Off,
+        };
+        let budget = ResourceBudget::new(&opts);
+        assert_eq!(budget.convert_threads(), 1);
     }
 }
