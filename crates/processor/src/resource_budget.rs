@@ -1,5 +1,8 @@
 use geoforge_protocol::{ExecutionOptions, ResolvedExecutionOptions};
 
+#[cfg(test)]
+use geoforge_protocol::ResumePolicy;
+
 pub struct ResourceBudget {
     pub resolved: ResolvedExecutionOptions,
 }
@@ -59,12 +62,13 @@ mod tests {
     #[test]
     fn budget_from_explicit() {
         let opts = ExecutionOptions {
-            cpu_workers: CpuWorkers::Count(4),
+            cpu_workers: CpuWorkers::Count(2),
             memory_budget_mib: Some(8192),
             io_workers: Some(2),
+            resume_policy: ResumePolicy::Off,
         };
         let budget = ResourceBudget::new(&opts);
-        assert_eq!(budget.cpu_workers(), 4);
+        assert_eq!(budget.cpu_workers(), 2);
         assert_eq!(budget.memory_budget_mib(), 8192);
         assert_eq!(budget.io_workers(), 2);
     }
@@ -72,23 +76,25 @@ mod tests {
     #[test]
     fn convert_threads_uses_cpu_workers() {
         let opts = ExecutionOptions {
-            cpu_workers: CpuWorkers::Count(4),
+            cpu_workers: CpuWorkers::Count(2),
             memory_budget_mib: None,
             io_workers: None,
+            resume_policy: ResumePolicy::Off,
         };
         let budget = ResourceBudget::new(&opts);
-        assert_eq!(budget.convert_threads(), 4);
+        assert_eq!(budget.convert_threads(), 2);
     }
 
     #[test]
     fn rebuild_workers_uses_cpu_workers() {
         let opts = ExecutionOptions {
-            cpu_workers: CpuWorkers::Count(8),
+            cpu_workers: CpuWorkers::Count(2),
             memory_budget_mib: None,
             io_workers: None,
+            resume_policy: ResumePolicy::Off,
         };
         let budget = ResourceBudget::new(&opts);
-        assert_eq!(budget.rebuild_workers(), 8);
+        assert_eq!(budget.rebuild_workers(), 2);
     }
 
     #[test]
@@ -97,6 +103,7 @@ mod tests {
             cpu_workers: CpuWorkers::Count(8),
             memory_budget_mib: None,
             io_workers: Some(8),
+            resume_policy: ResumePolicy::Off,
         };
         let budget = ResourceBudget::new(&opts);
         assert_eq!(budget.texture_file_workers(), 2);

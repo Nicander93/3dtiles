@@ -149,7 +149,7 @@ pub fn finish_texture(
     let file_workers = budget.map(|b| b.texture_file_workers()).unwrap_or(1);
     let encoder_threads = budget.map(|b| b.texture_encoder_threads()).unwrap_or(1);
     
-    if let Some(budget) = budget {
+    if let Some(_budget) = budget {
         emitter.log(&format!(
             "[texture] resource budget: {} file workers, {} encoder threads per file",
             file_workers, encoder_threads

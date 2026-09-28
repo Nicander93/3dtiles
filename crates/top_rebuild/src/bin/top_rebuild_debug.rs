@@ -229,6 +229,8 @@ fn run_rebuild(
         strict_budget,
         inject_test_textures,
         gap_warn_meters,
+        rebuild_workers: 0,
+        working_memory_budget_mib: 2048,
     };
     if ktx2 {
         match find_basisu() {

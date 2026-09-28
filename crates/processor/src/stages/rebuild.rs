@@ -45,7 +45,7 @@ pub fn run_rebuild(
     if engine == "python" || engine == "py" || engine == "baseline" {
         run_rebuild_python(emitter, cancel, input_dir, output_dir, &rebuild)
     } else {
-        run_rebuild_rust(emitter, cancel, input_dir, output_dir, &rebuild)
+        run_rebuild_rust(emitter, cancel, input_dir, output_dir, &rebuild, budget)
     }
 }
 
@@ -180,6 +180,7 @@ fn run_rebuild_rust(
     input_dir: &Path,
     output_dir: &Path,
     rebuild: &Value,
+    budget: &ResourceBudget,
 ) -> Result<(), String> {
     let tools = tool_paths();
     let bin = &tools.top_rebuild;

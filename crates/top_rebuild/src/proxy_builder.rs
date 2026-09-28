@@ -161,7 +161,7 @@ fn build_proxy_with_work(
         let mut cpos = Vec::new();
         let mut cidx = Vec::new();
         let mut base = 0u32;
-        for p in mesh.primitives {
+        for mut p in mesh.primitives {
             transform_primitive(&mut p, &to_parent);
             cpos.extend_from_slice(&p.positions);
             cidx.extend(p.indices.iter().map(|i| i + base));

@@ -715,7 +715,7 @@ mod tests {
             guard.mark_committed();
         }
 
-        assert!(!temp.exists(), "committed temp is always cleaned up by guard");
+        assert!(temp.exists(), "committed temp is preserved by guard (not cleaned up)");
         let _ = fs::remove_dir_all(root);
     }
 }

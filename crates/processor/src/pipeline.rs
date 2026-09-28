@@ -353,7 +353,7 @@ fn run_convert_osgb(
     }
 
     let manifest_file = manifest_path(&temp);
-    let mut manifest = if resuming && manifest_file.exists() {
+    let manifest = if resuming && manifest_file.exists() {
         WorkManifest::load(&manifest_file)?
     } else {
         WorkManifest::new(config.task_id.clone())
@@ -686,7 +686,7 @@ mod tests {
     fn prepare_temp_with_resume_off_refuses_existing() {
         let root = temp_dir("resume-off");
         let output = root.join("output");
-        let temp = commit::prepare_temp(&output, "task-resume-off").expect("prepare temp");
+        let _temp = commit::prepare_temp(&output, "task-resume-off").expect("prepare temp");
         
         let error = prepare_temp_with_resume(&output, "task-resume-off", ResumePolicy::Off)
             .expect_err("should refuse existing temp");
