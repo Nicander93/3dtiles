@@ -88,13 +88,13 @@ mod tests {
     #[test]
     fn rebuild_workers_uses_cpu_workers() {
         let opts = ExecutionOptions {
-            cpu_workers: CpuWorkers::Count(8),
+            cpu_workers: CpuWorkers::Count(4),
             memory_budget_mib: None,
             io_workers: None,
             resume_policy: ResumePolicy::Off,
         };
         let budget = ResourceBudget::new(&opts);
-        assert_eq!(budget.rebuild_workers(), 8);
+        assert_eq!(budget.rebuild_workers(), 4);
     }
 
     #[test]
