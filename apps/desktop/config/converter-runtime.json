@@ -1,12 +1,12 @@
 {
   "name": "geoforge-converter",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "source": "https://github.com/Nicander93/geoforge-converter",
   "upstream": "https://github.com/fanvanzh/3dtiles",
   "upstreamCommit": "GeoForge engines/3dtiles-converter snapshot bdb8b7fd31c1eaa7ef65ad9f3419c6ab8c56c149",
   "windowsX64": {
-    "url": "https://github.com/Nicander93/geoforge-converter/releases/download/v0.2.3/geoforge-converter-0.2.3-windows-x64.zip",
-    "sha256": "2ef51e30865540f5ad39ba98bf37fcd10117b9a1a55e0e401428fae46179a07e"
+    "url": "https://github.com/Nicander93/geoforge-converter/releases/download/v0.2.4/geoforge-converter-0.2.4-windows-x64.zip",
+    "sha256": "0341fd2f087f8032e6ae4feea62f6e4809881a877be5927580d694bc719dd55e"
   },
-  "_comment": "P8 pin complete: v0.2.3 includes P1 call_once, P2 streaming Block, P3 --resume"
+  "_comment": "Pin v0.2.4: serialize OGR CT and OSG DB reads for multi-thread OSGB (PR#8 / 057ed75)"
 }
