@@ -51,7 +51,7 @@ const defaults: FormState = {
   originY: '',
   originZ: '',
   geographicExport: false,
-  convertThreads: 1,
+  convertThreads: 4,
 };
 
 function loadConfig(): FormState {
@@ -128,7 +128,7 @@ export function OsgbConvert() {
       setDefaultOutputRoot(s.defaultOutputRoot || '');
       setExecutionSettings(s.execution || null);
       if (s.defaultConvertThreads !== undefined) {
-        setForm((f) => ({ ...f, convertThreads: s.defaultConvertThreads ?? 1 }));
+        setForm((f) => ({ ...f, convertThreads: s.defaultConvertThreads ?? 4 }));
       }
       if (s.defaultTextureCompress !== undefined) {
         setForm((f) => {
@@ -546,13 +546,13 @@ export function OsgbConvert() {
                 value={form.convertThreads}
                 onChange={(e) => update('convertThreads', Number(e.target.value))}
               >
-                <option value={1}>1（保守默认）</option>
+                <option value={1}>1</option>
                 <option value={2}>2</option>
                 <option value={4}>4</option>
                 <option value={0}>自动（CPU 核心数一半）</option>
               </select>
               <div className="field-hint">
-                已在 Windows 规则格网验证并发 1/2/4/8/16（converter v0.2.4）。默认 1 偏保守，常用可试 4；N≥8 收益递减，勿理解为无限并发。
+                已在 Windows 规则格网验证并发 1/2/4/8/16（converter v0.2.4）。默认 4；N≥8 收益递减，勿理解为无限并发。
               </div>
             </div>
             <div className="field">

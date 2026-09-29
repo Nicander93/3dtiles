@@ -11,7 +11,7 @@ const defaults: DesktopSettings = {
   defaultRebuildTop: true,
   defaultRebuildLevels: 0,
   defaultTextureCompress: false,
-  defaultConvertThreads: 1,
+  defaultConvertThreads: 4,
   pythonServerUrl: "http://127.0.0.1:8787",
   resourceServerPort: 0,
   execution: {
@@ -150,7 +150,7 @@ export function Settings() {
             <label>默认转换并发数</label>
             <select
               className="select"
-              value={form.defaultConvertThreads ?? 1}
+              value={form.defaultConvertThreads ?? 4}
               onChange={(e) =>
                 setForm({
                   ...form,
@@ -158,12 +158,12 @@ export function Settings() {
                 })
               }
             >
-              <option value={1}>1（保守默认）</option>
+              <option value={1}>1</option>
               <option value={2}>2</option>
               <option value={4}>4</option>
               <option value={0}>自动（CPU 核心数一半）</option>
             </select>
-            <div className="field-hint">已在 Windows 规则格网验证并发 1/2/4/8/16（converter v0.2.4）。默认 1 偏保守，常用可试 4；N≥8 收益递减，勿理解为无限并发。</div>
+            <div className="field-hint">已在 Windows 规则格网验证并发 1/2/4/8/16（converter v0.2.4）。默认 4；N≥8 收益递减，勿理解为无限并发。</div>
           </div>
         </FormSection>
 
