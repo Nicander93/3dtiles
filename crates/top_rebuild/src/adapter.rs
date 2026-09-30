@@ -197,7 +197,8 @@ pub fn validate_grid_spatial(blocks: &[SourceBlock]) -> Result<()> {
     let mut collapsed_x = false;
     let mut collapsed_y = false;
 
-    infos.sort_by_key(|info| (info.gx, info.gy));
+    // Horizontal neighbors share a row: group by gy first so (gx,gx+1) pairs are consecutive.
+    infos.sort_by_key(|info| (info.gy, info.gx));
     for i in 0..infos.len().saturating_sub(1) {
         let a = &infos[i];
         let b = &infos[i + 1];
@@ -213,7 +214,8 @@ pub fn validate_grid_spatial(blocks: &[SourceBlock]) -> Result<()> {
         }
     }
 
-    infos.sort_by_key(|info| (info.gy, info.gx));
+    // Vertical neighbors share a column: group by gx first so (gy,gy+1) pairs are consecutive.
+    infos.sort_by_key(|info| (info.gx, info.gy));
     for i in 0..infos.len().saturating_sub(1) {
         let a = &infos[i];
         let b = &infos[i + 1];
