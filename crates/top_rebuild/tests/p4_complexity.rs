@@ -146,8 +146,9 @@ fn test_1k_blocks_rebuild_with_block_index() {
     let out_dir = tmp.path().join("output");
     fs::create_dir_all(&out_dir).unwrap();
     
+    // 100 blocks lay out as a 100x1 strip (gx = i % 100); ~log2(100) = 7 merge levels to one root.
     let tree_opts = TreeBuildOptions {
-        max_levels: Some(2),
+        max_levels: Some(7),
         ..Default::default()
     };
     
@@ -175,8 +176,9 @@ fn test_spatial_index_gap_metrics() {
     let out_dir = tmp.path().join("output");
     fs::create_dir_all(&out_dir).unwrap();
     
+    // 64 blocks lay out as a 64x1 strip; log2(64) = 6 merge levels to one root.
     let tree_opts = TreeBuildOptions {
-        max_levels: Some(2),
+        max_levels: Some(6),
         ..Default::default()
     };
     
