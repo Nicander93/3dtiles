@@ -67,7 +67,7 @@ const settingsDefaults: DesktopSettings = {
   defaultRebuildTop: true,
   defaultRebuildLevels: 0,
   defaultTextureCompress: false,
-  defaultConvertThreads: 1,
+  defaultConvertThreads: 4,
   pythonServerUrl: 'http://127.0.0.1:8787',
   resourceServerPort: 0,
   execution: {
