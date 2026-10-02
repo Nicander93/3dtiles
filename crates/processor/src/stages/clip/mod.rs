@@ -155,6 +155,8 @@ impl Context<'_> {
         if !matches!(source["root"]["refine"].as_str(), Some("ADD" | "REPLACE")) {
             return Err("tileset root requires explicit refine".into());
         }
+        // Direct GLB content is a core tile format in 3D Tiles 1.1; legacy B3DM remains valid.
+        source["asset"]["version"] = json!("1.1");
         let prefix = if self.active.len() == 1 { "" } else { "../" };
         let bounds = self.tile(
             &mut source["root"],

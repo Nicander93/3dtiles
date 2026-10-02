@@ -16,6 +16,7 @@
 - 材质、sampler 和贴图编码保留，内嵌图片重定位到新 BIN，外部图片复制为相对引用。几何 accessor/bufferView 重新生成，输出采用无索引三角形；不压缩、简化或重新打包贴图，不生成封口。
 - 保留原树的有效分支与 refine，移除空内容和空分支，按实际写出的 f32 顶点重算 box；父盒包含子树。原 geometricError 不降低，必要时提高父级误差以保持包含子级误差的保守关系。此策略不重新估计裁剪后的 HLOD 误差。
 - 输出不复制未引用的原始模型或旧几何缓冲。资源命名独立；成果可脱离输入目录移动使用。`clip-report.json` 记录原区域、处理/移除内容数、前后三角形数和未封口策略。
+- 入口与外部 Tileset 均使用 asset.version 1.1，使直接 GLB 引用符合核心格式；原 B3DM 内容类型仍保留。
 
 ## 明确不支持
 
@@ -51,5 +52,7 @@ rtk proxy cargo run -p processor -- clip-tileset -i D:/data/tiles -o D:/results/
 三项裁剪 Playwright 测试使用真实 processor，验证工作区入口、输出 GLB 边界、报告、任务阶段、重新处理区域恢复、GeoJSON 文件导入与持久化，以及已有输出和空结果。传输层替换为浏览器测试适配器，原生 Tauri 对话框、WebView 渲染和安装包仍需人工验收。Product Core CI 运行所有合并与裁剪 e2e。
 
 在 `apps/desktop` 执行 `rtk proxy node scripts/create-clip-fixtures.mjs`，生成带定位、可渲染的合成三角形及区域文件。在本分支开发桌面中先预览原模型，再执行裁剪并预览成果，应看到模型缩小为区域内的部分。再把成果移动后预览，导入 region.geojson 重做，确认重试恢复区域；指定已有目录、无交集区域和复制/裁剪时取消，确认输入不变。当前发布安装包不包含此功能。合成样例用于流程与几何检查，不替代真实城市数据性能验证。
+
+在 `apps/desktop` 执行 `rtk proxy npm run tauri:dev` 启动开发桌面；这个入口会编译并指定本分支的 processor，避免误用旧安装包中的处理器。
 
 标准依据：[3D Tiles 坐标与层级](https://github.com/CesiumGS/3d-tiles/blob/main/specification/README.adoc)、[B3DM RTC](https://github.com/CesiumGS/3d-tiles/blob/main/specification/TileFormats/Batched3DModel/README.adoc)、[glTF 属性和变换](https://github.com/KhronosGroup/glTF/blob/main/specification/2.0/Specification.adoc)。

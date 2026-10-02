@@ -117,6 +117,7 @@ fn exports_real_clipped_geometry_and_interpolated_attributes_portably() {
         String::from_utf8_lossy(&result.stdout)
     );
     let tileset = json_file(&output.join("tileset.json"));
+    assert_eq!(tileset["asset"]["version"], "1.1");
     let path = output.join(tileset["root"]["content"]["uri"].as_str().unwrap());
     let (doc, bin) = unpack(&fs::read(path).unwrap());
     let p = &doc["meshes"][0]["primitives"][0];
