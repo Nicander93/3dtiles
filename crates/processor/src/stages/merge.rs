@@ -307,7 +307,8 @@ fn check_references(value: &Value, base: &Path, root: &Path) -> Result<(), Strin
                         }
                         let path = path_policy::normalize_path(&referenced)
                             .map_err(|e| format!("merge resource missing: {uri} ({e})"))?;
-                        if !path_policy::is_strict_descendant(root, &path) {
+                        let canonical_root = path_policy::normalize_path(root)?;
+                        if !path_policy::is_strict_descendant(&canonical_root, &path) {
                             return Err(format!("merge resource escapes input root: {uri}"));
                         }
                     }
