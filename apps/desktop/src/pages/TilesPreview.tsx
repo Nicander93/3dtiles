@@ -5,6 +5,7 @@ import { absolutizeLocalUrl, api, friendlyError, isTauri } from '../api/desktop'
 import type { Artifact } from '../api/types';
 import { Alert } from '../components/Alert';
 import { selectTilesetFile } from '../lib/tauri';
+import { PreviewClipPanel } from '../components/PreviewClipPanel';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -22,9 +23,16 @@ export function TilesPreview() {
   const [diagOpen, setDiagOpen] = useState(false);
   const [processOpen, setProcessOpen] = useState(false);
   const [diagNote, setDiagNote] = useState('');
+  const [operation, setOperation] = useState<'clip' | null>(null);
+  const [canClip, setCanClip] = useState(false);
+  const loadGeneration = useRef(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const hasData = Boolean(tilesetUrl);
+  useEffect(() => {
+    const artifact = artifacts.find((a) => a.id === selectedId);
+    if (artifact) setDataName(artifact.label || artifact.id);
+  }, [artifacts, selectedId]);
 
   useEffect(() => {
     void (async () => {
@@ -46,6 +54,8 @@ export function TilesPreview() {
       return;
     }
     if (tileset) {
+      loadGeneration.current++;
+      setInputPath(''); setCanClip(false); setOperation(null);
       const url = absolutizeLocalUrl(tileset);
       setTilesetUrl(url);
       setDataName('外部 tileset');
@@ -58,10 +68,12 @@ export function TilesPreview() {
 
   useEffect(() => {
     function onMessage(ev: MessageEvent) {
+      if (ev.source !== iframeRef.current?.contentWindow || ev.origin !== window.location.origin) return;
       const data = ev.data;
       if (!data || typeof data !== 'object') return;
       if (data.type === 'geoforge-preview-ready') {
         setLoadState('ready');
+        setCanClip(data.canClip === true);
         setError(null);
         if (data.diag) setDiagNote(String(data.diag));
       } else if (data.type === 'geoforge-preview-error') {
@@ -76,6 +88,8 @@ export function TilesPreview() {
   }, []);
 
   async function loadArtifact(id: string) {
+    const generation = ++loadGeneration.current;
+    setCanClip(false); setOperation(null); setInputPath(''); setTilesetUrl('');
     setSelectedId(id);
     setError(null);
     setDiagNote('');
@@ -89,6 +103,7 @@ export function TilesPreview() {
     setLoadState('loading');
     try {
       const res = await api.previewUrl(id);
+      if (generation !== loadGeneration.current) return;
       const url = res.url || res.previewUrl || '';
       if (!url) {
         setLoadState('error');
@@ -98,9 +113,10 @@ export function TilesPreview() {
       setTilesetUrl(url);
       const art = artifacts.find((a) => a.id === id);
       setDataName(art?.label || id);
-      setInputPath(art?.path || '');
+      setInputPath(res.path || art?.path || '');
       setFrameKey((k) => k + 1);
     } catch (e) {
+      if (generation !== loadGeneration.current) return;
       setLoadState('error');
       setError(friendlyError(e));
     }
@@ -112,25 +128,24 @@ export function TilesPreview() {
       const p = await selectTilesetFile();
       if (!p) return;
       // Prefer artifact match by path; else clear selection and use path via prepare if available
-      const match = artifacts.find((a) => a.path && (p === a.path || p.startsWith(a.path)));
+      const normalized = (path: string) => path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+      const match = artifacts.find((a) => a.path && normalized(p) === `${normalized(a.path)}/tileset.json`);
       if (match) {
         setSearchParams({ artifact: match.id });
-        void loadArtifact(match.id);
         return;
       }
-      setSelectedId('');
-      setDataName(p.split(/[/\\]/).slice(-2, -1)[0] || '本地数据');
-      setInputPath(p.replace(/[/\\]tileset\.json$/i, ''));
-      setError('请从成果列表打开已登记的数据，或先完成转换。');
-      setLoadState('idle');
-      setTilesetUrl('');
+      try {
+        if (!/[/\\]tileset\.json$/i.test(p)) throw new Error('当前预览入口请选择 tileset.json 文件。');
+        const registered = await api.registerArtifact(p.replace(/[/\\]tileset\.json$/i, ''), { label: p.split(/[/\\]/).slice(-2, -1)[0] || '本地数据' });
+        setArtifacts(await api.listArtifacts());
+        setSearchParams({ artifact: registered.artifact.id });
+      } catch (e) { setError(friendlyError(e)); }
       return;
     }
     // Browser: pick from artifacts dropdown via prompt-like select
     const first = artifacts.find((a) => a.has_tileset || a.hasTileset);
     if (first) {
       setSearchParams({ artifact: first.id });
-      void loadArtifact(first.id);
     } else {
       setError('暂无可用成果，请先完成转换。');
     }
@@ -139,7 +154,7 @@ export function TilesPreview() {
   function fitView() {
     if (!hasData || loadState !== 'ready') return;
     try {
-      iframeRef.current?.contentWindow?.postMessage({ type: 'geoforge-fit' }, '*');
+      iframeRef.current?.contentWindow?.postMessage({ type: 'geoforge-fit' }, window.location.origin);
     } catch {
       /* ignore */
     }
@@ -189,10 +204,13 @@ export function TilesPreview() {
             aria-haspopup="menu"
             aria-expanded={processOpen}
           >
-            处理 <CaretDown size={12} />
+            模型操作 <CaretDown size={12} />
           </button>
           {processOpen ? (
             <div className="menu__panel" role="menu">
+              <button className="menu__item" type="button" disabled={loadState !== 'ready' || !canClip} onClick={() => { setOperation('clip'); setInfoOpen(false); setProcessOpen(false); }}>
+                范围裁剪并导出
+              </button>
               <Link className="menu__item" to={processLinks.rebuild} onClick={() => setProcessOpen(false)}>
                 顶层重建
               </Link>
@@ -207,7 +225,7 @@ export function TilesPreview() {
           className="btn btn-sm"
           type="button"
           disabled={!hasData}
-          onClick={() => setInfoOpen((v) => !v)}
+          onClick={() => { setOperation(null); setInfoOpen((v) => !v); }}
         >
           {infoOpen ? '关闭信息' : '信息'}
         </button>
@@ -223,8 +241,10 @@ export function TilesPreview() {
           <Alert kind="warn">{error}</Alert>
         </div>
       ) : null}
+      {hasData && loadState === 'ready' && !canClip ? <Alert kind="warn">此模型使用预览临时定位，无法按地理区域裁剪。请先为原始数据配置地理定位。</Alert> : null}
+      {error && loadState === 'ready' ? <Alert kind="error">{error}</Alert> : null}
 
-      <div className={`preview-layout${infoOpen ? ' with-panel' : ''}`}>
+      <div className={`preview-layout${infoOpen || operation ? ' with-panel' : ''}`}>
         <div className="preview-main">
           {!hasData ? (
             <div className="preview-empty">
@@ -240,7 +260,6 @@ export function TilesPreview() {
                   onChange={(e) => {
                     if (!e.target.value) return;
                     setSearchParams({ artifact: e.target.value });
-                    void loadArtifact(e.target.value);
                   }}
                   aria-label="从成果选择"
                 >
@@ -274,7 +293,13 @@ export function TilesPreview() {
           )}
         </div>
 
-        {infoOpen ? (
+        {operation === 'clip' && loadState === 'ready' && canClip ? <PreviewClipPanel
+          key={`${frameKey}:${tilesetUrl}`} input={inputPath} name={dataName} frame={iframeRef}
+          onClose={() => setOperation(null)}
+          onResult={(artifact) => { setArtifacts((list) => [...list.filter((a) => a.id !== artifact.id), artifact]); setSearchParams({ artifact: artifact.id }); }}
+        /> : null}
+
+        {infoOpen && !operation ? (
           <aside className="info-panel">
             <div>
               <h3>数据信息</h3>
