@@ -6,6 +6,7 @@ import {
   Cube,
   Image,
   Stack,
+  Scissors,
   XCircle,
   ArrowClockwise,
   HourglassHigh,
@@ -29,6 +30,7 @@ const statusFilter: Record<StatusFilter, (t: Task) => boolean> = {
 };
 
 function opLabel(op?: string): string {
+  if (op === 'clip-tileset') return '范围裁剪';
   if (op === 'merge-tilesets') return '3D Tiles 合并';
   if (op === 'convert-osgb') return 'OSGB 转换';
   if (op === 'convert-model') return '通用模型转换';
@@ -41,6 +43,7 @@ function TaskIcon({ operation }: { operation?: string }) {
   if (operation === 'convert-model') return <Cube size={18} />;
   if (operation === 'process-tileset') return <Cube size={18} />;
   if (operation === 'merge-tilesets') return <Stack size={18} />;
+  if (operation === 'clip-tileset') return <Scissors size={18} />;
   return <Image size={18} />;
 }
 
@@ -105,6 +108,11 @@ function rebuildHref(t: Task): string {
     const merge = t.options?.merge as { additionalInputs?: string[] } | undefined;
     for (const input of merge?.additionalInputs || []) params.append('input', input);
     return `/tiles/merge?${params}`;
+  }
+  if (t.operation === 'clip-tileset') {
+    const clip = t.options?.clip as { region?: unknown } | undefined;
+    if (clip?.region) params.set('region', JSON.stringify(clip.region));
+    return `/tiles/clip?${params}`;
   }
   if (t.operation === 'process-tileset') return `/tiles/process?${q}`;
   if (t.operation === 'convert-model') return `/model/convert?${q}`;
@@ -329,6 +337,7 @@ export function Processing() {
           <option value="convert-model">通用模型转换</option>
           <option value="process-tileset">Tiles 处理</option>
           <option value="merge-tilesets">3D Tiles 合并</option>
+          <option value="clip-tileset">范围裁剪</option>
         </select>
       </div>
 
@@ -469,6 +478,7 @@ export function Processing() {
                 <dd>{selected.stage || '—'}</dd>
                 <dt>输入</dt>
                 <dd>{selected.input || '—'}</dd>
+                {selected.operation === 'clip-tileset' && <><dt>保留区域</dt><dd><pre>{JSON.stringify((selected.options?.clip as { region?: unknown })?.region, null, 2)}</pre></dd></>}
                 {selected.operation === 'merge-tilesets' && (
                   <><dt>其他输入</dt><dd>{((selected.options?.merge as { additionalInputs?: string[] })?.additionalInputs || []).map((path, index) => <div key={index}>{path}</div>)}</dd></>
                 )}

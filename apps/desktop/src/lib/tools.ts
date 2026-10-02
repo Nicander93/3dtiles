@@ -5,9 +5,10 @@ import {
   Eye,
   Image,
   Stack,
+  Scissors,
 } from '@phosphor-icons/react';
 
-export type ToolId = 'osgb-convert' | 'model-convert' | 'tiles-preview' | 'tiles-rebuild' | 'tiles-texture' | 'tiles-merge';
+export type ToolId = 'osgb-convert' | 'model-convert' | 'tiles-preview' | 'tiles-rebuild' | 'tiles-texture' | 'tiles-merge' | 'tiles-clip';
 
 export type ToolDef = {
   id: ToolId;
@@ -49,6 +50,7 @@ export const toolGroups: ToolGroup[] = [
     title: '3D Tiles',
     tools: [
       { id: 'tiles-merge', title: '3D Tiles 合并', desc: '将多份 Tileset 合并为统一成果', to: '/tiles/merge', icon: Stack },
+      { id: 'tiles-clip', title: '范围裁剪', desc: '精确保留指定地理区域内的模型', to: '/tiles/clip', icon: Scissors },
       {
         id: 'tiles-preview',
         title: '预览',

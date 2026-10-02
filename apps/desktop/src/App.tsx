@@ -9,6 +9,7 @@ import { Settings } from "./pages/Settings";
 import { ProcessTiles } from "./pages/ProcessTiles";
 import { ModelConvert } from "./pages/ModelConvert";
 import { MergeTiles } from "./pages/MergeTiles";
+import { ClipTiles } from "./pages/ClipTiles";
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
         <Route path="results" element={<Results />} />
         <Route path="tiles/process" element={<ProcessTiles />} />
         <Route path="tiles/merge" element={<MergeTiles />} />
+        <Route path="tiles/clip" element={<ClipTiles />} />
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>

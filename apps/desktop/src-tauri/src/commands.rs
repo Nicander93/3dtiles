@@ -105,6 +105,11 @@ pub fn submit_task(state: State<'_, AppState>, config: SubmitTaskConfig) -> Resu
       &input_path, &options, std::path::Path::new(&config.output.path()), provisional_id,
     ).map_err(|e| format!("路径校验失败: {e}"))?;
   }
+  if config.operation == "clip-tileset" {
+    processor::stages::clip::preflight(
+      &input_path, &options, std::path::Path::new(&config.output.path()), provisional_id,
+    )?;
+  }
   let path_policy_input = if config.operation == "convert-model" {
     let model_file = std::path::Path::new(&input_path);
     if !model_file.is_file() {

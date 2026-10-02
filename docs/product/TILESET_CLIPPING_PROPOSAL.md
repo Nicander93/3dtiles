@@ -1,5 +1,7 @@
 # 3D Tiles 范围裁剪技术方案（待讨论）
 
+首版已按本方案实现，具体支持范围、限制、协议和验收方式见 [范围裁剪功能说明](../features/tileset-clip.md)。以下保留设计取舍；地图绘制、凹多边形/孔洞、挖除、封口与重新生成 HLOD 仍为后续工作。
+
 目标：用户指定区域后，导出实际保留区域内几何的独立 Tileset。第一版建议提供“保留范围内”操作，先支持矩形与凸多边形、显式 B3DM/GLB 三角网格。后续再支持凹多边形、孔洞、挖除区域与高度限制。
 
 ## 三种能力的取舍
@@ -59,4 +61,4 @@ flowchart LR
 
 建议先确定两件事：首版的“矩形”是地图上的经纬度范围还是局部 ENU 矩形；输入只允许已有地理定位数据，还是同时支持局部模型坐标。上述方案默认地图 WGS84 区域、已有定位的静态网格，并先做“保留范围内”。
 
-依据：[3D Tiles 坐标、外部 Tileset、包围盒](https://github.com/CesiumGS/3d-tiles/blob/main/specification/README.adoc)、[glTF 2.0 网格、属性和节点变换](https://github.com/KhronosGroup/glTF/blob/main/specification/2.0/Specification.adoc)。这是设计提案，尚未实现裁剪功能。
+依据：[3D Tiles 坐标、外部 Tileset、包围盒](https://github.com/CesiumGS/3d-tiles/blob/main/specification/README.adoc)、[glTF 2.0 网格、属性和节点变换](https://github.com/KhronosGroup/glTF/blob/main/specification/2.0/Specification.adoc)。
