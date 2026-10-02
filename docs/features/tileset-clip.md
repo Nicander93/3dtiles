@@ -19,7 +19,7 @@
 
 ## 明确不支持
 
-隐式切片、多 contents、结构化元数据和 required Tileset 扩展；点云、I3DM、CMPT；动画、蒙皮、morph、GPU 实例化、Draco/meshopt/量化、feature ID 与自定义顶点属性。B3DM 须使用现代 28 字节头，BATCH_LENGTH=0，允许 JSON RTC_CENTER，不支持 feature/batch binary table 或 batch metadata。
+隐式切片、多 contents、结构化元数据与 Tileset 扩展（包括旧版元数据扩展）；点云、I3DM、CMPT；动画、蒙皮、morph、GPU 实例化、Draco/meshopt/量化、feature ID 与自定义顶点属性。B3DM 须使用现代 28 字节头，BATCH_LENGTH=0，允许 JSON RTC_CENTER，不支持 feature/batch binary table 或 batch metadata。
 
 GLB 须为 glTF 2、一个内嵌 BIN、一个 scene；节点必须均可达且不构成共享节点 DAG/循环。普通节点复用 mesh 支持。接受 KHR_materials_unlit、KHR_texture_transform，其他 glTF 扩展明确失败。支持 float 属性及归一化颜色/UV，常规整数索引和 interleaved byteStride，不支持 sparse accessor。
 

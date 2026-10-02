@@ -144,6 +144,7 @@ impl Context<'_> {
         let mut source: Value =
             serde_json::from_slice(&self.read(path)?).map_err(|e| e.to_string())?;
         merge::check_tileset_features(&source).map_err(|e| e.replace("merge", "clip"))?;
+        check_tile_extensions(&source)?;
         if source["asset"].get("gltfUpAxis").is_some_and(|v| v != "Y") {
             return Err("clip supports glTF Y-up tilesets only".into());
         }
@@ -324,4 +325,23 @@ fn scale_bound(m: Matrix) -> f64 {
         .map(|r| (0..3).map(|c| m[c * 4 + r].abs()).sum::<f64>())
         .fold(0., f64::max);
     (one * inf).sqrt()
+}
+fn check_tile_extensions(value: &Value) -> Result<(), String> {
+    if value
+        .get("extensions")
+        .is_some_and(|v| v.as_object().is_none_or(|o| !o.is_empty()))
+    {
+        return Err("clip does not support tileset extensions, including legacy metadata".into());
+    }
+    for key in ["root", "content", "boundingVolume"] {
+        if let Some(v) = value.get(key) {
+            check_tile_extensions(v)?;
+        }
+    }
+    if let Some(children) = value.get("children").and_then(Value::as_array) {
+        for child in children {
+            check_tile_extensions(child)?;
+        }
+    }
+    Ok(())
 }

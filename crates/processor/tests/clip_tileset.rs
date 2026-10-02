@@ -383,6 +383,14 @@ fn invalid_indices_cycles_and_missing_images_fail_cleanly() {
     assert!(!run(temp.path(), config(&input, &output)).status.success());
     fs::write(input.join("tile.glb"), glb()).unwrap();
     let mut top = json_file(&input.join("tileset.json"));
+    top["extensions"] = json!({"3DTILES_metadata":{"schema":{"classes":{}}}});
+    fs::write(
+        input.join("tileset.json"),
+        serde_json::to_vec(&top).unwrap(),
+    )
+    .unwrap();
+    assert!(!run(temp.path(), config(&input, &output)).status.success());
+    top.as_object_mut().unwrap().remove("extensions");
     top["root"]["content"] = json!({"uri":"tileset.json"});
     fs::write(
         input.join("tileset.json"),
