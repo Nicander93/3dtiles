@@ -15,6 +15,15 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Merge local tilesets into one portable dataset without changing source geometry.
+    MergeTilesets {
+        #[arg(short = 'i', long, required = true, num_args = 2..)]
+        inputs: Vec<PathBuf>,
+        #[arg(short = 'o', long)]
+        output: PathBuf,
+        #[arg(long)]
+        task_id: Option<String>,
+    },
     /// Run a task from JSON TaskConfig file (plan §7.1).
     Run {
         #[arg(long)]
@@ -88,6 +97,17 @@ enum Commands {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
+        Commands::MergeTilesets { inputs, output, task_id } => {
+            let config = TaskConfig {
+                schema_version: Some(1),
+                task_id: task_id.unwrap_or_else(|| format!("cli-{}", chrono_stamp())),
+                operation: "merge-tilesets".into(),
+                input: processor::protocol::PathRef { path: inputs[0].to_string_lossy().into_owned() },
+                output: processor::protocol::PathRef { path: output.to_string_lossy().into_owned() },
+                options: json!({"merge": {"additionalInputs": inputs[1..].iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>()}}),
+            };
+            ExitCode::from(run_task(config, CancelFlag::new()).exit_code as u8)
+        }
         Commands::Run { task } => {
             let text = match std::fs::read_to_string(&task) {
                 Ok(t) => t,

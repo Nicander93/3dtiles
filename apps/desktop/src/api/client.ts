@@ -117,6 +117,19 @@ function textureIsKeep(opts: Record<string, unknown> | undefined): boolean {
 }
 
 export function deriveStages(api: ApiTask): TaskStageInfo[] {
+  if (api.operation === 'merge-tilesets') {
+    const definitions = [
+      { id: 'scan', label: '检查输入' }, { id: 'merge', label: '合并' },
+      { id: 'validate', label: '检查成果' }, { id: 'commit', label: '提交成果' },
+    ];
+    const detail = typeof api.progress === 'object' && api.progress ? api.progress : {};
+    const stage = api.stage === 'check' ? 'validate' : (typeof detail.failedStage === 'string' ? detail.failedStage : api.stage);
+    const index = definitions.findIndex((d) => d.id === stage);
+    const succeeded = api.status === 'succeeded' || api.status === 'completed';
+    return definitions.map((d, i) => ({ ...d, status: succeeded || (index >= 0 && i < index) ? 'done' :
+      i === index ? (api.status === 'failed' ? 'failed' :
+        api.status === 'cancelled' || api.status === 'interrupted' ? 'pending' : 'running') : 'pending' }));
+  }
   const stage = (api.stage || '').toLowerCase();
   const status = (api.status || '').toLowerCase();
   const opts = api.options || {};

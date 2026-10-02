@@ -100,6 +100,11 @@ pub fn submit_task(state: State<'_, AppState>, config: SubmitTaskConfig) -> Resu
   // Preflight path policy (same rules as processor); provisional id for validation only
   let provisional_id = "task-preflight0";
   let input_path = config.input.path();
+  if config.operation == "merge-tilesets" {
+    processor::stages::merge::preflight(
+      &input_path, &options, std::path::Path::new(&config.output.path()), provisional_id,
+    ).map_err(|e| format!("路径校验失败: {e}"))?;
+  }
   let path_policy_input = if config.operation == "convert-model" {
     let model_file = std::path::Path::new(&input_path);
     if !model_file.is_file() {

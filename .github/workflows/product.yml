@@ -39,6 +39,12 @@ jobs:
           npm ci
           npm test
           npm run build
+      # Browser interactions submit tasks to the actual processor using isolated fixtures.
+      - name: Merge desktop end-to-end tests
+        working-directory: apps/desktop
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e
       - name: Prepare desktop sidecars
         working-directory: apps/desktop
         run: npm run prepare:sidecars

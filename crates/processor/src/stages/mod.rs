@@ -1,6 +1,7 @@
 pub mod commit;
 pub mod convert;
 pub mod model;
+pub mod merge;
 pub mod rebuild;
 pub mod scan;
 pub mod texture;

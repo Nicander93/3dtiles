@@ -33,6 +33,7 @@ pub fn run_task(config: TaskConfig, cancel: CancelFlag) -> RunOutcome {
         "convert-osgb" => run_convert_osgb(&config, &emitter, &cancel),
         "convert-model" => run_convert_model(&config, &emitter, &cancel),
         "process-tileset" => run_process_tileset(&config, &emitter, &cancel),
+        "merge-tilesets" => crate::stages::merge::run(&config, &emitter, &cancel),
         other => Err(format!("Unknown operation: {other}")),
     };
 

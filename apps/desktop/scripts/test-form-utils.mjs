@@ -22,6 +22,14 @@ assert.equal(errors.friendlyError({ detail: { message: 'nested' } }), 'nested');
 assert.equal(errors.friendlyError({}), '发生未知错误，请查看任务日志。');
 
 const forms = await loadTypeScript('../src/lib/formUtilsCore.ts');
+const merge = await loadTypeScript('../src/lib/mergeTilesValidation.ts');
+const mergeForm = { inputs: ['C:/data/a/tileset.json', 'C:/data/b'], output: 'D:/out/merged', name: ' 合并 ' };
+assert.equal(merge.validateMergeForm(mergeForm), null);
+assert.equal(merge.validateMergeForm({ ...mergeForm, inputs: ['C:/data/a', 'c:\\data\\a\\tileset.json'] }), '输入列表包含重复的 Tileset。');
+assert.equal(merge.validateMergeForm({ ...mergeForm, output: 'C:/data/b/nested/out' }), '成果目录不能与任何输入目录重叠。');
+assert.equal(merge.validateMergeForm({ ...mergeForm, inputs: ['C:/data/a', ''] }), '请填写每份 Tileset 的路径。');
+assert.equal(merge.validateMergeForm({ ...mergeForm, inputs: Array(65).fill('a') }), '请选择 2 到 64 份 Tileset。');
+assert.deepEqual(merge.mergeTaskRequest(mergeForm), { operation: 'merge-tilesets', input: { path: 'C:/data/a/tileset.json' }, output: { path: 'D:/out/merged' }, taskName: '合并', options: { merge: { additionalInputs: ['C:/data/b'] } } });
 assert.equal(forms.suggestOutputPath('C:\\data\\scene.osgb', '', '_tiles'), 'C:\\data\\scene.osgb_tiles');
 assert.equal(forms.suggestOutputPath('/data/scene_tiles', '', '_tiles'), '/data/scene_tiles');
 assert.equal(forms.suggestOutputPath('scene.osgb', 'D:\\out\\', '_process'), 'D:\\out\\scene.osgb_process');

@@ -547,6 +547,7 @@ impl TaskConfig {
 pub enum Stage {
     Scan,
     Convert,
+    Merge,
     RebuildIndex,
     RebuildProxy,
     Rebuild,
@@ -561,6 +562,7 @@ impl Stage {
         match self {
             Stage::Scan => "scan",
             Stage::Convert => "convert",
+            Stage::Merge => "merge",
             Stage::RebuildIndex => "rebuild-index",
             Stage::RebuildProxy => "rebuild-proxy",
             Stage::Rebuild => "rebuild",

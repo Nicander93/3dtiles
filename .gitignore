@@ -24,6 +24,8 @@ __pycache__/
 # GeoForge local state / build artifacts (keep apps/desktop/dist committed)
 .geoforge/
 apps/desktop/node_modules/
+apps/desktop/test-results/
+apps/desktop/playwright-report/
 apps/desktop/public/vendor/cesium/
 apps/desktop/dist/vendor/cesium/
 apps/*/build/
