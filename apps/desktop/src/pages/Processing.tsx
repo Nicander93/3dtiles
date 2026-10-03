@@ -29,6 +29,7 @@ const statusFilter: Record<StatusFilter, (t: Task) => boolean> = {
 };
 
 function opLabel(op?: string): string {
+  if (op === 'merge-tilesets') return '3D Tiles 合并';
   if (op === 'convert-osgb') return 'OSGB 转换';
   if (op === 'convert-model') return '通用模型转换';
   if (op === 'process-tileset') return 'Tiles 处理';
@@ -39,6 +40,7 @@ function TaskIcon({ operation }: { operation?: string }) {
   if (operation === 'convert-osgb') return <Stack size={18} />;
   if (operation === 'convert-model') return <Cube size={18} />;
   if (operation === 'process-tileset') return <Cube size={18} />;
+  if (operation === 'merge-tilesets') return <Stack size={18} />;
   return <Image size={18} />;
 }
 
@@ -99,6 +101,11 @@ function rebuildHref(t: Task): string {
   if (t.output) params.set('output', cloneOutputPath(t.output));
   if (t.name) params.set('name', t.name);
   const q = params.toString();
+  if (t.operation === 'merge-tilesets') {
+    const merge = t.options?.merge as { additionalInputs?: string[] } | undefined;
+    for (const input of merge?.additionalInputs || []) params.append('input', input);
+    return `/tiles/merge?${params}`;
+  }
   if (t.operation === 'process-tileset') return `/tiles/process?${q}`;
   if (t.operation === 'convert-model') return `/model/convert?${q}`;
   return `/osgb/convert?${q}`;
@@ -321,6 +328,7 @@ export function Processing() {
           <option value="convert-osgb">OSGB 转换</option>
           <option value="convert-model">通用模型转换</option>
           <option value="process-tileset">Tiles 处理</option>
+          <option value="merge-tilesets">3D Tiles 合并</option>
         </select>
       </div>
 
@@ -461,6 +469,9 @@ export function Processing() {
                 <dd>{selected.stage || '—'}</dd>
                 <dt>输入</dt>
                 <dd>{selected.input || '—'}</dd>
+                {selected.operation === 'merge-tilesets' && (
+                  <><dt>其他输入</dt><dd>{((selected.options?.merge as { additionalInputs?: string[] })?.additionalInputs || []).map((path, index) => <div key={index}>{path}</div>)}</dd></>
+                )}
                 <dt>输出</dt>
                 <dd>{selected.artifactPath || selected.output || '—'}</dd>
                 <dt>说明</dt>

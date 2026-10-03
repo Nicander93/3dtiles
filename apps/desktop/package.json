@@ -14,6 +14,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "test": "node scripts/test-form-utils.mjs",
+    "test:e2e": "cargo build -p processor --manifest-path ../../Cargo.toml --offline && playwright test",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "node scripts/run-tauri-dev.mjs",
@@ -32,6 +33,7 @@
     "react-router-dom": "^6.28.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tauri-apps/cli": "^2.11.4",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
