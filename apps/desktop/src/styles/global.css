@@ -1163,6 +1163,16 @@ p {
   margin-bottom: 8px;
 }
 
+.preview-operation-panel {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.preview-operation-panel .row { flex-wrap: wrap; }
+.preview-operation-panel .field { margin-bottom: 0; }
+.preview-region-json { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+
 .menu {
   position: relative;
   display: inline-block;

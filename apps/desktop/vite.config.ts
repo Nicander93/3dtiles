@@ -29,7 +29,8 @@ export default defineConfig({
         target: "http://127.0.0.1:8787",
         changeOrigin: true,
       },
-      "/preview": {
+      // Keep the React preview page local; proxy only preview resources.
+      "^/preview/(?!tiles(?:[/?]|$))": {
         target: "http://127.0.0.1:8080",
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/preview/, ""),
