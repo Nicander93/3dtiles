@@ -702,22 +702,17 @@ fn is_under_root(root: &Path, child: &Path) -> bool {
 mod tests {
     use super::*;
     use crate::protocol::Emitter;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use tempfile::TempDir;
 
-    fn tmp() -> PathBuf {
-        let n = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let p = std::env::temp_dir().join(format!("gf-val-{n}"));
-        let _ = fs::remove_dir_all(&p);
-        fs::create_dir_all(&p).unwrap();
-        p
+    fn tmp() -> TempDir {
+        // Timestamp-only paths can collide between parallel tests on coarse clocks.
+        tempfile::Builder::new().prefix("gf-val-").tempdir().unwrap()
     }
 
     #[test]
     fn rejects_missing_root() {
-        let dir = tmp();
+        let tmp = tmp();
+        let dir = tmp.path();
         fs::write(dir.join("tileset.json"), r#"{"asset":{"version":"1.0"}}"#).unwrap();
         let e = Emitter::new("t");
         let err = validate_tileset_dir(&e, &dir).unwrap_err();
@@ -725,12 +720,12 @@ mod tests {
             err.contains("ROOT_MISSING") || err.contains("TILESET_ROOT") || err.contains("missing root"),
             "{err}"
         );
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn accepts_minimal_ok() {
-        let dir = tmp();
+        let tmp = tmp();
+        let dir = tmp.path();
         // tiny valid GLB: header + empty JSON {}
         let mut glb = Vec::new();
         glb.extend_from_slice(b"glTF");
@@ -752,34 +747,34 @@ mod tests {
         fs::write(dir.join("tileset.json"), tileset).unwrap();
         let e = Emitter::new("t");
         validate_tileset_dir(&e, &dir).unwrap();
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn rejects_missing_content() {
-        let dir = tmp();
+        let tmp = tmp();
+        let dir = tmp.path();
         let tileset = r#"{"asset":{"version":"1.0"},"root":{"geometricError":1,"boundingVolume":{"box":[0,0,0,1,0,0,0,1,0,0,0,1]},"content":{"uri":"missing.b3dm"}}}"#;
         fs::write(dir.join("tileset.json"), tileset).unwrap();
         let e = Emitter::new("t");
         let err = validate_tileset_dir(&e, &dir).unwrap_err();
         assert!(err.contains("CONTENT_MISSING") || err.contains("MISSING_CONTENT"), "{err}");
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn rejects_invalid_bounding_volume_shape() {
-        let dir = tmp();
+        let tmp = tmp();
+        let dir = tmp.path();
         let tileset = r#"{"asset":{"version":"1.0"},"root":{"geometricError":1,"boundingVolume":{"box":[0,1]}}}"#;
         fs::write(dir.join("tileset.json"), tileset).unwrap();
         let e = Emitter::new("t");
         let err = validate_tileset_dir(&e, &dir).unwrap_err();
         assert!(err.contains("BOUNDING_VOLUME_INVALID") || err.contains("BAD_BOUNDS"), "{err}");
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn rejects_gltf_external_path_escape() {
-        let dir = tmp();
+        let tmp = tmp();
+        let dir = tmp.path();
         fs::write(dir.join("outside.bin"), b"outside").unwrap();
         fs::write(
             dir.join("nested.gltf"),
@@ -794,12 +789,12 @@ mod tests {
         let e = Emitter::new("t");
         let err = validate_tileset_dir(&e, &dir).unwrap_err();
         assert!(err.contains("PATH_ESCAPE") || err.contains("CONTENT_URI_ESCAPE"), "{err}");
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn rejects_cycle() {
-        let dir = tmp();
+        let tmp = tmp();
+        let dir = tmp.path();
         let a = dir.join("a.json");
         let b = dir.join("b.json");
         fs::write(
@@ -820,6 +815,5 @@ mod tests {
         let e = Emitter::new("t");
         let err = validate_tileset_dir(&e, &dir).unwrap_err();
         assert!(err.contains("CYCLE_DETECTED") || err.contains("CYCLE"), "{err}");
-        let _ = fs::remove_dir_all(&dir);
     }
 }
