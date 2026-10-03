@@ -7,7 +7,9 @@ import { promisify } from 'node:util';
 import { createMergeFixture } from '../../scripts/create-merge-fixtures.mjs';
 
 const execute = promisify(execFile);
-test.describe.configure({ timeout: 60000 });
+// CI uses software WebGL: repeated GPU picking and drawing need a larger total budget.
+// Individual locator assertions keep their short defaults so functional failures surface promptly.
+test.describe.configure({ timeout: 120000 });
 const processor = process.env.GEOFORGE_E2E_PROCESSOR || resolve('../../target/debug', process.platform === 'win32' ? 'processor.exe' : 'processor');
 let root, input, artifacts, submissions, tasks;
 test.beforeEach(async ({ page }) => {
