@@ -23,6 +23,17 @@ assert.equal(errors.friendlyError({}), '发生未知错误，请查看任务日�
 
 const forms = await loadTypeScript('../src/lib/formUtilsCore.ts');
 const merge = await loadTypeScript('../src/lib/mergeTilesValidation.ts');
+const clip = await loadTypeScript('../src/lib/clipTilesValidation.ts');
+const clipForm = { input: 'C:/data/a/tileset.json', output: 'D:/out/crop', name: '裁剪', mode: 'rectangle', bounds: ['-0.001', '-0.001', '0.001', '0.001'], geojson: '' };
+assert.deepEqual(clip.clipTaskRequest(clipForm).options, { clip: { region: { type: 'rectangle', bounds: [-0.001, -0.001, 0.001, 0.001] } } });
+assert.throws(() => clip.clipTaskRequest({ ...clipForm, output: 'C:/data/a/nested' }), /重叠/);
+assert.throws(() => clip.clippingRegion({ ...clipForm, bounds: ['', '0', '1', '1'] }), /完整/);
+assert.throws(() => clip.clippingRegion({ ...clipForm, bounds: ['1', '0', '0', '1'] }), /西经度/);
+assert.throws(() => clip.clippingRegion({ ...clipForm, mode: 'polygon', geojson: '{' }));
+const polygon = { type: 'Polygon', coordinates: [[[0, 0], [0.001, 0], [0, 0.001], [0, 0]]] };
+assert.deepEqual(clip.clippingRegion({ ...clipForm, mode: 'polygon', geojson: JSON.stringify(polygon) }), polygon);
+assert.deepEqual(clip.restoreClipRegion(clip.clippingRegion(clipForm)).bounds, clipForm.bounds);
+assert.equal(clip.restoreClipRegion(polygon).mode, 'polygon');
 const mergeForm = { inputs: ['C:/data/a/tileset.json', 'C:/data/b'], output: 'D:/out/merged', name: ' 合并 ' };
 assert.equal(merge.validateMergeForm(mergeForm), null);
 assert.equal(merge.validateMergeForm({ ...mergeForm, inputs: ['C:/data/a', 'c:\\data\\a\\tileset.json'] }), '输入列表包含重复的 Tileset。');

@@ -164,7 +164,7 @@ fn check_cancel(cancel: &CancelFlag) -> Result<(), String> {
     }
 }
 
-fn check_tileset_features(value: &Value) -> Result<(), String> {
+pub(crate) fn check_tileset_features(value: &Value) -> Result<(), String> {
     if value.get("root").is_some() {
         let asset = value.get("asset").ok_or("merge input missing asset")?;
         if !matches!(

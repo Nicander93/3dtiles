@@ -15,6 +15,18 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Export exact geometry inside a small WGS84 rectangle or convex GeoJSON polygon.
+    ClipTileset {
+        #[arg(short = 'i', long)]
+        input: PathBuf,
+        #[arg(short = 'o', long)]
+        output: PathBuf,
+        /// Region JSON: rectangle bounds [west,south,east,north] or GeoJSON Polygon/Feature.
+        #[arg(long)]
+        region: PathBuf,
+        #[arg(long)]
+        task_id: Option<String>,
+    },
     /// Merge local tilesets into one portable dataset without changing source geometry.
     MergeTilesets {
         #[arg(short = 'i', long, required = true, num_args = 2..)]
@@ -97,6 +109,20 @@ enum Commands {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
+        Commands::ClipTileset { input, output, region, task_id } => {
+            let region = match std::fs::read(&region).map_err(|e|e.to_string()).and_then(|b|serde_json::from_slice::<serde_json::Value>(&b).map_err(|e|e.to_string())) {
+                Ok(v) => v,
+                Err(e) => { eprintln!("invalid region file: {e}"); return ExitCode::from(EXIT_FAILED as u8); }
+            };
+            let config = TaskConfig {
+                schema_version: Some(1), task_id: task_id.unwrap_or_else(||format!("cli-{}",chrono_stamp())),
+                operation: "clip-tileset".into(),
+                input: processor::protocol::PathRef { path: input.to_string_lossy().into_owned() },
+                output: processor::protocol::PathRef { path: output.to_string_lossy().into_owned() },
+                options: json!({"clip":{"region":region}}),
+            };
+            ExitCode::from(run_task(config,CancelFlag::new()).exit_code as u8)
+        }
         Commands::MergeTilesets { inputs, output, task_id } => {
             let config = TaskConfig {
                 schema_version: Some(1),
