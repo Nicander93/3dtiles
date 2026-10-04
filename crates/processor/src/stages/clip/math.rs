@@ -99,6 +99,7 @@ pub fn ecef(lon: f64, lat: f64) -> Point {
 pub struct Region {
     pub frame: Matrix,
     pub polygon: Vec<[f64; 2]>,
+    pub parts: Vec<Vec<[f64; 2]>>,
 }
 impl Region {
     pub fn parse(v: &Value) -> Result<Self, String> {
@@ -195,25 +196,40 @@ impl Region {
         if area < 0. {
             polygon.reverse();
         }
-        // Every vertex must lie inside every directed edge: this also rejects self crossings.
-        for i in 0..polygon.len() {
-            let a = polygon[i];
-            let b = polygon[(i + 1) % polygon.len()];
-            if (b[0] - a[0]).hypot(b[1] - a[1]) < 1e-6
-                || polygon.iter().any(|p| cross(a, b, *p) < -1e-6)
-            {
-                return Err(
-                    "clip requires a simple convex polygon without repeated vertices".into(),
-                );
-            }
+        let parts = super::polygon::decompose(&polygon)?;
+        Ok(Self {
+            frame,
+            polygon,
+            parts,
+        })
+    }
+    pub fn pieces(&self) -> &[Vec<[f64; 2]>] {
+        if self.parts.is_empty() {
+            std::slice::from_ref(&self.polygon)
+        } else {
+            &self.parts
         }
-        Ok(Self { frame, polygon })
+    }
+    pub fn contains(&self, p: Point, tolerance: f64) -> bool {
+        self.pieces()
+            .iter()
+            .any(|part| (0..part.len()).all(|edge| edge_distance(part, edge, p) >= -tolerance))
+    }
+    pub fn excludes_bounds(&self, corners: &[Point]) -> bool {
+        self.pieces().iter().all(|part| {
+            (0..part.len()).any(|edge| corners.iter().all(|p| edge_distance(part, edge, *p) < 0.))
+        })
     }
     pub fn distance(&self, edge: usize, p: Point) -> f64 {
         let a = self.polygon[edge];
         let b = self.polygon[(edge + 1) % self.polygon.len()];
         cross(a, b, [p[0], p[1]]) / (b[0] - a[0]).hypot(b[1] - a[1])
     }
+}
+fn edge_distance(polygon: &[[f64; 2]], edge: usize, p: Point) -> f64 {
+    let a = polygon[edge];
+    let b = polygon[(edge + 1) % polygon.len()];
+    cross(a, b, [p[0], p[1]]) / (b[0] - a[0]).hypot(b[1] - a[1])
 }
 fn cross(a: [f64; 2], b: [f64; 2], p: [f64; 2]) -> f64 {
     (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
@@ -301,7 +317,7 @@ pub fn inverse(m: Matrix) -> Result<Matrix, String> {
 }
 
 pub fn split_polygon(
-    region: &Region,
+    boundary: &[[f64; 2]],
     polygon: Vec<Vertex>,
     edge: usize,
 ) -> (Vec<Vertex>, Vec<Vertex>) {
@@ -311,9 +327,9 @@ pub fn split_polygon(
         return (inside, outside);
     }
     let mut previous = polygon.last().unwrap();
-    let mut dp = region.distance(edge, previous.clip);
+    let mut dp = edge_distance(boundary, edge, previous.clip);
     for current in &polygon {
-        let dc = region.distance(edge, current.clip);
+        let dc = edge_distance(boundary, edge, current.clip);
         if (dp >= 0.) != (dc >= 0.) {
             let v = previous.interpolate(current, (dp / (dp - dc)).clamp(0., 1.));
             inside.push(v.clone());
@@ -330,25 +346,61 @@ pub fn split_polygon(
     (inside, outside)
 }
 
-/// A disjoint convex partition: pieces outside the ROI retain their original positions.
+/// Disjoint intersection and remainder of a source triangle against the complete region.
 pub fn partition_triangle(
     region: &Region,
     vertices: [Vertex; 3],
-) -> (Vec<Vertex>, Vec<Vec<Vertex>>) {
-    let mut inside = vertices.to_vec();
-    let mut outside = Vec::new();
-    for edge in 0..region.polygon.len() {
-        let (remaining, fragment) = split_polygon(region, inside, edge);
-        if fragment.len() >= 3 {
-            outside.push(fragment);
+) -> (Vec<Vec<Vertex>>, Vec<Vec<Vertex>>) {
+    let mut outside = vec![vertices.to_vec()];
+    let mut inside = Vec::new();
+    for part in region.pieces() {
+        let mut next = Vec::new();
+        for fragment in outside {
+            if (0..part.len()).any(|edge| {
+                fragment
+                    .iter()
+                    .all(|v| edge_distance(part, edge, v.clip) < 0.)
+            }) {
+                next.push(fragment);
+                continue;
+            }
+            let mut remaining = fragment;
+            for edge in 0..part.len() {
+                let (keep, discard) = split_polygon(part, remaining, edge);
+                if discard.len() >= 3 {
+                    next.push(discard);
+                }
+                remaining = keep;
+                if remaining.len() < 3 {
+                    break;
+                }
+            }
+            if remaining.len() >= 3 {
+                inside.push(remaining);
+            }
         }
-        inside = remaining;
-        if inside.is_empty() {
-            break;
-        }
+        outside = next;
     }
     (inside, outside)
 }
+pub fn clip_region(region: &Region, vertices: [Vertex; 3]) -> Vec<Vec<Vertex>> {
+    region
+        .pieces()
+        .iter()
+        .map(|part| {
+            let mut polygon = vertices.to_vec();
+            for edge in 0..part.len() {
+                polygon = split_polygon(part, polygon, edge).0;
+                if polygon.len() < 3 {
+                    break;
+                }
+            }
+            polygon
+        })
+        .filter(|p| p.len() >= 3)
+        .collect()
+}
+#[cfg(test)]
 pub fn clip_triangle(region: &Region, vertices: [Vertex; 3]) -> Vec<Vertex> {
     let mut polygon = vertices.to_vec();
     for edge in 0..region.polygon.len() {
@@ -378,9 +430,61 @@ pub fn clip_triangle(region: &Region, vertices: [Vertex; 3]) -> Vec<Vertex> {
 mod tests {
     use super::*;
     #[test]
+    fn concave_partition_preserves_area_and_notch() {
+        let polygon = vec![[0., 0.], [3., 0.], [3., 1.], [1., 1.], [1., 3.], [0., 3.]];
+        let region = Region {
+            frame: IDENTITY,
+            parts: super::super::polygon::decompose(&polygon).unwrap(),
+            polygon,
+        };
+        let v = |x, y| Vertex {
+            values: vec![x, y, x + y],
+            clip: [x, y, 2.],
+        };
+        let area = |p: &[Vertex]| {
+            (1..p.len().saturating_sub(1))
+                .map(|i| {
+                    cross(
+                        [p[0].clip[0], p[0].clip[1]],
+                        [p[i].clip[0], p[i].clip[1]],
+                        [p[i + 1].clip[0], p[i + 1].clip[1]],
+                    )
+                    .abs()
+                        * 0.5
+                })
+                .sum::<f64>()
+        };
+        let mut kept = 0.;
+        let mut remainder = 0.;
+        for tri in [
+            [v(-1., -1.), v(4., -1.), v(4., 4.)],
+            [v(-1., -1.), v(4., 4.), v(-1., 4.)],
+        ] {
+            let (inside, outside) = partition_triangle(&region, tri.clone());
+            kept += inside.iter().map(|p| area(p)).sum::<f64>();
+            remainder += outside.iter().map(|p| area(p)).sum::<f64>();
+            assert!(inside
+                .iter()
+                .flatten()
+                .all(|v| region.contains(v.clip, 1e-8)
+                    && (v.values[2] - v.clip[0] - v.clip[1]).abs() < 1e-10));
+            let clipped = clip_region(&region, tri);
+            assert!(
+                (clipped.iter().map(|p| area(p)).sum::<f64>()
+                    - inside.iter().map(|p| area(p)).sum::<f64>())
+                .abs()
+                    < 1e-10
+            );
+        }
+        assert!((kept - 5.).abs() < 1e-10);
+        assert!((remainder - 20.).abs() < 1e-10);
+        assert!(!region.contains([2., 2., 0.], 0.));
+    }
+    #[test]
     fn partition_preserves_area_and_affine_inverse_roundtrips() {
         let r = Region {
             frame: IDENTITY,
+            parts: Vec::new(),
             polygon: vec![[-1., -1.], [1., -1.], [1., 1.], [-1., 1.]],
         };
         let v = |x, y| Vertex {
@@ -397,7 +501,13 @@ mod tests {
                 })
                 .sum::<f64>()
         };
-        assert!((area(&inside) + outside.iter().map(|p| area(p)).sum::<f64>() - 8.).abs() < 1e-10);
+        assert!(
+            (inside.iter().map(|p| area(p)).sum::<f64>()
+                + outside.iter().map(|p| area(p)).sum::<f64>()
+                - 8.)
+                .abs()
+                < 1e-10
+        );
         assert!(outside.iter().flatten().all(|v| v.values[2] == 2.));
         let m = [
             0., 2., 0., 0., -3., 0., 0., 0., 0., 0., 4., 0., 6378137., 100., 10., 1.,
@@ -412,7 +522,7 @@ mod tests {
             serde_json::json!({"type":"rectangle","bounds":[1.,0.,0.,1.]}),
             serde_json::json!({"type":"rectangle","bounds":[-1.,0.,1.,1.]}),
             serde_json::json!({"type":"Polygon","coordinates":[[[0.,0.],[0.001,0.],[0.,0.001]]]}),
-            serde_json::json!({"type":"Polygon","coordinates":[[[0.,0.],[0.001,0.],[0.0003,0.0003],[0.001,0.001],[0.,0.001],[0.,0.]]]}),
+            serde_json::json!({"type":"Polygon","coordinates":[[[0.,0.],[0.001,0.001],[0.,0.001],[0.001,0.],[0.,0.]]]}),
         ] {
             assert!(Region::parse(&v).is_err());
         }
@@ -425,6 +535,7 @@ mod tests {
     fn clips_area_and_interpolates_attributes() {
         let r = Region {
             frame: IDENTITY,
+            parts: Vec::new(),
             polygon: vec![[0., 0.], [1., 0.], [1., 1.], [0., 1.]],
         };
         let v = |x, y| Vertex {

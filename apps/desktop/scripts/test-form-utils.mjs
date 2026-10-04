@@ -29,7 +29,9 @@ assert.deepEqual(drawing.drawnClipRegion('rectangle', [[0.001, 0.001], [0, 0]]),
 const drawnTriangle = [[0, 0], [0.001, 0], [0, 0.001]];
 assert.deepEqual(drawing.drawnClipRegion('polygon', drawnTriangle), { type: 'Polygon', coordinates: [[...drawnTriangle, drawnTriangle[0]]] });
 assert.equal(drawing.drawnClipRegion('polygon', drawnTriangle.toReversed()).type, 'Polygon');
-assert.throws(() => drawing.drawnClipRegion('polygon', [[0, 0], [0.001, 0], [0.0002, 0.0002], [0, 0.001]]), /凸多边形/);
+assert.equal(drawing.drawnClipRegion('polygon', [[0, 0], [0.001, 0], [0.0002, 0.0002], [0, 0.001]]).type, 'Polygon');
+assert.throws(() => drawing.drawnClipRegion('polygon', [[0,0],[0.001,0.001],[0,0.001],[0.001,0],[0,0.0005]]), /自交|面积/);
+assert.throws(() => drawing.drawnClipRegion('polygon', [[0,0],[0.001,0],[0.001,0.001],[0.001,0],[0,0.001]]), /重复|自交/);
 assert.throws(() => drawing.drawnClipRegion('polygon', [[0, 0], [0.001, 0.001], [0, 0.001], [0.001, 0]]));
 assert.throws(() => drawing.drawnClipRegion('polygon', [...drawnTriangle, drawnTriangle[0]]), /重复/);
 assert.throws(() => drawing.drawnClipRegion('rectangle', [[0, 0], [1, 1]]), /10 公里/);

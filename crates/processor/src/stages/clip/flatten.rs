@@ -105,79 +105,88 @@ pub fn flatten_triangle(
 ) -> Result<Vec<[Vertex; 3]>, String> {
     let (inside, outside) = partition_triangle(region, input);
     let mut output: Vec<_> = outside.iter().flat_map(|p| triangulate(p)).collect();
-    let flat: Vec<_> = inside
-        .iter()
-        .cloned()
-        .map(|v| flatten_vertex(v, height, inverse, offset))
-        .collect();
-    let flattened_before = counts.flattened;
-    for tri in triangulate(&flat) {
-        if let Some(tri) = shade(tri, offset, layout, shading) {
-            output.push(tri);
-            counts.flattened += 1;
-        }
-    }
-    // Only ROI edges need walls; triangle fan edges and original interior seams do not.
-    if counts.flattened == flattened_before || inside.len() < 3 {
-        return Ok(output);
-    }
-    for i in 0..inside.len() {
-        let mut a = inside[i].clone();
-        let mut b = inside[(i + 1) % inside.len()].clone();
-        let edge = (0..region.polygon.len()).find(|edge| {
-            region.distance(*edge, a.clip).abs() < 1e-5
-                && region.distance(*edge, b.clip).abs() < 1e-5
-        });
-        let Some(edge) = edge else {
-            continue;
-        };
-        let ra = region.polygon[edge];
-        let rb = region.polygon[(edge + 1) % region.polygon.len()];
-        if (b.clip[0] - a.clip[0]) * (rb[0] - ra[0]) + (b.clip[1] - a.clip[1]) * (rb[1] - ra[1])
-            < 0.
-        {
-            std::mem::swap(&mut a, &mut b);
-        }
-        let da = a.clip[2] - height;
-        let db = b.clip[2] - height;
-        let segments = if da * db < 0. {
-            let t = da / (da - db);
-            let mid = Vertex {
-                values: a
-                    .values
-                    .iter()
-                    .zip(&b.values)
-                    .map(|(a, b)| a + (b - a) * t)
-                    .collect(),
-                clip: std::array::from_fn(|j| a.clip[j] + (b.clip[j] - a.clip[j]) * t),
-            };
-            vec![(a.clone(), mid.clone()), (mid, b.clone())]
-        } else {
-            vec![(a.clone(), b.clone())]
-        };
-        for (a, b) in segments {
-            if (a.clip[2] - height).abs().max((b.clip[2] - height).abs()) < 1e-5 {
-                continue;
+    for inside in inside {
+        let flat: Vec<_> = inside
+            .iter()
+            .cloned()
+            .map(|v| flatten_vertex(v, height, inverse, offset))
+            .collect();
+        let flattened_before = counts.flattened;
+        for tri in triangulate(&flat) {
+            if let Some(tri) = shade(tri, offset, layout, shading) {
+                output.push(tri);
+                counts.flattened += 1;
             }
-            let fa = flatten_vertex(a.clone(), height, inverse, offset);
-            let fb = flatten_vertex(b.clone(), height, inverse, offset);
-            let mut walls = [[a.clone(), fa, fb.clone()], [a.clone(), fb, b.clone()]];
-            for tri in &mut walls {
-                if a.clip[2] + b.clip[2] < 2. * height {
-                    tri.swap(1, 2);
+        }
+        // Only ROI edges need walls; triangle fan edges and original interior seams do not.
+        if counts.flattened == flattened_before || inside.len() < 3 {
+            continue;
+        }
+        for i in 0..inside.len() {
+            let mut a = inside[i].clone();
+            let mut b = inside[(i + 1) % inside.len()].clone();
+            let edge = (0..region.polygon.len()).find(|edge| {
+                region.distance(*edge, a.clip).abs() < 1e-5
+                    && region.distance(*edge, b.clip).abs() < 1e-5
+                    && [a.clip, b.clip].iter().all(|p| {
+                        let start = region.polygon[*edge];
+                        let end = region.polygon[(*edge + 1) % region.polygon.len()];
+                        let d = [end[0] - start[0], end[1] - start[1]];
+                        let t = (p[0] - start[0]) * d[0] + (p[1] - start[1]) * d[1];
+                        t >= -1e-6 && t <= d[0] * d[0] + d[1] * d[1] + 1e-6
+                    })
+            });
+            let Some(edge) = edge else {
+                continue;
+            };
+            let ra = region.polygon[edge];
+            let rb = region.polygon[(edge + 1) % region.polygon.len()];
+            if (b.clip[0] - a.clip[0]) * (rb[0] - ra[0]) + (b.clip[1] - a.clip[1]) * (rb[1] - ra[1])
+                < 0.
+            {
+                std::mem::swap(&mut a, &mut b);
+            }
+            let da = a.clip[2] - height;
+            let db = b.clip[2] - height;
+            let segments = if da * db < 0. {
+                let t = da / (da - db);
+                let mid = Vertex {
+                    values: a
+                        .values
+                        .iter()
+                        .zip(&b.values)
+                        .map(|(a, b)| a + (b - a) * t)
+                        .collect(),
+                    clip: std::array::from_fn(|j| a.clip[j] + (b.clip[j] - a.clip[j]) * t),
+                };
+                vec![(a.clone(), mid.clone()), (mid, b.clone())]
+            } else {
+                vec![(a.clone(), b.clone())]
+            };
+            for (a, b) in segments {
+                if (a.clip[2] - height).abs().max((b.clip[2] - height).abs()) < 1e-5 {
+                    continue;
                 }
-                for v in tri.iter_mut() {
-                    let u = (v.clip[0] - a.clip[0]).hypot(v.clip[1] - a.clip[1]);
-                    for name in ["TEXCOORD_0", "TEXCOORD_1"] {
-                        if let Some((uv, _)) = layout.get(name) {
-                            v.values[*uv] = u;
-                            v.values[*uv + 1] = v.clip[2] - height;
+                let fa = flatten_vertex(a.clone(), height, inverse, offset);
+                let fb = flatten_vertex(b.clone(), height, inverse, offset);
+                let mut walls = [[a.clone(), fa, fb.clone()], [a.clone(), fb, b.clone()]];
+                for tri in &mut walls {
+                    if a.clip[2] + b.clip[2] < 2. * height {
+                        tri.swap(1, 2);
+                    }
+                    for v in tri.iter_mut() {
+                        let u = (v.clip[0] - a.clip[0]).hypot(v.clip[1] - a.clip[1]);
+                        for name in ["TEXCOORD_0", "TEXCOORD_1"] {
+                            if let Some((uv, _)) = layout.get(name) {
+                                v.values[*uv] = u;
+                                v.values[*uv + 1] = v.clip[2] - height;
+                            }
                         }
                     }
-                }
-                if let Some(tri) = shade(tri.clone(), offset, layout, shading) {
-                    output.push(tri);
-                    counts.walls += 1;
+                    if let Some(tri) = shade(tri.clone(), offset, layout, shading) {
+                        output.push(tri);
+                        counts.walls += 1;
+                    }
                 }
             }
         }
@@ -189,9 +198,55 @@ pub fn flatten_triangle(
 mod tests {
     use super::*;
     #[test]
+    fn concave_flatten_has_no_walls_on_decomposition_seams() {
+        let polygon = vec![[0., 0.], [3., 0.], [3., 1.], [1., 1.], [1., 3.], [0., 3.]];
+        let region = Region {
+            frame: IDENTITY,
+            parts: super::super::polygon::decompose(&polygon).unwrap(),
+            polygon,
+        };
+        let v = |x, y| Vertex {
+            values: vec![x, y, 2.],
+            clip: [x, y, 2.],
+        };
+        let mut counts = Counts::default();
+        let mut wall_area = 0.;
+        for input in [
+            [v(-1., -1.), v(4., -1.), v(4., 4.)],
+            [v(-1., -1.), v(4., 4.), v(-1., 4.)],
+        ] {
+            let output = flatten_triangle(
+                &region,
+                input,
+                0.,
+                IDENTITY,
+                0,
+                &Layout::new(),
+                &Shading::default(),
+                &mut counts,
+            )
+            .unwrap();
+            for tri in output {
+                if tri.iter().all(|v| v.clip[2] == tri[0].clip[2]) {
+                    continue;
+                }
+                assert!((0..region.polygon.len()).any(|edge| tri
+                    .iter()
+                    .all(|v| region.distance(edge, v.clip).abs() < 1e-8)));
+                let ab = subtract(tri[1].clip, tri[0].clip);
+                let ac = subtract(tri[2].clip, tri[0].clip);
+                let normal = cross(ab, ac);
+                wall_area += dot(normal, normal).sqrt() * 0.5;
+            }
+        }
+        assert!((wall_area - 24.).abs() < 1e-8);
+        assert!(counts.flattened > 0 && counts.walls > 0);
+    }
+    #[test]
     fn adjacent_triangles_generate_walls_only_on_roi_boundary() {
         let r = Region {
             frame: IDENTITY,
+            parts: Vec::new(),
             polygon: vec![[-1., -1.], [1., -1.], [1., 1.], [-1., 1.]],
         };
         let v = |x, y| Vertex {
