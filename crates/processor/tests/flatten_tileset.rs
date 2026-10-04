@@ -82,6 +82,68 @@ fn attributes(output: &Path, uri: &str, name: &str, width: usize) -> Vec<Vec<f64
 }
 
 #[test]
+fn concave_cli_preserves_the_notch_in_both_windings_and_operations() {
+    for operation in ["clip", "flatten"] {
+        for clockwise in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let input = fixture(root.path());
+            let output = root.path().join("result");
+            let mut ring = vec![
+                [0., -40.],
+                [40., -40.],
+                [40., -20.],
+                [20., -20.],
+                [20., 0.],
+                [0., 0.],
+            ];
+            if clockwise {
+                ring.reverse();
+            }
+            let mut geographic: Vec<_> = ring
+                .iter()
+                .map(|p| [p[0] / 111319.490793, p[1] / 110574.275822])
+                .collect();
+            geographic.push(geographic[0]);
+            let region = json!({"type":"Polygon","coordinates":[geographic]});
+            let mut task = config(&input, &output, -5.);
+            task["operation"] = json!(format!("{operation}-tileset"));
+            task["options"] = if operation == "clip" {
+                json!({"clip":{"region":region}})
+            } else {
+                json!({"flatten":{"region":region,"heightMeters":-5.}})
+            };
+            let result = run(root.path(), &task);
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stdout)
+            );
+            let top = read(&output.join("tileset.json"));
+            let uri = top["root"]["content"]["uri"].as_str().unwrap();
+            let positions = attributes(&output, uri, "POSITION", 3);
+            let mut area = 0.;
+            for tri in positions.chunks_exact(3) {
+                // ROI-centre ENU is slightly tilted relative to the source node frame.
+                if tri.iter().any(|p| (p[1] - tri[0][1]).abs() > 0.01) {
+                    continue;
+                }
+                if operation == "flatten" && tri[0][1].abs() < 1e-5 {
+                    continue;
+                }
+                let x = tri.iter().map(|p| p[0]).sum::<f64>() / 3.;
+                let y = -tri.iter().map(|p| p[2]).sum::<f64>() / 3.;
+                assert!(!(x > 20.01 && y > -19.99), "notch was filled");
+                area += ((tri[1][0] - tri[0][0]) * (tri[2][2] - tri[0][2])
+                    - (tri[1][2] - tri[0][2]) * (tri[2][0] - tri[0][0]))
+                    .abs()
+                    * 0.5;
+            }
+            assert!((area - 1200.).abs() < 0.1, "area={area}");
+        }
+    }
+}
+
+#[test]
 fn flatten_preserves_outside_and_exports_flat_surface_with_boundary_walls_and_normals() {
     for height in [-5., 25.] {
         let root = tempfile::tempdir().unwrap();

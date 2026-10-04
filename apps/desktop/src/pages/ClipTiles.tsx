@@ -58,7 +58,7 @@ export function ClipTiles() {
       </FormSection>
       <FormSection title="保留区域">
         <div className="field"><label htmlFor="clip-mode">区域输入方式</label><select id="clip-mode" className="input" value={form.mode} disabled={submitting} onChange={(e) => update({ mode: e.target.value as ClipForm['mode'] })}>
-          <option value="rectangle">经纬度矩形</option><option value="polygon">凸多边形 GeoJSON</option>
+          <option value="rectangle">经纬度矩形</option><option value="polygon">多边形 GeoJSON</option>
         </select></div>
         {form.mode === 'rectangle' ? ['西经度', '南纬度', '东经度', '北纬度'].map((label, i) => <div className="field" key={label}><label htmlFor={`clip-bound-${i}`}>{label}（度）</label>
           <input id={`clip-bound-${i}`} className="input" type="number" step="any" disabled={submitting} value={form.bounds[i]} onChange={(e) => update({ bounds: form.bounds.map((v, n) => n === i ? e.target.value : v) })} />
@@ -68,7 +68,7 @@ export function ClipTiles() {
             const file = e.target.files?.[0]; if (file) void file.text().then((geojson) => update({ geojson })).catch((e) => setError(friendlyError(e)));
           }} /></div>
         </>}
-        <p className="field-hint">WGS84 经纬度，凸多边形须闭合且无孔洞。区域距中心不超过 10 公里，纬度在 ±80° 内，不跨日期变更线。边界按局部 ENU 竖直平面裁剪，不限制高度。</p>
+        <p className="field-hint">WGS84 经纬度，多边形须闭合且无孔洞。区域距中心不超过 10 公里，纬度在 ±80° 内，不跨日期变更线。边界按局部 ENU 竖直平面裁剪，不限制高度。</p>
       </FormSection>
       <FormSection title="任务"><div className="field"><label htmlFor="clip-name">任务名</label><input id="clip-name" className="input" disabled={submitting} value={form.name} onChange={(e) => update({ name: e.target.value })} placeholder="可选" /></div></FormSection>
       <SubmitBar primaryLabel={submitting ? '提交中…' : '开始裁剪'} primaryDisabled={submitting} onPrimary={() => void submit()} onReset={() => update(defaults)} />

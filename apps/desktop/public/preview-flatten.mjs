@@ -87,13 +87,17 @@ export function installFlattenTool(C, viewer, getTileset, notify, canEdit) {
     });
     state = { key: data.regionKey, xy, surface, toWorld, toLocal, origin, up: new C.Cartesian3(toWorld[8],toWorld[9],toWorld[10]),
       initial, height: initial, active: true, history: [], scale: Math.max(4,Math.min(500,C.Cartesian3.distance(viewer.camera.positionWC,origin)*0.12)) };
-    const area = xy.reduce((sum,a,i) => { const b = xy[(i+1)%xy.length]; return sum+a[0]*b[1]-b[0]*a[1]; },0);
-    const sign = Math.sign(area);
-    const conditions = xy.map((a,i) => { const b = xy[(i+1)%xy.length]; const x = -(b[1]-a[1])*sign, y = (b[0]-a[0])*sign, z = (a[0]*(b[1]-a[1])-a[1]*(b[0]-a[0]))*sign; return `(${x.toFixed(9)} * p.x + ${y.toFixed(9)} * p.y + ${z.toFixed(9)} >= 0.0)`; });
+    // Ray crossing handles concavity in either winding; horizontal edges never cross.
+    const crossings = xy.flatMap((a,i) => {
+      const b=xy[(i+1)%xy.length];
+      if (Math.abs(b[1]-a[1]) < 1e-12) return [];
+      const slope=(b[0]-a[0])/(b[1]-a[1]), intercept=a[0]-slope*a[1];
+      return [`(((p.y < ${a[1].toFixed(9)}) != (p.y < ${b[1].toFixed(9)})) && p.x < ${slope.toFixed(12)} * p.y + ${intercept.toFixed(9)} ? 1.0 : 0.0)`];
+    });
     previousShader = getTileset().customShader;
     // Eye-relative matrices avoid subtracting two large ECEF values in single-precision GLSL.
     shader = new C.CustomShader({ uniforms: { u_eyeToRegion: { type: C.UniformType.MAT4, value: C.Matrix4.IDENTITY } }, fragmentShaderText:
-      `void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material) { vec3 p = (u_eyeToRegion * vec4(fsInput.attributes.positionEC,1.0)).xyz; if (${conditions.join(' && ')}) { discard; } }` });
+      `void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material) { vec3 p = (u_eyeToRegion * vec4(fsInput.attributes.positionEC,1.0)).xyz; if (mod(${crossings.join(' + ') || '0.0'}, 2.0) > 0.5) { discard; } }` });
     getTileset().customShader = shader;
     const update = () => shader.setUniform('u_eyeToRegion',C.Matrix4.multiply(toLocal,viewer.camera.inverseViewMatrix,new C.Matrix4()));
     update(); removeRender = viewer.scene.preRender.addEventListener(update); render();

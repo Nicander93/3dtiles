@@ -26,12 +26,18 @@ export function drawnClipRegion(mode: DrawMode, points: RegionPoint[]) {
     const next = planar[(i + 1) % planar.length]; return sum + p[0] * next[1] - next[0] * p[1];
   }, 0);
   if (Math.abs(area) < 1e-4) throw new Error('区域面积为零，请重新绘制。');
-  const sign = Math.sign(area);
+  const cross = (a: number[], b: number[], p: number[]) => (b[0]-a[0])*(p[1]-a[1])-(b[1]-a[1])*(p[0]-a[0]);
+  const onSegment = (a: number[], b: number[], p: number[]) => Math.abs(cross(a,b,p)) <= 1e-6 && [0,1].every((i) => p[i] >= Math.min(a[i],b[i])-1e-6 && p[i] <= Math.max(a[i],b[i])+1e-6);
+  if (planar.some((a,i) => planar.slice(i+1).some((b) => Math.hypot(b[0]-a[0],b[1]-a[1]) < 1e-6))) throw new Error('区域存在重复顶点。');
   for (let i = 0; i < planar.length; i++) {
     const a = planar[i], b = planar[(i + 1) % planar.length];
     if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 1e-6) throw new Error('区域存在重复顶点。');
-    // Every vertex must lie on the interior side of every edge, rejecting stars and concavity.
-    if (planar.some((p) => sign * ((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])) < -1e-6)) throw new Error('首版只支持不自交的凸多边形，请调整顶点。');
+    for (let j=i+1; j<planar.length; j++) {
+      const c=planar[j], d=planar[(j+1)%planar.length];
+      if (Math.hypot(c[0]-a[0],c[1]-a[1]) < 1e-6) throw new Error('区域存在重复顶点。');
+      if (j === i+1 || (i === 0 && j === planar.length-1)) continue;
+      if ((cross(a,b,c)*cross(a,b,d) < 0 && cross(c,d,a)*cross(c,d,b) < 0) || onSegment(a,b,c) || onSegment(a,b,d) || onSegment(c,d,a) || onSegment(c,d,b)) throw new Error('多边形不能自交或自接触，请调整顶点。');
+    }
   }
   return mode === 'rectangle'
     ? { type: 'rectangle', bounds: [ring[0][0], ring[0][1], ring[2][0], ring[2][1]] }

@@ -99,12 +99,12 @@ test('polygon supports undo, vertex dragging, validation and clearing without ac
   await page.getByLabel('绘制方式').selectOption('polygon');
   await page.getByRole('button', { name: '开始绘制', exact: true }).click();
   await expect(page.getByText('已绘制 0 个控制点', { exact: true })).toBeVisible();
-  for (const [i, p] of [[0.00005, 0.00005], [0.0004, 0.00005], [0.0002, 0.00012], [0.00005, 0.0004]].entries()) {
+  for (const [i, p] of [[0.00005, 0.00005], [0.0004, 0.00005], [0.00005, 0.0004], [0.0004, 0.0004]].entries()) {
     await clickGeo(page, frame, ...p);
     await expect(page.getByText(`已绘制 ${i + 1} 个控制点`, { exact: true })).toBeVisible();
   }
   await page.getByRole('button', { name: '完成绘制', exact: true }).click();
-  await expect(page.getByText(/首版只支持不自交的凸多边形/)).toBeVisible();
+  await expect(page.getByText(/自交|面积为零/)).toBeVisible();
   await expect(page.getByRole('button', { name: '导出裁剪模型', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: '撤销顶点' }).click();
   await page.getByRole('button', { name: '撤销顶点' }).click();
@@ -202,3 +202,49 @@ test('closing flatten tool restores the source view and clearing the region inva
   expect(await frame.evaluate(()=>window.__geoforgePreview.viewer.scene.screenSpaceCameraController.enableInputs)).toBe(true);
   expect(submissions).toHaveLength(0);
 });
+
+for (const operation of ['clip','flatten']) {
+  test(`hand-drawn concave region exports real ${operation} geometry`, async ({page}) => {
+    const frame=await openClip(page,operation);
+    await page.getByLabel('绘制方式').selectOption('polygon');
+    await page.getByRole('button',{name:'开始绘制',exact:true}).click();
+    await expect(page.getByText('已绘制 0 个控制点',{exact:true})).toBeVisible();
+    const points=[[0.00005,0.00005],[0.0004,0.00005],[0.0004,0.00015],[0.00015,0.00015],[0.00015,0.0004],[0.00005,0.0004]];
+    for (const [i,p] of points.entries()) {
+      await clickGeo(page,frame,...p);
+      await expect(page.getByText(`已绘制 ${i+1} 个控制点`,{exact:true})).toBeVisible();
+    }
+    await page.getByRole('button',{name:'完成绘制',exact:true}).click();
+    if (operation === 'flatten') {
+      await page.getByRole('button',{name:'显示压平拖拽工具'}).click();
+      await expect(page.getByLabel('目标平面高度')).toBeVisible();
+      await dragPlane(page,frame,20);
+    }
+    const label=operation === 'clip' ? '裁剪' : '压平';
+    const output=join(root,`concave-${operation}`);
+    await page.getByLabel(`${label}成果目录`).fill(output);
+    await page.getByRole('button',{name:`导出${label}模型`,exact:true}).click();
+    await expect(page.getByRole('button',{name:`打开${label}后模型`})).toBeVisible();
+    expect(submissions[0].options[operation].region.coordinates[0]).toHaveLength(7);
+    const top=JSON.parse(await readFile(join(output,'tileset.json'),'utf8'));
+    const glb=await readFile(join(output,top.root.content.uri));
+    const size=glb.readUInt32LE(12), doc=JSON.parse(glb.subarray(20,20+size).toString('utf8'));
+    const primitive=doc.meshes[0].primitives[0], accessor=doc.accessors[primitive.attributes.POSITION];
+    const view=doc.bufferViews[accessor.bufferView], offset=28+size+(view.byteOffset || 0)+(accessor.byteOffset || 0);
+    let flatArea=0;
+    for (let i=0;i<accessor.count;i+=3) {
+      const p=[0,1,2].map((j)=>[0,1,2].map((k)=>glb.readFloatLE(offset+(i+j)*12+k*4)));
+      // Region-centre ENU is slightly tilted relative to the scaled source node frame.
+      const horizontal=p.every((v)=>Math.abs(v[1]-p[0][1]) < 0.0001);
+      if (!horizontal || (operation === 'flatten' && Math.abs(p[0][1]) < 1e-6)) continue;
+      const x=p.reduce((n,v)=>n+v[0]*100,0)/3, y=p.reduce((n,v)=>n-v[2]*100,0)/3;
+      expect(x > 16.8 && y > 16.7).toBe(false);
+      flatArea+=Math.abs((p[1][0]-p[0][0])*(p[2][2]-p[0][2])-(p[1][2]-p[0][2])*(p[2][0]-p[0][0]))*5000;
+    }
+    // The two arms of this L cover about 738 square metres, rather than its 1508 m² box.
+    expect(flatArea).toBeGreaterThan(700); expect(flatArea).toBeLessThan(780);
+    await page.getByRole('button',{name:`打开${label}后模型`}).click();
+    await expect(page.getByText('加载完成',{exact:true})).toBeVisible({timeout:20000});
+    await expect(page.getByText('An error occurred while rendering.')).toHaveCount(0);
+  });
+}

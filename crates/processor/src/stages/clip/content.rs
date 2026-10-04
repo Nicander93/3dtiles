@@ -655,14 +655,12 @@ impl CropContext<'_> {
                 ]
             })
             .collect();
-        if self.flatten_height.is_none()
-            && (0..self.region.polygon.len())
-                .any(|edge| corners.iter().all(|p| self.region.distance(edge, *p) < 0.))
-        {
+        if self.flatten_height.is_none() && self.region.excludes_bounds(&corners) {
             return Ok(None);
         }
-        let fully_inside = (0..self.region.polygon.len())
-            .all(|edge| corners.iter().all(|p| self.region.distance(edge, *p) >= 0.));
+        // A concave ring is not the intersection of its perimeter half-planes.
+        let fully_inside =
+            self.region.pieces().len() == 1 && corners.iter().all(|p| self.region.contains(*p, 0.));
         for (triangle, ids) in indices.chunks_exact(3).enumerate() {
             if triangle % 256 == 0 && self.cancel.is_cancelled() {
                 return Err("cancelled".into());
@@ -706,17 +704,20 @@ impl CropContext<'_> {
                 )?
             } else {
                 let clipped = if fully_inside {
-                    input
+                    vec![input]
                 } else {
-                    clip_triangle(self.region, input.try_into().unwrap())
+                    clip_region(self.region, input.try_into().unwrap())
                 };
-                (1..clipped.len().saturating_sub(1))
-                    .map(|i| {
-                        [
-                            clipped[0].clone(),
-                            clipped[i].clone(),
-                            clipped[i + 1].clone(),
-                        ]
+                clipped
+                    .iter()
+                    .flat_map(|clipped| {
+                        (1..clipped.len().saturating_sub(1)).map(|i| {
+                            [
+                                clipped[0].clone(),
+                                clipped[i].clone(),
+                                clipped[i + 1].clone(),
+                            ]
+                        })
                     })
                     .collect()
             };
@@ -787,10 +788,7 @@ impl CropContext<'_> {
                             return Err("f32 flatten height exceeds 2 cm tolerance; use localized mesh coordinates".into());
                         }
                     }
-                    if self.flatten_height.is_none()
-                        && (0..self.region.polygon.len())
-                            .any(|edge| self.region.distance(edge, q) < -0.02)
-                    {
+                    if self.flatten_height.is_none() && !self.region.contains(q, 0.02) {
                         return Err("f32 output exceeds 2 cm clip boundary tolerance; use localized mesh coordinates".into());
                     }
                     bounds = union(bounds, Some(Bounds::new(point(tile, p))));

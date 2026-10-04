@@ -2,6 +2,7 @@
 mod content;
 mod flatten;
 mod math;
+mod polygon;
 
 use super::{commit, merge, scan, validate};
 use crate::{path_policy, CancelFlag, Emitter, Stage, TaskConfig};

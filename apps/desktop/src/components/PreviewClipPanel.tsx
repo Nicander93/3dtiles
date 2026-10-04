@@ -112,7 +112,7 @@ export function PreviewClipPanel({ input, name, frame, onResult, onClose, operat
     <div className="row"><h3>{title}</h3><button className="btn btn-sm" type="button" onClick={onClose}>关闭操作</button></div>
     <p className="muted">{flatten ? '画出区域，拖动竖直手柄调整目标平面，导出新模型。' : '绘制要保留的区域，导出新的 3D Tiles 模型。'}</p>
     <div className="field"><label htmlFor="preview-draw-mode">绘制方式</label><select id="preview-draw-mode" className="input" value={mode} disabled={busy} onChange={(e) => { const next = e.target.value as DrawMode; setMode(next); command('clear'); command('stop'); }}>
-      <option value="rectangle">矩形</option><option value="polygon">凸多边形</option>
+      <option value="rectangle">矩形</option><option value="polygon">多边形</option>
     </select></div>
     <button className="btn" type="button" disabled={busy} onClick={() => { planeCommand('clear'); setPlane(null); setTask(null); setResult(null); setDrawing(null); command('start'); }}>开始绘制</button>
     <p className="field-hint">{mode === 'rectangle' ? '在模型上按住左键拖出矩形。' : '左键点选顶点，右键或点击完成绘制闭合区域。'}完成后可拖动黄色顶点调整。{flatten ? '区域内的全部表面移到目标面，边界补连接侧壁。' : '区域不限高度，不自动封口。'}</p>
