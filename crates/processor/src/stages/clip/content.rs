@@ -378,6 +378,8 @@ fn write_attribute(
 pub struct Counts {
     pub before: u64,
     pub after: u64,
+    pub flattened: u64,
+    pub walls: u64,
 }
 /// Rebuild only geometry accessors. Materials, samplers and image bytes keep their original meaning.
 pub fn crop(
@@ -386,6 +388,7 @@ pub fn crop(
     tile_world: Matrix,
     cancel: &CancelFlag,
     counts: &mut Counts,
+    flatten_height: Option<f64>,
 ) -> Result<Option<Bounds>, String> {
     let original = content.document.clone();
     let source_binary = std::mem::take(&mut content.binary);
@@ -442,6 +445,7 @@ pub fn crop(
         cancel,
         counts,
         visited: &mut visited,
+        flatten_height,
     };
     for node in scene_nodes {
         let b = context.node(index(node, "scene node")?, IDENTITY, 0, content)?;
@@ -462,6 +466,7 @@ struct CropContext<'a> {
     cancel: &'a CancelFlag,
     counts: &'a mut Counts,
     visited: &'a mut HashSet<usize>,
+    flatten_height: Option<f64>,
 }
 impl CropContext<'_> {
     fn node(
@@ -588,6 +593,38 @@ impl CropContext<'_> {
         }
         self.counts.before += indices.len() as u64 / 3;
         let (pos_offset, _) = layout["POSITION"];
+        let mut shading = super::flatten::Shading::default();
+        if self.flatten_height.is_some() {
+            let texture = &self.original["materials"]
+                [p["material"].as_u64().unwrap_or(usize::MAX as u64) as usize]["normalTexture"];
+            let transform = &texture["extensions"]["KHR_texture_transform"];
+            let tex_coord = transform
+                .get("texCoord")
+                .or_else(|| texture.get("texCoord"))
+                .map(|v| v.as_u64().ok_or("invalid normal-map texture coordinate"))
+                .transpose()?
+                .unwrap_or(0);
+            if tex_coord > 1 {
+                return Err("flatten supports normal maps on TEXCOORD_0 or TEXCOORD_1".into());
+            }
+            shading.uv = format!("TEXCOORD_{tex_coord}");
+            let scale = transform
+                .get("scale")
+                .map(array::<2>)
+                .transpose()?
+                .unwrap_or([1., 1.]);
+            let rotation = transform
+                .get("rotation")
+                .map(|v| {
+                    v.as_f64()
+                        .filter(|r| r.is_finite())
+                        .ok_or("invalid texture rotation")
+                })
+                .transpose()?
+                .unwrap_or(0.);
+            let (s, c) = rotation.sin_cos();
+            shading.transform = [c * scale[0], -s * scale[1], s * scale[0], c * scale[1]];
+        }
         let mut vertices = Vec::new();
         let mut bounds = None;
         let mut projected_bounds = None;
@@ -618,8 +655,9 @@ impl CropContext<'_> {
                 ]
             })
             .collect();
-        if (0..self.region.polygon.len())
-            .any(|edge| corners.iter().all(|p| self.region.distance(edge, *p) < 0.))
+        if self.flatten_height.is_none()
+            && (0..self.region.polygon.len())
+                .any(|edge| corners.iter().all(|p| self.region.distance(edge, *p) < 0.))
         {
             return Ok(None);
         }
@@ -655,17 +693,34 @@ impl CropContext<'_> {
                     clip: point(projected, v),
                 });
             }
-            let clipped = if fully_inside {
-                input
+            let triangles = if let Some(height) = self.flatten_height {
+                super::flatten::flatten_triangle(
+                    self.region,
+                    input.try_into().unwrap(),
+                    height,
+                    inverse(projected)?,
+                    pos_offset,
+                    &layout,
+                    &shading,
+                    self.counts,
+                )?
             } else {
-                clip_triangle(self.region, input.try_into().unwrap())
+                let clipped = if fully_inside {
+                    input
+                } else {
+                    clip_triangle(self.region, input.try_into().unwrap())
+                };
+                (1..clipped.len().saturating_sub(1))
+                    .map(|i| {
+                        [
+                            clipped[0].clone(),
+                            clipped[i].clone(),
+                            clipped[i + 1].clone(),
+                        ]
+                    })
+                    .collect()
             };
-            for i in 1..clipped.len().saturating_sub(1) {
-                let mut tri = [
-                    clipped[0].clone(),
-                    clipped[i].clone(),
-                    clipped[i + 1].clone(),
-                ];
+            for mut tri in triangles {
                 let a = point(
                     tile,
                     tri[0].values[pos_offset..pos_offset + 3]
@@ -727,8 +782,14 @@ impl CropContext<'_> {
                     // Bounds use the f32 values that will actually be written to the output.
                     let p = std::array::from_fn(|i| vertex.values[pos_offset + i] as f32 as f64);
                     let q = point(projected, p);
-                    if (0..self.region.polygon.len())
-                        .any(|edge| self.region.distance(edge, q) < -0.02)
+                    if let Some(height) = self.flatten_height {
+                        if (vertex.clip[2] - height).abs() < 1e-6 && (q[2] - height).abs() > 0.02 {
+                            return Err("f32 flatten height exceeds 2 cm tolerance; use localized mesh coordinates".into());
+                        }
+                    }
+                    if self.flatten_height.is_none()
+                        && (0..self.region.polygon.len())
+                            .any(|edge| self.region.distance(edge, q) < -0.02)
                     {
                         return Err("f32 output exceeds 2 cm clip boundary tolerance; use localized mesh coordinates".into());
                     }

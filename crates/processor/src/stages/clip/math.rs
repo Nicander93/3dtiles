@@ -276,6 +276,79 @@ impl Vertex {
         }
     }
 }
+/// Inverse of an affine column-major transform, including non-uniform node scales.
+pub fn inverse(m: Matrix) -> Result<Matrix, String> {
+    let [a, b, c, d, e, f, g, h, i] = [m[0], m[4], m[8], m[1], m[5], m[9], m[2], m[6], m[10]];
+    let det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+    if !det.is_finite() || det.abs() < 1e-15 {
+        return Err("non-invertible flatten transform".into());
+    }
+    let mut out = IDENTITY;
+    let rows = [
+        [e * i - f * h, c * h - b * i, b * f - c * e],
+        [f * g - d * i, a * i - c * g, c * d - a * f],
+        [d * h - e * g, b * g - a * h, a * e - b * d],
+    ];
+    for r in 0..3 {
+        for col in 0..3 {
+            out[col * 4 + r] = rows[r][col] / det;
+        }
+    }
+    for r in 0..3 {
+        out[12 + r] = -(out[r] * m[12] + out[4 + r] * m[13] + out[8 + r] * m[14]);
+    }
+    Ok(out)
+}
+
+pub fn split_polygon(
+    region: &Region,
+    polygon: Vec<Vertex>,
+    edge: usize,
+) -> (Vec<Vertex>, Vec<Vertex>) {
+    let mut inside = Vec::new();
+    let mut outside = Vec::new();
+    if polygon.is_empty() {
+        return (inside, outside);
+    }
+    let mut previous = polygon.last().unwrap();
+    let mut dp = region.distance(edge, previous.clip);
+    for current in &polygon {
+        let dc = region.distance(edge, current.clip);
+        if (dp >= 0.) != (dc >= 0.) {
+            let v = previous.interpolate(current, (dp / (dp - dc)).clamp(0., 1.));
+            inside.push(v.clone());
+            outside.push(v);
+        }
+        if dc >= 0. {
+            inside.push(current.clone());
+        } else {
+            outside.push(current.clone());
+        }
+        previous = current;
+        dp = dc;
+    }
+    (inside, outside)
+}
+
+/// A disjoint convex partition: pieces outside the ROI retain their original positions.
+pub fn partition_triangle(
+    region: &Region,
+    vertices: [Vertex; 3],
+) -> (Vec<Vertex>, Vec<Vec<Vertex>>) {
+    let mut inside = vertices.to_vec();
+    let mut outside = Vec::new();
+    for edge in 0..region.polygon.len() {
+        let (remaining, fragment) = split_polygon(region, inside, edge);
+        if fragment.len() >= 3 {
+            outside.push(fragment);
+        }
+        inside = remaining;
+        if inside.is_empty() {
+            break;
+        }
+    }
+    (inside, outside)
+}
 pub fn clip_triangle(region: &Region, vertices: [Vertex; 3]) -> Vec<Vertex> {
     let mut polygon = vertices.to_vec();
     for edge in 0..region.polygon.len() {
@@ -304,6 +377,35 @@ pub fn clip_triangle(region: &Region, vertices: [Vertex; 3]) -> Vec<Vertex> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn partition_preserves_area_and_affine_inverse_roundtrips() {
+        let r = Region {
+            frame: IDENTITY,
+            polygon: vec![[-1., -1.], [1., -1.], [1., 1.], [-1., 1.]],
+        };
+        let v = |x, y| Vertex {
+            values: vec![x, y, 2.],
+            clip: [x, y, 2.],
+        };
+        let (inside, outside) = partition_triangle(&r, [v(-2., -2.), v(2., -2.), v(2., 2.)]);
+        let area = |p: &[Vertex]| {
+            (0..p.len())
+                .map(|i| {
+                    let a = p[i].clip;
+                    let b = p[(i + 1) % p.len()].clip;
+                    (a[0] * b[1] - b[0] * a[1]) * 0.5
+                })
+                .sum::<f64>()
+        };
+        assert!((area(&inside) + outside.iter().map(|p| area(p)).sum::<f64>() - 8.).abs() < 1e-10);
+        assert!(outside.iter().flatten().all(|v| v.values[2] == 2.));
+        let m = [
+            0., 2., 0., 0., -3., 0., 0., 0., 0., 0., 4., 0., 6378137., 100., 10., 1.,
+        ];
+        let p = [0.3, 1.7, -2.];
+        let q = point(inverse(m).unwrap(), point(m, p));
+        assert!(p.iter().zip(q).all(|(a, b)| (a - b).abs() < 1e-8));
+    }
     #[test]
     fn geographic_region_rejects_bad_polygons_and_large_extents() {
         for v in [

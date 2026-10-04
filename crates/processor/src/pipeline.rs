@@ -35,6 +35,7 @@ pub fn run_task(config: TaskConfig, cancel: CancelFlag) -> RunOutcome {
         "process-tileset" => run_process_tileset(&config, &emitter, &cancel),
         "merge-tilesets" => crate::stages::merge::run(&config, &emitter, &cancel),
         "clip-tileset" => crate::stages::clip::run(&config, &emitter, &cancel),
+        "flatten-tileset" => crate::stages::clip::run(&config, &emitter, &cancel).map_err(|e| e.replace("clip", "flatten")),
         other => Err(format!("Unknown operation: {other}")),
     };
 

@@ -110,6 +110,11 @@ pub fn submit_task(state: State<'_, AppState>, config: SubmitTaskConfig) -> Resu
       &input_path, &options, std::path::Path::new(&config.output.path()), provisional_id,
     )?;
   }
+  if config.operation == "flatten-tileset" {
+    processor::stages::clip::flatten_preflight(
+      &input_path, &options, std::path::Path::new(&config.output.path()), provisional_id,
+    )?;
+  }
   let path_policy_input = if config.operation == "convert-model" {
     let model_file = std::path::Path::new(&input_path);
     if !model_file.is_file() {
