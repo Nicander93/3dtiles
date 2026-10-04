@@ -117,9 +117,9 @@ function textureIsKeep(opts: Record<string, unknown> | undefined): boolean {
 }
 
 export function deriveStages(api: ApiTask): TaskStageInfo[] {
-  if (api.operation === 'merge-tilesets' || api.operation === 'clip-tileset') {
+  if (['merge-tilesets', 'clip-tileset', 'flatten-tileset'].includes(api.operation)) {
     const definitions = [
-      { id: 'scan', label: '检查输入' }, api.operation === 'clip-tileset' ? { id: 'clip', label: '裁剪几何' } : { id: 'merge', label: '合并' },
+      { id: 'scan', label: '检查输入' }, api.operation === 'flatten-tileset' ? { id: 'flatten', label: '压平几何与侧壁' } : api.operation === 'clip-tileset' ? { id: 'clip', label: '裁剪几何' } : { id: 'merge', label: '合并' },
       { id: 'validate', label: '检查成果' }, { id: 'commit', label: '提交成果' },
     ];
     const detail = typeof api.progress === 'object' && api.progress ? api.progress : {};

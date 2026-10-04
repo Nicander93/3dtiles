@@ -43,6 +43,11 @@ assert.equal(drawing.readDrawingMessage({ type: 'geoforge-region', mode: 'polygo
 assert.equal(drawing.readDrawingMessage({ type: 'geoforge-region', mode: 'polygon', points: [], complete: 'yes', active: true }), null);
 assert.equal(drawing.readDrawingMessage({ type: 'geoforge-region', mode: 'polygon', points: drawnTriangle, complete: true, active: 'yes' }), null);
 assert.deepEqual(drawing.readDrawingMessage({ type: 'geoforge-region', mode: 'polygon', points: drawnTriangle, complete: true, active: true }).points, drawnTriangle);
+assert.equal(drawing.readDrawingMessage({ type: 'geoforge-region', mode: 'polygon', points: drawnTriangle, complete: true, active: true, heights: [10] }), null);
+assert.equal(drawing.readFlattenMessage({ type: 'geoforge-flatten-plane', regionKey: 'r', heightMeters: Infinity, initialHeightMeters: 0, hasUndo: false }), null);
+assert.equal(drawing.readFlattenMessage({ type: 'geoforge-flatten-plane', regionKey: 'r', heightMeters: 10001, initialHeightMeters: 0, hasUndo: false }), null);
+assert.equal(drawing.readFlattenMessage({ type: 'geoforge-flatten-plane', regionKey: 'r', heightMeters: '10', initialHeightMeters: 0, hasUndo: false }), null);
+assert.equal(drawing.readFlattenMessage({ type: 'geoforge-flatten-plane', regionKey: 'r', heightMeters: -10, initialHeightMeters: 0, hasUndo: true }).heightMeters, -10);
 const clipForm = { input: 'C:/data/a/tileset.json', output: 'D:/out/crop', name: '裁剪', mode: 'rectangle', bounds: ['-0.001', '-0.001', '0.001', '0.001'], geojson: '' };
 assert.deepEqual(clip.clipTaskRequest(clipForm).options, { clip: { region: { type: 'rectangle', bounds: [-0.001, -0.001, 0.001, 0.001] } } });
 assert.throws(() => clip.clipTaskRequest({ ...clipForm, output: 'C:/data/a/nested' }), /重叠/);

@@ -45,6 +45,7 @@
   <div id="cesiumContainer"></div>
   <script type="module">
     import { installRegionDrawing } from './preview-drawing.mjs';
+    import { installFlattenTool } from './preview-flatten.mjs';
     function q(name) {
       const u = new URL(window.location.href);
       return u.searchParams.get(name);
@@ -108,7 +109,8 @@
     let currentTileset = null;
     let canClip = false;
     const drawing = installRegionDrawing(Cesium, viewer, postParent, () => canClip);
-    window.addEventListener('pagehide', () => drawing.destroy(), { once: true });
+    const flatten = installFlattenTool(Cesium, viewer, () => currentTileset, postParent, () => canClip);
+    window.addEventListener('pagehide', () => { drawing.destroy(); flatten.destroy(); }, { once: true });
     function parseEnu(param) {
       if (!param) return null;
       const parts = String(param).split(',').map((s) => Number(String(s).trim()));
@@ -385,6 +387,7 @@
       const data = ev && ev.data;
       if (!data || typeof data !== 'object') return;
       drawing.command(data);
+      flatten.command(data);
       if (data.type === 'geoforge-fit') {
         void refit();
       }

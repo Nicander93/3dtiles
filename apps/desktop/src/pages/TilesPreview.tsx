@@ -23,7 +23,7 @@ export function TilesPreview() {
   const [diagOpen, setDiagOpen] = useState(false);
   const [processOpen, setProcessOpen] = useState(false);
   const [diagNote, setDiagNote] = useState('');
-  const [operation, setOperation] = useState<'clip' | null>(null);
+  const [operation, setOperation] = useState<'clip' | 'flatten' | null>(null);
   const [canClip, setCanClip] = useState(false);
   const loadGeneration = useRef(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -74,6 +74,7 @@ export function TilesPreview() {
       if (data.type === 'geoforge-preview-ready') {
         setLoadState('ready');
         setCanClip(data.canClip === true);
+        if (data.canClip === true && searchParams.get('operation') === 'flatten') setOperation('flatten');
         setError(null);
         if (data.diag) setDiagNote(String(data.diag));
       } else if (data.type === 'geoforge-preview-error') {
@@ -85,7 +86,7 @@ export function TilesPreview() {
     }
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, []);
+  }, [searchParams]);
 
   async function loadArtifact(id: string) {
     const generation = ++loadGeneration.current;
@@ -211,6 +212,7 @@ export function TilesPreview() {
               <button className="menu__item" type="button" disabled={loadState !== 'ready' || !canClip} onClick={() => { setOperation('clip'); setInfoOpen(false); setProcessOpen(false); }}>
                 范围裁剪并导出
               </button>
+              <button className="menu__item" type="button" disabled={loadState !== 'ready' || !canClip} onClick={() => { setOperation('flatten'); setInfoOpen(false); setProcessOpen(false); }}>区域压平并导出</button>
               <Link className="menu__item" to={processLinks.rebuild} onClick={() => setProcessOpen(false)}>
                 顶层重建
               </Link>
@@ -293,8 +295,8 @@ export function TilesPreview() {
           )}
         </div>
 
-        {operation === 'clip' && loadState === 'ready' && canClip ? <PreviewClipPanel
-          key={`${frameKey}:${tilesetUrl}`} input={inputPath} name={dataName} frame={iframeRef}
+        {operation && loadState === 'ready' && canClip ? <PreviewClipPanel
+          key={`${operation}:${frameKey}:${tilesetUrl}`} input={inputPath} name={dataName} frame={iframeRef} operation={operation} sourceArtifactId={selectedId}
           onClose={() => setOperation(null)}
           onResult={(artifact) => { setArtifacts((list) => [...list.filter((a) => a.id !== artifact.id), artifact]); setSearchParams({ artifact: artifact.id }); }}
         /> : null}

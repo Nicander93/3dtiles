@@ -31,6 +31,7 @@ const statusFilter: Record<StatusFilter, (t: Task) => boolean> = {
 
 function opLabel(op?: string): string {
   if (op === 'clip-tileset') return '范围裁剪';
+  if (op === 'flatten-tileset') return '区域压平';
   if (op === 'merge-tilesets') return '3D Tiles 合并';
   if (op === 'convert-osgb') return 'OSGB 转换';
   if (op === 'convert-model') return '通用模型转换';
@@ -44,6 +45,7 @@ function TaskIcon({ operation }: { operation?: string }) {
   if (operation === 'process-tileset') return <Cube size={18} />;
   if (operation === 'merge-tilesets') return <Stack size={18} />;
   if (operation === 'clip-tileset') return <Scissors size={18} />;
+  if (operation === 'flatten-tileset') return <Scissors size={18} />;
   return <Image size={18} />;
 }
 
@@ -99,6 +101,12 @@ function StatusIcon({ status }: { status: string }) {
 }
 
 function rebuildHref(t: Task): string {
+  if (t.operation === 'flatten-tileset') {
+    const preview = t.options?.preview as { sourceArtifactId?: string } | undefined;
+    const params = new URLSearchParams({ operation: 'flatten' });
+    if (preview?.sourceArtifactId) params.set('artifact', preview.sourceArtifactId);
+    return `/preview/tiles?${params}`;
+  }
   const params = new URLSearchParams();
   if (t.input) params.set('input', t.input);
   if (t.output) params.set('output', cloneOutputPath(t.output));
@@ -338,6 +346,7 @@ export function Processing() {
           <option value="process-tileset">Tiles 处理</option>
           <option value="merge-tilesets">3D Tiles 合并</option>
           <option value="clip-tileset">范围裁剪</option>
+          <option value="flatten-tileset">区域压平</option>
         </select>
       </div>
 
@@ -479,6 +488,7 @@ export function Processing() {
                 <dt>输入</dt>
                 <dd>{selected.input || '—'}</dd>
                 {selected.operation === 'clip-tileset' && <><dt>保留区域</dt><dd><pre>{JSON.stringify((selected.options?.clip as { region?: unknown })?.region, null, 2)}</pre></dd></>}
+                {selected.operation === 'flatten-tileset' && <><dt>压平区域与高度</dt><dd><pre>{JSON.stringify(selected.options?.flatten, null, 2)}</pre></dd><dt>重新设置</dt><dd>重新创建会打开源模型预览，请重新绘制区域并拖动目标平面。</dd></>}
                 {selected.operation === 'merge-tilesets' && (
                   <><dt>其他输入</dt><dd>{((selected.options?.merge as { additionalInputs?: string[] })?.additionalInputs || []).map((path, index) => <div key={index}>{path}</div>)}</dd></>
                 )}

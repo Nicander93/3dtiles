@@ -15,6 +15,15 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Flatten a geographic region to a local horizontal plane and bridge its boundary.
+    FlattenTileset {
+        #[arg(short = 'i', long)] input: PathBuf,
+        #[arg(short = 'o', long)] output: PathBuf,
+        #[arg(long)] region: PathBuf,
+        /// Metres above the ROI centre's WGS84 ellipsoid surface, along its ENU up axis.
+        #[arg(long, allow_hyphen_values = true)] height_meters: f64,
+        #[arg(long)] task_id: Option<String>,
+    },
     /// Export exact geometry inside a small WGS84 rectangle or convex GeoJSON polygon.
     ClipTileset {
         #[arg(short = 'i', long)]
@@ -109,6 +118,18 @@ enum Commands {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
+        Commands::FlattenTileset { input, output, region, height_meters, task_id } => {
+            let region = match std::fs::read(&region).map_err(|e|e.to_string()).and_then(|b|serde_json::from_slice::<serde_json::Value>(&b).map_err(|e|e.to_string())) {
+                Ok(v) => v,
+                Err(e) => { eprintln!("invalid region file: {e}"); return ExitCode::from(EXIT_FAILED as u8); }
+            };
+            let config = TaskConfig {
+                schema_version: Some(1), task_id: task_id.unwrap_or_else(||format!("cli-{}",chrono_stamp())), operation: "flatten-tileset".into(),
+                input: processor::protocol::PathRef { path: input.to_string_lossy().into_owned() }, output: processor::protocol::PathRef { path: output.to_string_lossy().into_owned() },
+                options: json!({"flatten":{"region":region,"heightMeters":height_meters}}),
+            };
+            ExitCode::from(run_task(config,CancelFlag::new()).exit_code as u8)
+        }
         Commands::ClipTileset { input, output, region, task_id } => {
             let region = match std::fs::read(&region).map_err(|e|e.to_string()).and_then(|b|serde_json::from_slice::<serde_json::Value>(&b).map_err(|e|e.to_string())) {
                 Ok(v) => v,

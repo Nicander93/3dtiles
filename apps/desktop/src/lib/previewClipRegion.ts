@@ -45,10 +45,19 @@ function rectangleRing(points: RegionPoint[]): RegionPoint[] {
   return [[west, south], [east, south], [east, north], [west, north]];
 }
 
-export function readDrawingMessage(value: unknown): { mode: DrawMode; points: RegionPoint[]; complete: boolean; active: boolean } | null {
+export function readDrawingMessage(value: unknown): { mode: DrawMode; points: RegionPoint[]; heights?: number[]; complete: boolean; active: boolean } | null {
   if (!value || typeof value !== 'object') return null;
   const data = value as Record<string, unknown>;
   if (data.type !== 'geoforge-region' || !['rectangle', 'polygon'].includes(String(data.mode)) || typeof data.complete !== 'boolean' || typeof data.active !== 'boolean' || !Array.isArray(data.points) || data.points.length > 256) return null;
   if (!data.points.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === 'number' && Number.isFinite(n)))) return null;
-  return { mode: data.mode as DrawMode, points: data.points as RegionPoint[], complete: data.complete, active: data.active };
+  if (data.heights !== undefined && (!Array.isArray(data.heights) || data.heights.length !== data.points.length || !data.heights.every((h) => typeof h === 'number' && Number.isFinite(h)))) return null;
+  return { mode: data.mode as DrawMode, points: data.points as RegionPoint[], heights: data.heights as number[] | undefined, complete: data.complete, active: data.active };
+}
+
+export function readFlattenMessage(value: unknown): { regionKey: string; heightMeters: number; initialHeightMeters: number; hasUndo: boolean } | null {
+  if (!value || typeof value !== 'object') return null;
+  const data = value as Record<string, unknown>;
+  if (data.type !== 'geoforge-flatten-plane' || typeof data.regionKey !== 'string' || typeof data.hasUndo !== 'boolean' ||
+    ![data.heightMeters,data.initialHeightMeters].every((h) => typeof h === 'number' && Number.isFinite(h) && Math.abs(h) <= 10000)) return null;
+  return data as unknown as { regionKey: string; heightMeters: number; initialHeightMeters: number; hasUndo: boolean };
 }

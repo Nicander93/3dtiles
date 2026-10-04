@@ -4,7 +4,7 @@ export function installRegionDrawing(Cesium, viewer, notify, canDraw) {
   let entities = [], drag = -1, anchor = null, savedInputs = null;
   const controller = viewer.scene.screenSpaceCameraController;
   const handler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
-  const send = () => notify({ type: 'geoforge-region', mode, points: points.map((p) => p.slice(0, 2)), complete, active });
+  const send = () => notify({ type: 'geoforge-region', mode, points: points.map((p) => p.slice(0, 2)), heights: points.map((p) => p[2]), complete, active });
   function unlock() {
     if (savedInputs !== null) controller.enableInputs = savedInputs;
     savedInputs = null; drag = -1; anchor = null;

@@ -1,5 +1,6 @@
 //! Exact convex geographic cropping of explicit static triangle tilesets.
 mod content;
+mod flatten;
 mod math;
 
 use super::{commit, merge, scan, validate};
@@ -42,22 +43,44 @@ pub fn preflight(
     Ok(input)
 }
 pub fn run(config: &TaskConfig, emitter: &Emitter, cancel: &CancelFlag) -> Result<PathBuf, String> {
+    let flatten_height = if config.operation == "flatten-tileset" {
+        Some(flatten_options(&config.options)?.1)
+    } else {
+        None
+    };
+    let operation = if flatten_height.is_some() {
+        "flatten"
+    } else {
+        "clip"
+    };
+    let options = if flatten_height.is_some() {
+        json!({"clip":{"region":config.options["flatten"]["region"]}})
+    } else {
+        config.options.clone()
+    };
     emitter.stage(Stage::Scan, "Checking clipping region and input");
     let input = preflight(
         config.input_path(),
-        &config.options,
+        &options,
         Path::new(config.output_path()),
         &config.task_id,
     )?;
     let output = path_policy::normalize_path(Path::new(config.output_path()))?;
-    let region = Region::parse(&config.options["clip"]["region"])?;
+    let region = Region::parse(&options["clip"]["region"])?;
     let temp = commit::prepare_temp(&output, &config.task_id)?;
     let mut guard = commit::TempGuard::new(temp.clone());
     let staged = temp.join("staged");
     fs::create_dir(&staged).map_err(|e| e.to_string())?;
     fs::create_dir(staged.join("content")).map_err(|e| e.to_string())?;
     fs::create_dir(staged.join("resources")).map_err(|e| e.to_string())?;
-    emitter.stage(Stage::Clip, "Clipping triangles across all LODs");
+    emitter.stage(
+        if flatten_height.is_some() {
+            Stage::Flatten
+        } else {
+            Stage::Clip
+        },
+        "Processing triangles across all LODs",
+    );
     let mut context = Context {
         region,
         source_root: input.parent().unwrap().to_path_buf(),
@@ -70,18 +93,24 @@ pub fn run(config: &TaskConfig, emitter: &Emitter, cancel: &CancelFlag) -> Resul
         counts: Counts::default(),
         files: 0,
         removed: 0,
+        flatten_height,
     };
     let (mut source, bounds) = context.tileset(&input, IDENTITY, 0)?;
     if bounds.is_none() {
         return Err("clip removed all geometry; no output committed".into());
     }
-    source["asset"]["generator"] = json!("GeoForge exact geographic clip");
+    if flatten_height.is_some() && context.counts.flattened == 0 {
+        return Err(
+            "flatten region does not intersect editable surface; no output committed".into(),
+        );
+    }
+    source["asset"]["generator"] = json!(format!("GeoForge geographic {operation}"));
     fs::write(
         staged.join("tileset.json"),
         serde_json::to_vec_pretty(&source).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
-    fs::write(staged.join("clip-report.json"),serde_json::to_vec_pretty(&json!({"region":config.options["clip"]["region"],"projection":"WGS84 to local ENU; vertical half-planes","contentsProcessed":context.files,"contentsRemoved":context.removed,"trianglesBefore":context.counts.before,"trianglesAfter":context.counts.after,"capsGenerated":false})).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+    fs::write(staged.join(format!("{operation}-report.json")),serde_json::to_vec_pretty(&json!({"region":options["clip"]["region"],"heightMeters":flatten_height,"projection":"WGS84 to local ENU; vertical half-planes","contentsProcessed":context.files,"contentsRemoved":context.removed,"trianglesBefore":context.counts.before,"trianglesAfter":context.counts.after,"trianglesFlattened":context.counts.flattened,"wallTriangles":context.counts.walls,"capsGenerated":false})).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
     context.check_cancel()?;
     commit::write_checkpoint(&temp, commit::Checkpoint::Validating)?;
     validate::validate_tileset_dir_cancellable(emitter, &staged, Some(cancel))?;
@@ -91,6 +120,33 @@ pub fn run(config: &TaskConfig, emitter: &Emitter, cancel: &CancelFlag) -> Resul
     commit::commit_rename(emitter, &staged, &temp, &output, Some(&mut guard))?;
     commit::cleanup_temp(&temp);
     Ok(output)
+}
+fn flatten_options(options: &Value) -> Result<(Region, f64), String> {
+    let value = options["flatten"]
+        .as_object()
+        .ok_or("missing flatten options")?;
+    if value.len() != 2 || !value.contains_key("region") || !value.contains_key("heightMeters") {
+        return Err("flatten options require only region and heightMeters".into());
+    }
+    let height = value["heightMeters"]
+        .as_f64()
+        .filter(|h| h.is_finite() && h.abs() <= 10_000.)
+        .ok_or("flatten heightMeters must be finite and within ±10000 m")?;
+    Ok((Region::parse(&value["region"])?, height))
+}
+pub fn flatten_preflight(
+    input: &str,
+    options: &Value,
+    output: &Path,
+    task: &str,
+) -> Result<PathBuf, String> {
+    flatten_options(options)?;
+    preflight(
+        input,
+        &json!({"clip":{"region":options["flatten"]["region"]}}),
+        output,
+        task,
+    )
 }
 struct Context<'a> {
     region: Region,
@@ -104,6 +160,7 @@ struct Context<'a> {
     counts: Counts,
     files: u64,
     removed: u64,
+    flatten_height: Option<f64>,
 }
 impl Context<'_> {
     fn check_cancel(&self) -> Result<(), String> {
@@ -237,6 +294,7 @@ impl Context<'_> {
                     world,
                     self.cancel,
                     &mut self.counts,
+                    self.flatten_height,
                 )?;
                 let relative = format!("content/model-{id:06}.{ext}");
                 if b.is_some() {
@@ -245,7 +303,15 @@ impl Context<'_> {
                         .map_err(|e| e.to_string())?;
                 }
                 self.files += 1;
-                self.emitter.progress(Stage::Clip, self.files, 0);
+                self.emitter.progress(
+                    if self.flatten_height.is_some() {
+                        Stage::Flatten
+                    } else {
+                        Stage::Clip
+                    },
+                    self.files,
+                    0,
+                );
                 (relative, b)
             } else {
                 return Err(format!(
