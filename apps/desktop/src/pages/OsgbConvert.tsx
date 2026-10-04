@@ -303,6 +303,11 @@ export function OsgbConvert() {
       setError('当前安装包未包含可用的纹理压缩组件，请选择“保留原纹理”。');
       return;
     }
+    const originValues = [form.originX, form.originY, form.originZ].map((v) => v.trim());
+    if (originValues.some(Boolean) && originValues.some((v) => !v || !Number.isFinite(Number(v)))) {
+      setError('原点 X / Y / Z 必须同时填写，且均为有限数值。');
+      return;
+    }
     setSubmitting(true);
     try {
       const geo: Record<string, unknown> = {
@@ -568,6 +573,7 @@ export function OsgbConvert() {
             </div>
             <div className="field">
               <label>CRS 覆盖</label>
+              <div className="field-hint">当前 OSGB 转换使用 metadata.xml 中的 SRS / SRSOrigin。更改坐标系或原点请先修正该文件；不支持的覆盖会停止转换。</div>
               <input
                 className="input"
                 placeholder="例如 ENU:35.9,117.1 或 EPSG:4547"

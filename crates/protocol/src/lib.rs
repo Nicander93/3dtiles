@@ -172,7 +172,7 @@ impl Default for MissingTexturePolicy {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "mode", rename_all = "camelCase")]
+#[serde(tag = "mode", rename_all = "camelCase", rename_all_fields = "camelCase", deny_unknown_fields)]
 pub enum GeoReferenceOptions {
     Local,
     Anchor {
@@ -582,6 +582,26 @@ impl Stage {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn anchor_rotation_uses_camel_case_and_rejects_misspelled_fields() {
+        let value = json!({"mode":"anchor","longitudeDeg":117,"latitudeDeg":35,"ellipsoidHeightM":0,"headingDeg":40,"pitchDeg":-15,"rollDeg":20});
+        let parsed: GeoReferenceOptions = serde_json::from_value(value.clone()).unwrap();
+        if let GeoReferenceOptions::Anchor {
+            heading_deg,
+            pitch_deg,
+            roll_deg,
+            ..
+        } = parsed
+        {
+            assert_eq!((heading_deg, pitch_deg, roll_deg), (40., -15., 20.));
+        } else {
+            panic!("expected anchor");
+        }
+        let mut invalid = value;
+        invalid["heading_deg"] = json!(40);
+        assert!(serde_json::from_value::<GeoReferenceOptions>(invalid).is_err());
+    }
 
     #[test]
     fn task_config_roundtrip() {

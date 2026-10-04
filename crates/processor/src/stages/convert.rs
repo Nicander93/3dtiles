@@ -186,12 +186,9 @@ pub fn run_model_convert(
     ];
     if let (Some(longitude), Some(latitude), Some(height)) = (longitude, latitude, height) {
         command.extend([
-            "--lon".into(),
-            longitude.to_string(),
-            "--lat".into(),
-            latitude.to_string(),
-            "--alt".into(),
-            height.to_string(),
+            format!("--lon={longitude}"),
+            format!("--lat={latitude}"),
+            format!("--alt={height}"),
         ]);
     }
 

@@ -1,6 +1,7 @@
 pub mod commit;
 pub mod convert;
 pub mod model;
+pub mod model_anchor;
 pub mod merge;
 pub mod clip;
 pub mod rebuild;

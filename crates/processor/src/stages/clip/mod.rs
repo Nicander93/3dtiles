@@ -1,7 +1,7 @@
 //! Exact convex geographic cropping of explicit static triangle tilesets.
 mod content;
 mod flatten;
-mod math;
+pub(crate) mod math;
 mod polygon;
 
 use super::{commit, merge, scan, validate};
