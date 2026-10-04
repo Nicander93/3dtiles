@@ -141,19 +141,25 @@ async function drawRectangle(page,frame) {
   await expect(page.getByText('区域已闭合 · 2 个控制点')).toBeVisible();
 }
 async function dragPlane(page,frame,pixels) {
-  const point=await frame.evaluate(async () => {
+  await frame.evaluate(() => window.__geoforgePreview.viewer.camera.cancelFlight());
+  let point;
+  await expect.poll(async () => {
+    const next=await frame.evaluate(async () => {
     const { viewer }=window.__geoforgePreview;
-    // Camera lookAt updates projection matrices during rendering; pick the visible frame.
+    // Camera projection and residual inertia settle during rendering.
     await new Promise((resolve) => { const remove=viewer.scene.postRender.addEventListener(() => { remove(); resolve(); }); viewer.scene.requestRender(); });
     const pixel=Cesium.SceneTransforms.worldToWindowCoordinates(viewer.scene,window.__geoforgeFlatten.handlePosition);
     return {x:pixel.x,y:pixel.y};
-  });
+    });
+    const stable=point && Math.hypot(next.x-point.x,next.y-point.y)<0.1;
+    point=next;return Boolean(stable);
+  }).toBe(true);
   const box=await page.locator('iframe').boundingBox();
   const x=box.x+point.x+1,y=box.y+point.y+1;
   await page.mouse.move(x,y); await page.mouse.down();
-  expect(await frame.evaluate(() => window.__geoforgePreview.viewer.scene.screenSpaceCameraController.enableInputs)).toBe(false);
+  await expect.poll(() => frame.evaluate(() => window.__geoforgePreview.viewer.scene.screenSpaceCameraController.enableInputs)).toBe(false);
   await page.mouse.move(x,y+pixels,{steps:6}); await page.mouse.up();
-  expect(await frame.evaluate(() => window.__geoforgePreview.viewer.scene.screenSpaceCameraController.enableInputs)).toBe(true);
+  await expect.poll(() => frame.evaluate(() => window.__geoforgePreview.viewer.scene.screenSpaceCameraController.enableInputs)).toBe(true);
   const height=await frame.evaluate(() => window.__geoforgeFlatten.heightMeters);
   await expect(page.getByLabel('目标平面高度')).toContainText(height.toFixed(2)); return height;
 }
