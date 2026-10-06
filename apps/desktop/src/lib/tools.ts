@@ -1,14 +1,14 @@
 import type { Icon } from '@phosphor-icons/react';
-import {
-  Cube,
-  CubeTransparent,
-  Eye,
-  Image,
-  Stack,
-  Scissors,
-} from '@phosphor-icons/react';
+import { Cube, CubeTransparent, Eye, Image, Stack, Scissors } from '@phosphor-icons/react';
 
-export type ToolId = 'osgb-convert' | 'model-convert' | 'tiles-preview' | 'tiles-rebuild' | 'tiles-texture' | 'tiles-merge' | 'tiles-clip';
+export type ToolId =
+  | 'osgb-convert'
+  | 'model-convert'
+  | 'tiles-preview'
+  | 'tiles-rebuild'
+  | 'tiles-texture'
+  | 'tiles-merge'
+  | 'tiles-clip';
 
 export type ToolDef = {
   id: ToolId;
@@ -27,7 +27,7 @@ export type ToolGroup = {
 export const toolGroups: ToolGroup[] = [
   {
     id: 'oblique',
-    title: '倾斜摄影',
+    title: '转换',
     tools: [
       {
         id: 'osgb-convert',
@@ -49,12 +49,24 @@ export const toolGroups: ToolGroup[] = [
     id: 'tiles',
     title: '3D Tiles',
     tools: [
-      { id: 'tiles-merge', title: '3D Tiles 合并', desc: '将多份 Tileset 合并为统一成果', to: '/tiles/merge', icon: Stack },
-      { id: 'tiles-clip', title: '范围裁剪', desc: '精确保留指定地理区域内的模型', to: '/tiles/clip', icon: Scissors },
+      {
+        id: 'tiles-merge',
+        title: '3D Tiles 合并',
+        desc: '将多份 Tileset 合并为统一成果',
+        to: '/tiles/merge',
+        icon: Stack,
+      },
+      {
+        id: 'tiles-clip',
+        title: '范围裁剪',
+        desc: '精确保留指定地理区域内的模型',
+        to: '/tiles/clip',
+        icon: Scissors,
+      },
       {
         id: 'tiles-preview',
-        title: '预览',
-        desc: '浏览和检查 3D Tiles 数据',
+        title: '预览与编辑',
+        desc: '浏览模型，绘制区域并裁剪或压平',
         to: '/preview/tiles',
         icon: Eye,
       },
@@ -83,9 +95,7 @@ export function filterToolGroups(query: string): ToolGroup[] {
     .map((g) => ({
       ...g,
       tools: g.tools.filter(
-        (t) =>
-          t.title.toLowerCase().includes(q) ||
-          t.desc.toLowerCase().includes(q),
+        (t) => t.title.toLowerCase().includes(q) || t.desc.toLowerCase().includes(q),
       ),
     }))
     .filter((g) => g.tools.length > 0);
