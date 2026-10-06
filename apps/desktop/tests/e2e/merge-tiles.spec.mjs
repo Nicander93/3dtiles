@@ -66,9 +66,11 @@ test('workspace entry submits a real merge and shows completed stages and reusab
   await page.goto('/');
   await page.getByRole('link', { name: /3D Tiles 合并/ }).click();
   await fillInputs(page);
+  await page.getByRole('button', { name: '高级设置', exact: true }).click();
   await page.getByLabel('任务名', { exact: true }).fill('合并验收');
+  await page.getByRole('button', { name: '完成', exact: true }).click();
   await page.getByRole('button', { name: '开始合并' }).click();
-  await expect(page.getByText('合并任务已创建。')).toBeVisible();
+  await expect(page).toHaveURL(/\/processing\?task=e2e-merge-1$/);
   expect(submissions[0].operation).toBe('merge-tilesets');
   expect(submissions[0].options.merge.additionalInputs).toEqual([inputs[1]]);
   const output = join(root, 'merged');
@@ -76,7 +78,6 @@ test('workspace entry submits a real merge and shows completed stages and reusab
   expect(result.root.children).toHaveLength(2);
   expect(result.root.children[0].boundingVolume.box[0]).toBe(100);
   expect(await readFile(join(output, 'sources/source-001/tileset.json'), 'utf8')).toBe(await readFile(join(inputs[0], 'tileset.json'), 'utf8'));
-  await page.getByRole('link', { name: '查看任务', exact: true }).click();
   await expect(page.getByRole('heading', { name: '合并验收' })).toBeVisible();
   await expect(page.getByText('检查输入', { exact: true })).toBeVisible();
   await expect(page.getByText('检查成果', { exact: true })).toBeVisible();
