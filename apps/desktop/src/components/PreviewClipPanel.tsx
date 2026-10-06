@@ -109,7 +109,7 @@ export function PreviewClipPanel({ input, name, frame, onResult, onClose, operat
     finally { setSubmitting(false); }
   }
   return <aside className="info-panel preview-operation-panel" aria-label="模型操作">
-    <div className="row"><h3>{title}</h3><button className="btn btn-sm" type="button" onClick={onClose}>关闭操作</button></div>
+    <div className="inspector-head"><h2>{title}</h2><button className="btn btn-ghost btn-sm" type="button" onClick={onClose}>关闭操作</button></div>
     <p className="muted">{flatten ? '画出区域，拖动竖直手柄调整目标平面，导出新模型。' : '绘制要保留的区域，导出新的 3D Tiles 模型。'}</p>
     <div className="field"><label htmlFor="preview-draw-mode">绘制方式</label><select id="preview-draw-mode" className="input" value={mode} disabled={busy} onChange={(e) => { const next = e.target.value as DrawMode; setMode(next); command('clear'); command('stop'); }}>
       <option value="rectangle">矩形</option><option value="polygon">多边形</option>

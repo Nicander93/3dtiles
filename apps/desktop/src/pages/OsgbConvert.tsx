@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, friendlyError } from '../api/desktop';
 import type { CapabilitiesResponse, OsgbScanResult, TextureMode } from '../api/types';
-import { AdvancedBlock } from '../components/AdvancedBlock';
+import { Drawer } from '../components/Drawer';
+import { PageHeader } from '../components/PageHeader';
 import { Alert } from '../components/Alert';
 import { FormSection } from '../components/FormSection';
 import { PathField } from '../components/PathField';
@@ -91,15 +92,13 @@ function scanSrs(scan: OsgbScanResult | null): string | null {
 function scanOriginText(scan: OsgbScanResult | null): string | null {
   if (!scan) return null;
   return (
-    scan.geo?.effectiveOrigin?.text ||
-    scan.summary?.srsOrigin ||
-    scan.metadata?.srsOrigin ||
-    null
+    scan.geo?.effectiveOrigin?.text || scan.summary?.srsOrigin || scan.metadata?.srsOrigin || null
   );
 }
 
 export function OsgbConvert() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [form, setForm] = useState<FormState>(() => loadConfig());
   const [outputTouched, setOutputTouched] = useState(() => {
     try {
@@ -118,29 +117,40 @@ export function OsgbConvert() {
   const [error, setError] = useState<string | null>(null);
   const [caps, setCaps] = useState<CapabilitiesResponse | null>(null);
   const [defaultOutputRoot, setDefaultOutputRoot] = useState('');
-  const [executionSettings, setExecutionSettings] = useState<{ resourceMode: 'auto' | 'custom', cpuWorkers?: number, memoryBudgetMiB?: number, ioWorkers?: number } | null>(null);
+  const [executionSettings, setExecutionSettings] = useState<{
+    resourceMode: 'auto' | 'custom';
+    cpuWorkers?: number;
+    memoryBudgetMiB?: number;
+    ioWorkers?: number;
+  } | null>(null);
   const scanSeq = useRef(0);
   const debouncedInput = useDebouncedValue(form.input, 500);
 
   useEffect(() => {
-    void api.capabilities().then(setCaps).catch(() => setCaps(null));
-    void api.getSettings().then((s) => {
-      setDefaultOutputRoot(s.defaultOutputRoot || '');
-      setExecutionSettings(s.execution || null);
-      if (s.defaultConvertThreads !== undefined) {
-        setForm((f) => ({ ...f, convertThreads: s.defaultConvertThreads ?? 1 }));
-      }
-      if (s.defaultTextureCompress !== undefined) {
-        setForm((f) => {
-          if (s.defaultTextureCompress) {
-            const ktx2Available = ktx2Etc1sEnabled(caps, false);
-            return { ...f, textureMode: ktx2Available ? 'ktx2-etc1s' : 'keep' };
-          } else {
-            return { ...f, textureMode: 'keep' };
-          }
-        });
-      }
-    }).catch(() => {});
+    void api
+      .capabilities()
+      .then(setCaps)
+      .catch(() => setCaps(null));
+    void api
+      .getSettings()
+      .then((s) => {
+        setDefaultOutputRoot(s.defaultOutputRoot || '');
+        setExecutionSettings(s.execution || null);
+        if (s.defaultConvertThreads !== undefined) {
+          setForm((f) => ({ ...f, convertThreads: s.defaultConvertThreads ?? 1 }));
+        }
+        if (s.defaultTextureCompress !== undefined) {
+          setForm((f) => {
+            if (s.defaultTextureCompress) {
+              const ktx2Available = ktx2Etc1sEnabled(caps, false);
+              return { ...f, textureMode: ktx2Available ? 'ktx2-etc1s' : 'keep' };
+            } else {
+              return { ...f, textureMode: 'keep' };
+            }
+          });
+        }
+      })
+      .catch(() => {});
   }, [caps]);
 
   useEffect(() => {
@@ -316,7 +326,7 @@ export function OsgbConvert() {
         geo.origin = `${form.originX.trim()},${form.originY.trim()},${form.originZ.trim()}`;
       }
       const preset = rebuildQualityOptions(form.quality, ktx2Etc1sEnabled(caps));
-      
+
       const executionOptions: Record<string, unknown> = {};
       if (executionSettings?.resourceMode === 'custom') {
         if (executionSettings.cpuWorkers !== undefined) {
@@ -329,7 +339,7 @@ export function OsgbConvert() {
           executionOptions.ioWorkers = executionSettings.ioWorkers;
         }
       }
-      
+
       const res = await api.createTask({
         operation: 'convert-osgb',
         input: { path: form.input.trim() },
@@ -357,8 +367,7 @@ export function OsgbConvert() {
       setMessage(
         id ? (
           <>
-            任务已创建{' '}
-            <Link to={`/processing?task=${encodeURIComponent(id)}`}>查看任务</Link>
+            任务已创建 <Link to={`/processing?task=${encodeURIComponent(id)}`}>查看任务</Link>
           </>
         ) : (
           '任务已创建'
@@ -368,8 +377,13 @@ export function OsgbConvert() {
       // input auto-suggest effect immediately replace it with the old `_tiles`
       // path after the successful submission.
       setOutputTouched(true);
-      const nextOut = suggestOutputPath(form.input, defaultOutputRoot, `_tiles_${Date.now().toString(36)}`);
+      const nextOut = suggestOutputPath(
+        form.input,
+        defaultOutputRoot,
+        `_tiles_${Date.now().toString(36)}`,
+      );
       if (nextOut) setForm((f) => ({ ...f, output: nextOut }));
+      if (id) navigate(`/processing?task=${encodeURIComponent(id)}`);
     } catch (e) {
       setError(friendlyError(e));
     } finally {
@@ -392,16 +406,15 @@ export function OsgbConvert() {
 
   return (
     <div className="page">
-      <div className="page-header">
-        <div>
-          <div className="page-crumb">
-            <Link to="/">← 返回工具</Link>
-            <span>/</span>
-            <span>OSGB 转换</span>
-          </div>
-          <h1>OSGB 转换</h1>
-        </div>
-      </div>
+      <PageHeader
+        title="OSGB 转换"
+        description="转换为 3D Tiles，保留源数据。"
+        actions={
+          <button className="btn" type="button" onClick={() => setAdvancedOpen(true)}>
+            高级设置
+          </button>
+        }
+      />
 
       <div className="page-form">
         {error ? (
@@ -417,30 +430,26 @@ export function OsgbConvert() {
         {convertHint.via === 'docker' ? (
           <div style={{ marginBottom: 12 }}>
             <Alert kind="warn">
-              {convertHint.message}{' '}
-              <Link to="/settings">打开设置</Link>
+              {convertHint.message} <Link to="/settings">打开设置</Link>
             </Alert>
           </div>
         ) : null}
         {convertHint.via === 'none' ? (
           <div style={{ marginBottom: 12 }}>
             <Alert kind="error">
-              {convertHint.message}{' '}
-              <Link to="/settings">打开设置</Link>
+              {convertHint.message} <Link to="/settings">打开设置</Link>
             </Alert>
           </div>
         ) : null}
 
-        <FormSection title="输入">
+        <FormSection title="数据" description="选择要处理的源数据。">
           <PathField
             label="数据目录"
             value={form.input}
             placeholder="含 Data/ 与 metadata.xml"
             onChange={(v) => update('input', v)}
             onBlur={() => void runScan(form.input)}
-            onPick={
-              isTauri() ? () => void pickInputDirectory() : undefined
-            }
+            onPick={isTauri() ? () => void pickInputDirectory() : undefined}
             feedback={inputFeedback}
           />
           {detailsOpen && scan ? (
@@ -457,22 +466,25 @@ export function OsgbConvert() {
               </dl>
               {!scanSrs(scan) && !form.crsOverride.trim() ? (
                 <div className="field-hint" style={{ marginTop: 8, color: 'var(--warning)' }}>
-                  缺少坐标信息，请补充坐标系。可继续本地转换；若需要地理定位，请在高级设置中填写 CRS。
+                  缺少坐标信息，请补充坐标系。可继续本地转换；若需要地理定位，请在高级设置中填写
+                  CRS。
                 </div>
               ) : null}
             </div>
           ) : null}
         </FormSection>
 
-        <FormSection title="处理选项">
+        <FormSection title="处理" description="常用参数" columns={4}>
           <div className="field">
+            <label>顶层重建</label>
             <Switch checked={form.rebuildTop} onChange={(v) => update('rebuildTop', v)}>
-              顶层重建
+              {form.rebuildTop ? '开启' : '关闭'}
             </Switch>
           </div>
           <div className="field">
             <label>纹理处理</label>
             <select
+              aria-label="纹理处理"
               className="select"
               value={form.textureMode}
               onChange={(e) => update('textureMode', e.target.value as TextureMode)}
@@ -497,128 +509,46 @@ export function OsgbConvert() {
             </div>
           </div>
 
-          <AdvancedBlock
-            open={advancedOpen}
-            onToggle={setAdvancedOpen}
-            title="高级设置"
-          >
-            <div className="field">
-              <label>重建质量</label>
-              <select
-                className="select"
-                disabled={!form.rebuildTop}
-                value={form.quality}
-                onChange={(e) => {
-                  const quality = e.target.value as RebuildQuality;
-                  const preset = rebuildQualityOptions(quality, ktx2Etc1sEnabled(caps));
-                  setForm((f) => ({
-                    ...f,
-                    quality,
-                    rebuildLevels: preset.levels,
-                  }));
-                }}
-              >
-                <option value="quality">质量优先</option>
-                <option value="balanced">均衡</option>
-                <option value="speed">性能优先</option>
-              </select>
-            </div>
-            <div className="field">
-              <label>重建层数</label>
-              <select
-                className="select"
-                disabled={!form.rebuildTop}
-                value={form.rebuildLevels}
-                onChange={(e) => update('rebuildLevels', Number(e.target.value))}
-              >
-                <option value={0}>自动到根</option>
-                <option value={1}>1</option>
-                <option value={2}>2</option>
-              </select>
-              <div className="field-hint">
-                {form.rebuildTop ? rebuildLevelsLabel(form.rebuildLevels) : '未启用顶层重建'}
-              </div>
-            </div>
-            <div className="field">
-              <label>转换并发数</label>
-              <select
-                className="select"
-                value={form.convertThreads}
-                onChange={(e) => update('convertThreads', Number(e.target.value))}
-              >
-                <option value={1}>1（推荐 M1 试用版）</option>
-                <option value={2}>2</option>
-                <option value={4}>4</option>
-                <option value={0}>自动（CPU 核心数一半）</option>
-              </select>
-              <div className="field-hint">
-                M1 试用版建议使用 1 worker 以确保稳定性
-              </div>
-            </div>
-            <div className="field">
-              <Switch
-                checked={form.geographicExport}
-                onChange={(v) => {
-                  update('geographicExport', v);
-                  if (v && !effectiveCrs) setAdvancedOpen(true);
-                }}
-              >
-                地理导出（要求坐标系）
-              </Switch>
-            </div>
-            <div className="field">
-              <label>CRS 覆盖</label>
-              <input
-                className="input"
-                placeholder="例如 ENU:35.9,117.1 或 EPSG:4547"
-                value={form.crsOverride}
-                onChange={(e) => update('crsOverride', e.target.value)}
-              />
-              {!effectiveCrs ? (
-                <div className="field-error">缺少坐标信息，请补充坐标系</div>
-              ) : null}
-            </div>
-            <div className="field">
-              <label>原点覆盖 X / Y / Z</label>
-              <div className="row">
-                <input
-                  className="input"
-                  placeholder="X"
-                  value={form.originX}
-                  onChange={(e) => update('originX', e.target.value)}
-                />
-                <input
-                  className="input"
-                  placeholder="Y"
-                  value={form.originY}
-                  onChange={(e) => update('originY', e.target.value)}
-                />
-                <input
-                  className="input"
-                  placeholder="Z"
-                  value={form.originZ}
-                  onChange={(e) => update('originZ', e.target.value)}
-                />
-              </div>
-            </div>
-            <details>
-              <summary className="muted" style={{ cursor: 'pointer', fontSize: 13 }}>
-                任务信息
-              </summary>
-              <div className="field" style={{ marginTop: 8 }}>
-                <label>任务名</label>
-                <input
-                  className="input"
-                  placeholder="可选，自动命名"
-                  value={form.name}
-                  onChange={(e) => update('name', e.target.value)}
-                />
-              </div>
-            </details>
-          </AdvancedBlock>
+          <div className="field">
+            <label>重建质量</label>
+            <select
+              aria-label="重建质量"
+              className="select"
+              disabled={!form.rebuildTop}
+              value={form.quality}
+              onChange={(e) => {
+                const quality = e.target.value as RebuildQuality;
+                const preset = rebuildQualityOptions(quality, ktx2Etc1sEnabled(caps));
+                setForm((f) => ({
+                  ...f,
+                  quality,
+                  rebuildLevels: preset.levels,
+                }));
+              }}
+            >
+              <option value="quality">质量优先</option>
+              <option value="balanced">均衡</option>
+              <option value="speed">性能优先</option>
+            </select>
+          </div>
+          <div className="field">
+            <label>转换并发数</label>
+            <select
+              aria-label="转换并发数"
+              className="select"
+              value={form.convertThreads}
+              onChange={(e) => update('convertThreads', Number(e.target.value))}
+            >
+              <option value={1}>1（推荐 M1 试用版）</option>
+              <option value={2}>2</option>
+              <option value={4}>4</option>
+              <option value={0}>自动（CPU 核心数一半）</option>
+            </select>
+            <div className="field-hint">M1 试用版建议使用 1 worker 以确保稳定性</div>
+          </div>
         </FormSection>
 
-        <FormSection title="输出">
+        <FormSection title="输出" description="新建独立成果目录。">
           <PathField
             label="成果目录（选择父目录后自动生成）"
             value={form.output}
@@ -626,11 +556,93 @@ export function OsgbConvert() {
               setOutputTouched(true);
               update('output', v);
             }}
-            onPick={
-              isTauri() ? () => void pickOutputParent() : undefined
-            }
+            onPick={isTauri() ? () => void pickOutputParent() : undefined}
           />
         </FormSection>
+
+        <Drawer title="高级设置" open={advancedOpen} onClose={() => setAdvancedOpen(false)}>
+          <div className="field">
+            <label>重建层数</label>
+            <select
+              aria-label="重建层数"
+              className="select"
+              disabled={!form.rebuildTop}
+              value={form.rebuildLevels}
+              onChange={(e) => update('rebuildLevels', Number(e.target.value))}
+            >
+              <option value={0}>自动到根</option>
+              <option value={1}>1</option>
+              <option value={2}>2</option>
+            </select>
+            <div className="field-hint">
+              {form.rebuildTop ? rebuildLevelsLabel(form.rebuildLevels) : '未启用顶层重建'}
+            </div>
+          </div>
+
+          <div className="field">
+            <Switch
+              checked={form.geographicExport}
+              onChange={(v) => {
+                update('geographicExport', v);
+                if (v && !effectiveCrs) setAdvancedOpen(true);
+              }}
+            >
+              地理导出（要求坐标系）
+            </Switch>
+          </div>
+          <div className="field">
+            <label>CRS 覆盖</label>
+            <input
+              aria-label="CRS 覆盖"
+              className="input"
+              placeholder="例如 ENU:35.9,117.1 或 EPSG:4547"
+              value={form.crsOverride}
+              onChange={(e) => update('crsOverride', e.target.value)}
+            />
+            {!effectiveCrs ? <div className="field-error">缺少坐标信息，请补充坐标系</div> : null}
+          </div>
+          <div className="field">
+            <label>原点覆盖 X / Y / Z</label>
+            <div className="row">
+              <input
+                aria-label="原点覆盖 X"
+                className="input"
+                placeholder="X"
+                value={form.originX}
+                onChange={(e) => update('originX', e.target.value)}
+              />
+              <input
+                aria-label="原点覆盖 Y"
+                className="input"
+                placeholder="Y"
+                value={form.originY}
+                onChange={(e) => update('originY', e.target.value)}
+              />
+              <input
+                aria-label="原点覆盖 Z"
+                className="input"
+                placeholder="Z"
+                value={form.originZ}
+                onChange={(e) => update('originZ', e.target.value)}
+              />
+            </div>
+          </div>
+          <details>
+            <summary className="muted" style={{ cursor: 'pointer', fontSize: 13 }}>
+              任务信息
+            </summary>
+            <div className="field" style={{ marginTop: 8 }}>
+              <label>任务名</label>
+              <input
+                aria-label="任务名"
+                className="input"
+                placeholder="可选，自动命名"
+                value={form.name}
+                onChange={(e) => update('name', e.target.value)}
+              />
+            </div>
+          </details>
+        </Drawer>
 
         <SubmitBar
           onReset={handleReset}

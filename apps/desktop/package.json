@@ -21,7 +21,8 @@
     "pretauri:build": "npm run prepare:sidecars",
     "tauri:build": "tauri build",
     "pretauri:check": "npm run prepare:sidecars",
-    "tauri:check": "tauri build --debug --no-bundle"
+    "tauri:check": "tauri build --debug --no-bundle",
+    "test:ui": "playwright test --config playwright.ui.config.mjs"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
