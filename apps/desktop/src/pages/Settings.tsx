@@ -1,18 +1,24 @@
-import { useEffect, useState } from "react";
-import { api, friendlyError, isTauri, type DesktopSettings, type ResourceMode } from "../api/desktop";
-import { Alert } from "../components/Alert";
-import { FormSection } from "../components/FormSection";
-import { PathField } from "../components/PathField";
-import { Switch } from "../components/Switch";
-import { selectOutputDirectory } from "../lib/tauri";
+import { useEffect, useState } from 'react';
+import {
+  api,
+  friendlyError,
+  isTauri,
+  type DesktopSettings,
+  type ResourceMode,
+} from '../api/desktop';
+import { Alert } from '../components/Alert';
+import { FormSection } from '../components/FormSection';
+import { PathField } from '../components/PathField';
+import { Switch } from '../components/Switch';
+import { selectOutputDirectory } from '../lib/tauri';
 
 const defaults: DesktopSettings = {
-  defaultOutputRoot: "",
+  defaultOutputRoot: '',
   defaultRebuildTop: true,
   defaultRebuildLevels: 0,
   defaultTextureCompress: false,
   defaultConvertThreads: 1,
-  pythonServerUrl: "http://127.0.0.1:8787",
+  pythonServerUrl: 'http://127.0.0.1:8787',
   resourceServerPort: 0,
   execution: {
     resourceMode: 'auto',
@@ -38,7 +44,9 @@ export function Settings() {
       }
       try {
         const h = await api.health();
-        setHealth(`状态：${h.status || (h.ok ? "ok" : "unknown")}${h.version ? ` · 版本 ${h.version}` : ""}`);
+        setHealth(
+          `状态：${h.status || (h.ok ? 'ok' : 'unknown')}${h.version ? ` · 版本 ${h.version}` : ''}`,
+        );
         setHealthError(null);
       } catch (e) {
         setHealth(null);
@@ -47,11 +55,11 @@ export function Settings() {
       try {
         const caps = await api.capabilities();
         const parts: string[] = [];
-        if (caps.convert?.exists) parts.push("本机转换器可用");
-        else if (caps.convert?.docker) parts.push("Docker 转换可用");
-        else parts.push("转换器不可用");
-        if (caps.postprocessBasisu?.available) parts.push("basisu 可用");
-        setCapsText(parts.join(" · "));
+        if (caps.convert?.exists) parts.push('本机转换器可用');
+        else if (caps.convert?.docker) parts.push('Docker 转换可用');
+        else parts.push('转换器不可用');
+        if (caps.postprocessBasisu?.available) parts.push('basisu 可用');
+        setCapsText(parts.join(' · '));
       } catch {
         setCapsText(null);
       }
@@ -84,6 +92,7 @@ export function Settings() {
       <div className="page-header">
         <div>
           <h1>设置</h1>
+          <p>任务默认参数与运行资源。</p>
         </div>
       </div>
 
@@ -94,7 +103,7 @@ export function Settings() {
           </div>
         ) : null}
 
-        <FormSection title="默认参数">
+        <FormSection title="默认参数" columns={2}>
           <PathField
             label="默认输出根目录"
             value={form.defaultOutputRoot}
@@ -167,8 +176,8 @@ export function Settings() {
           </div>
         </FormSection>
 
-        <FormSection title="资源配置">
-          <div className="field">
+        <FormSection title="资源配置" columns={2}>
+          <div className="field span-all">
             <label>资源模式</label>
             <select
               className="select"
@@ -263,7 +272,7 @@ export function Settings() {
               </div>
             </>
           )}
-          <div className="actions">
+          <div className="actions span-all">
             <button type="button" className="btn btn-primary" onClick={() => void save()}>
               保存
             </button>
@@ -303,7 +312,7 @@ export function Settings() {
                 <div className="field-hint">仅在本机转换器不可用时作为后备</div>
               </div>
             ) : null}
-            <div className="actions">
+            <div className="actions span-all">
               <button type="button" className="btn" onClick={() => void save()}>
                 保存诊断项
               </button>

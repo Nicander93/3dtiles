@@ -59,15 +59,15 @@ function fmtTime(v?: string | number) {
 function statusLine(t: Task): { text: string; pct: number | null } {
   const pct = realProgressPercent(t.progress, t.status);
   const prog = typeof t.progress === 'object' ? (t.progress as TaskProgressDetail) : undefined;
-  
+
   if (t.status === 'running' || t.status === 'cancelling') {
     const stage = t.stage ? String(t.stage) : '处理中';
     let text = stage;
-    
+
     if (prog?.completed !== undefined) {
       const completed = prog.completed;
       const total = prog.total;
-      
+
       if (total !== undefined && total > 0) {
         text = `${stage} · ${completed}/${total}`;
       } else {
@@ -76,7 +76,7 @@ function statusLine(t: Task): { text: string; pct: number | null } {
     } else if (pct != null) {
       text = `${stage} · ${pct}%`;
     }
-    
+
     return { text, pct };
   }
   if (t.status === 'queued') return { text: '排队中', pct: null };
@@ -93,7 +93,8 @@ function statusLine(t: Task): { text: string; pct: number | null } {
 function StatusIcon({ status }: { status: string }) {
   if (status === 'running' || status === 'cancelling') return <Clock size={16} />;
   if (status === 'queued') return <Clock size={16} />;
-  if (status === 'completed' || status === 'succeeded') return <CheckCircle size={16} color="var(--success)" />;
+  if (status === 'completed' || status === 'succeeded')
+    return <CheckCircle size={16} color="var(--success)" />;
   if (status === 'failed' || status === 'cancelled' || status === 'interrupted') {
     return <XCircle size={16} color="var(--danger)" />;
   }
@@ -145,7 +146,8 @@ function failureSuggestion(code: string | null): string | null {
   if (!code) return null;
   if (code === 'PATH_OUTPUT_EXISTS') return '请更换一个尚不存在的成果目录。';
   if (code === 'PATH_OUTPUT_NOT_WRITABLE') return '请检查输出目录权限，或选择可写磁盘。';
-  if (code === 'CONVERTER_EXIT_NONZERO') return '查看 stderr 诊断文件，确认输入数据和 converter 依赖。';
+  if (code === 'CONVERTER_EXIT_NONZERO')
+    return '查看 stderr 诊断文件，确认输入数据和 converter 依赖。';
   if (code === 'TASK_CANCELLED') return '任务已取消；原始输入和既有成果应保持不变。';
   return '请查看完整日志和诊断文件，再决定是否重试。';
 }
@@ -185,9 +187,7 @@ export function Processing() {
     return list;
   }, [tasks, tab, typeFilter, query]);
 
-  const selected = selectedId
-    ? tasks.find((t) => t.id === selectedId) || null
-    : null;
+  const selected = selectedId ? tasks.find((t) => t.id === selectedId) || null : null;
   const selectedErrorCode = selected ? progressText(selected, 'errorCode') : null;
   const selectedFailedStage = selected ? progressText(selected, 'failedStage') : null;
   const selectedSuggestion = failureSuggestion(selectedErrorCode);
@@ -288,6 +288,7 @@ export function Processing() {
       <div className="page-header full-width">
         <div>
           <h1>任务</h1>
+          <p>查看进度、取消任务或重新处理。</p>
         </div>
         <div className="search-wrap">
           <input
@@ -326,6 +327,7 @@ export function Processing() {
             <button
               key={id}
               type="button"
+              aria-pressed={tab === id}
               className={`tab${tab === id ? ' active' : ''}`}
               onClick={() => setTab(id)}
             >
@@ -336,6 +338,7 @@ export function Processing() {
         <span className="filter-row__label">类型</span>
         <select
           className="select"
+          aria-label="任务类型"
           style={{ width: 160 }}
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value)}
@@ -396,7 +399,17 @@ export function Processing() {
                             <span className="task-name__icon" aria-hidden>
                               <TaskIcon operation={t.operation} />
                             </span>
-                            {t.name || t.operation || t.id}
+                            <button
+                              type="button"
+                              title={t.name || t.id}
+                              aria-expanded={selected?.id === t.id}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                selectTask(t.id);
+                              }}
+                            >
+                              {t.name || t.operation || t.id}
+                            </button>
                           </div>
                         </td>
                         <td className="muted">{opLabel(t.operation)}</td>
@@ -435,7 +448,11 @@ export function Processing() {
                   <StatusBadge status={selected.status as TaskStatus} />
                 </div>
               </div>
-              <button className="btn btn-ghost btn-sm" type="button" onClick={() => selectTask(null)}>
+              <button
+                className="btn btn-ghost btn-sm"
+                type="button"
+                onClick={() => selectTask(null)}
+              >
                 关闭
               </button>
             </div>
@@ -444,7 +461,10 @@ export function Processing() {
             <StageStepper stages={selected.stages} orientation="horizontal" />
 
             {isActiveStatus(selected.status) && typeof selected.progress === 'object' && (
-              <div className="summary-box" style={{ marginTop: 16, marginBottom: 16, background: 'var(--surface-hover)' }}>
+              <div
+                className="summary-box"
+                style={{ marginTop: 16, marginBottom: 16, background: 'var(--surface-hover)' }}
+              >
                 <dl>
                   {(selected.progress as TaskProgressDetail).completed !== undefined && (
                     <>
@@ -487,10 +507,42 @@ export function Processing() {
                 <dd>{selected.stage || '—'}</dd>
                 <dt>输入</dt>
                 <dd>{selected.input || '—'}</dd>
-                {selected.operation === 'clip-tileset' && <><dt>保留区域</dt><dd><pre>{JSON.stringify((selected.options?.clip as { region?: unknown })?.region, null, 2)}</pre></dd></>}
-                {selected.operation === 'flatten-tileset' && <><dt>压平区域与高度</dt><dd><pre>{JSON.stringify(selected.options?.flatten, null, 2)}</pre></dd><dt>重新设置</dt><dd>重新创建会打开源模型预览，请重新绘制区域并拖动目标平面。</dd></>}
+                {selected.operation === 'clip-tileset' && (
+                  <>
+                    <dt>保留区域</dt>
+                    <dd>
+                      <pre>
+                        {JSON.stringify(
+                          (selected.options?.clip as { region?: unknown })?.region,
+                          null,
+                          2,
+                        )}
+                      </pre>
+                    </dd>
+                  </>
+                )}
+                {selected.operation === 'flatten-tileset' && (
+                  <>
+                    <dt>压平区域与高度</dt>
+                    <dd>
+                      <pre>{JSON.stringify(selected.options?.flatten, null, 2)}</pre>
+                    </dd>
+                    <dt>重新设置</dt>
+                    <dd>重新创建会打开源模型预览，请重新绘制区域并拖动目标平面。</dd>
+                  </>
+                )}
                 {selected.operation === 'merge-tilesets' && (
-                  <><dt>其他输入</dt><dd>{((selected.options?.merge as { additionalInputs?: string[] })?.additionalInputs || []).map((path, index) => <div key={index}>{path}</div>)}</dd></>
+                  <>
+                    <dt>其他输入</dt>
+                    <dd>
+                      {(
+                        (selected.options?.merge as { additionalInputs?: string[] })
+                          ?.additionalInputs || []
+                      ).map((path, index) => (
+                        <div key={index}>{path}</div>
+                      ))}
+                    </dd>
+                  </>
                 )}
                 <dt>输出</dt>
                 <dd>{selected.artifactPath || selected.output || '—'}</dd>
@@ -519,7 +571,9 @@ export function Processing() {
                     <dt>诊断日志</dt>
                     <dd>
                       {diagnosticPaths(selected).map((path) => (
-                        <div key={path} style={{ wordBreak: 'break-all' }}>{path}</div>
+                        <div key={path} style={{ wordBreak: 'break-all' }}>
+                          {path}
+                        </div>
                       ))}
                     </dd>
                   </>
@@ -527,7 +581,10 @@ export function Processing() {
               </dl>
             </div>
 
-            <details open={logOpen} onToggle={(e) => setLogOpen((e.target as HTMLDetailsElement).open)}>
+            <details
+              open={logOpen}
+              onToggle={(e) => setLogOpen((e.target as HTMLDetailsElement).open)}
+            >
               <summary className="muted" style={{ cursor: 'pointer' }}>
                 执行日志
               </summary>
@@ -547,10 +604,12 @@ export function Processing() {
                     : '取消任务'}
                 </button>
               ) : null}
-              {(selected.status === 'failed' || selected.status === 'cancelled' || selected.status === 'interrupted') &&
-               typeof selected.progress === 'object' &&
-               (selected.progress as TaskProgressDetail).completed !== undefined &&
-               (selected.progress as TaskProgressDetail).completed! > 0 ? (
+              {(selected.status === 'failed' ||
+                selected.status === 'cancelled' ||
+                selected.status === 'interrupted') &&
+              typeof selected.progress === 'object' &&
+              (selected.progress as TaskProgressDetail).completed !== undefined &&
+              (selected.progress as TaskProgressDetail).completed! > 0 ? (
                 <button
                   className="btn"
                   type="button"
@@ -562,7 +621,11 @@ export function Processing() {
                 </button>
               ) : null}
               {isDoneStatus(selected.status) ? (
-                <button className="btn" type="button" onClick={() => navigate(rebuildHref(selected))}>
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => navigate(rebuildHref(selected))}
+                >
                   重新处理
                 </button>
               ) : null}

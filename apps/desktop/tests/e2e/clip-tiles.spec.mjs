@@ -58,8 +58,13 @@ function positions(bytes) {
 }
 test('workspace rectangle clips actual output geometry and restores task region', async ({ page }) => {
   await page.goto('/'); await page.getByRole('link', { name: /范围裁剪/ }).click();
-  await fill(page); await page.getByLabel('任务名', { exact: true }).fill('裁剪验收');
-  await page.getByRole('button', { name: '开始裁剪' }).click(); await expect(page.getByText('裁剪任务已创建。')).toBeVisible();
+  await fill(page);
+  await page.getByRole('button', { name: '高级设置', exact: true }).click();
+  await page.getByLabel('任务名', { exact: true }).fill('裁剪验收');
+  await page.getByRole('button', { name: '完成', exact: true }).click();
+  await page.getByRole('button', { name: '开始裁剪' }).click();
+  await expect(page).toHaveURL(/\/processing\?task=e2e-clip-1$/);
+  await expect(page.getByRole('heading', { name: '裁剪验收', exact: true })).toBeVisible();
   expect(submissions[0].operation).toBe('clip-tileset');
   const output = join(root, 'cropped'); const tileset = JSON.parse(await readFile(join(output, 'tileset.json'), 'utf8'));
   const vertices = positions(await readFile(join(output, tileset.root.content.uri)));
@@ -67,7 +72,6 @@ test('workspace rectangle clips actual output geometry and restores task region'
   expect(vertices.every(([x, , z]) => x >= -0.00001 && x <= 0.335 && z <= 0.00001 && z >= -0.333)).toBe(true);
   const report = JSON.parse(await readFile(join(output, 'clip-report.json'), 'utf8'));
   expect(report.trianglesBefore).toBe(1); expect(report.trianglesAfter).toBe(vertices.length / 3);
-  await page.getByRole('link', { name: '查看任务', exact: true }).click();
   await expect(page.getByText('裁剪几何', { exact: true })).toBeVisible();
   await page.locator('aside.split-drawer__panel').getByRole('button', { name: '重新处理', exact: true }).click();
   await expect(page.getByLabel('东经度（度）', { exact: true })).toHaveValue('0.0003');
@@ -82,7 +86,9 @@ test('invalid rectangle is blocked and imported GeoJSON persists and executes', 
   await page.getByLabel('导入 GeoJSON 文件').setInputFiles({ name: 'region.geojson', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(region)) });
   await expect(page.getByLabel('GeoJSON 区域')).toHaveValue(JSON.stringify(region)); await page.reload();
   await expect(page.getByLabel('GeoJSON 区域')).toHaveValue(JSON.stringify(region));
-  await page.getByRole('button', { name: '开始裁剪' }).click(); await expect(page.getByText('裁剪任务已创建。')).toBeVisible();
+  await page.getByRole('button', { name: '开始裁剪' }).click();
+  await expect(page).toHaveURL(/\/processing\?task=e2e-clip-1$/);
+  await expect(page.locator('aside.split-drawer__panel')).toBeVisible();
   expect(submissions[0].options.clip.region).toEqual(region);
 });
 test('existing output and empty region fail without a successful task or overwritten files', async ({ page }) => {

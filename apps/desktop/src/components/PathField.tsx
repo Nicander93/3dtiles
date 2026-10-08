@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 
 type Props = {
   label: string;
@@ -25,13 +25,16 @@ export function PathField({
   error,
   feedback,
 }: Props) {
+  const id = useId();
   return (
     <div className="field path-field">
-      <label>{label}</label>
+      <label htmlFor={id}>{label}</label>
       <div className="row">
         <input
+          id={id}
           className="input"
           value={value}
+          title={value || undefined}
           placeholder={placeholder}
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
