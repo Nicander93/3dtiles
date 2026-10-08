@@ -52,7 +52,7 @@ const defaults: FormState = {
   originY: '',
   originZ: '',
   geographicExport: false,
-  convertThreads: 1,
+  convertThreads: 0,
 };
 
 function loadConfig(): FormState {
@@ -137,7 +137,7 @@ export function OsgbConvert() {
         setDefaultOutputRoot(s.defaultOutputRoot || '');
         setExecutionSettings(s.execution || null);
         if (s.defaultConvertThreads !== undefined) {
-          setForm((f) => ({ ...f, convertThreads: s.defaultConvertThreads ?? 1 }));
+          setForm((f) => ({ ...f, convertThreads: s.defaultConvertThreads ?? 0 }));
         }
         if (s.defaultTextureCompress !== undefined) {
           setForm((f) => {
@@ -544,12 +544,12 @@ export function OsgbConvert() {
               value={form.convertThreads}
               onChange={(e) => update('convertThreads', Number(e.target.value))}
             >
-              <option value={1}>1（推荐 M1 试用版）</option>
+              <option value={0}>自动（CPU 核心数一半，最多 8）</option>
+              <option value={1}>1</option>
               <option value={2}>2</option>
               <option value={4}>4</option>
-              <option value={0}>自动（CPU 核心数一半）</option>
             </select>
-            <div className="field-hint">M1 试用版建议使用 1 worker 以确保稳定性</div>
+            <div className="field-hint">默认自动。转换、顶层重建和纹理压缩都按这个并发数运行；转换出错时可改为 1。</div>
           </div>
         </FormSection>
 
