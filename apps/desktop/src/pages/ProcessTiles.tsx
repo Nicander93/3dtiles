@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, friendlyError } from '../api/desktop';
 import type { CapabilitiesResponse, TextureMode } from '../api/types';
-import { AdvancedBlock } from '../components/AdvancedBlock';
+import { Drawer } from '../components/Drawer';
+import { PageHeader } from '../components/PageHeader';
 import { Alert } from '../components/Alert';
 import { FormSection } from '../components/FormSection';
 import { PathField } from '../components/PathField';
@@ -15,7 +16,12 @@ import {
   type RebuildQuality,
 } from '../lib/rebuildQuality';
 import { ktx2Etc1sEnabled, ktx2UastcEnabled, textureModeEnabled } from '../lib/textureCaps';
-import { isTauri, selectInputDirectory, selectOutputDirectory, selectTilesetFile } from '../lib/tauri';
+import {
+  isTauri,
+  selectInputDirectory,
+  selectOutputDirectory,
+  selectTilesetFile,
+} from '../lib/tauri';
 
 const CONFIG_KEY = 'geoforge.tiles.process.config';
 const OUTPUT_TOUCHED_KEY = 'geoforge.tiles.process.outputTouched';
@@ -58,6 +64,7 @@ function pageTitle(op: string | null): string {
 
 export function ProcessTiles() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const op = searchParams.get('op');
   const title = pageTitle(op);
   const opApplied = useRef(false);
@@ -78,20 +85,26 @@ export function ProcessTiles() {
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => {
-    void api.capabilities().then(setCaps).catch(() => setCaps(null));
-    void api.getSettings().then((s) => {
-      setDefaultOutputRoot(s.defaultOutputRoot || '');
-      if (s.defaultTextureCompress !== undefined) {
-        setForm((f) => {
-          if (s.defaultTextureCompress) {
-            const ktx2Available = ktx2Etc1sEnabled(caps, true);
-            return { ...f, textureMode: ktx2Available ? 'ktx2-etc1s' : 'keep' };
-          } else {
-            return { ...f, textureMode: 'keep' };
-          }
-        });
-      }
-    }).catch(() => {});
+    void api
+      .capabilities()
+      .then(setCaps)
+      .catch(() => setCaps(null));
+    void api
+      .getSettings()
+      .then((s) => {
+        setDefaultOutputRoot(s.defaultOutputRoot || '');
+        if (s.defaultTextureCompress !== undefined) {
+          setForm((f) => {
+            if (s.defaultTextureCompress) {
+              const ktx2Available = ktx2Etc1sEnabled(caps, true);
+              return { ...f, textureMode: ktx2Available ? 'ktx2-etc1s' : 'keep' };
+            } else {
+              return { ...f, textureMode: 'keep' };
+            }
+          });
+        }
+      })
+      .catch(() => {});
   }, [caps]);
 
   useEffect(() => {
@@ -265,8 +278,7 @@ export function ProcessTiles() {
       setMessage(
         id ? (
           <>
-            任务已创建{' '}
-            <Link to={`/processing?task=${encodeURIComponent(id)}`}>查看任务</Link>
+            任务已创建 <Link to={`/processing?task=${encodeURIComponent(id)}`}>查看任务</Link>
           </>
         ) : (
           '任务已创建'
@@ -275,8 +287,13 @@ export function ProcessTiles() {
       // Keep the fresh unique path fixed; otherwise the auto-suggest effect
       // can immediately reuse the just-submitted `_process` directory.
       setOutputTouched(true);
-      const nextOut = suggestOutputPath(form.input, defaultOutputRoot, `_process_${Date.now().toString(36)}`);
+      const nextOut = suggestOutputPath(
+        form.input,
+        defaultOutputRoot,
+        `_process_${Date.now().toString(36)}`,
+      );
       if (nextOut) setForm((f) => ({ ...f, output: nextOut }));
+      if (id) navigate(`/processing?task=${encodeURIComponent(id)}`);
     } catch (e) {
       setError(friendlyError(e));
     } finally {
@@ -288,16 +305,15 @@ export function ProcessTiles() {
 
   return (
     <div className="page">
-      <div className="page-header">
-        <div>
-          <div className="page-crumb">
-            <Link to="/">← 返回工具</Link>
-            <span>/</span>
-            <span>{title}</span>
-          </div>
-          <h1>{title}</h1>
-        </div>
-      </div>
+      <PageHeader
+        title={title}
+        description="重建层级或处理纹理，生成独立成果。"
+        actions={
+          <button className="btn" type="button" onClick={() => setAdvancedOpen(true)}>
+            高级设置
+          </button>
+        }
+      />
 
       <div className="page-form">
         {error ? (
@@ -319,38 +335,34 @@ export function ProcessTiles() {
           </div>
         ) : null}
 
-        <FormSection title="输入">
+        <FormSection title="数据" description="选择要处理的源数据。">
           <PathField
             label="Tileset 目录"
             value={form.input}
             placeholder="含 tileset.json"
             onChange={(v) => update('input', v)}
-            onPick={
-              isTauri() ? () => void pickInputDirectory() : undefined
-            }
+            onPick={isTauri() ? () => void pickInputDirectory() : undefined}
           />
           {isTauri() ? (
             <div className="field">
-              <button
-                className="btn"
-                type="button"
-                onClick={() => void pickTilesetFile()}
-              >
+              <button className="btn" type="button" onClick={() => void pickTilesetFile()}>
                 选择 tileset.json
               </button>
             </div>
           ) : null}
         </FormSection>
 
-        <FormSection title="处理选项">
+        <FormSection title="处理" description="常用参数" columns={3}>
           <div className="field">
+            <label>顶层重建</label>
             <Switch checked={form.rebuildTop} onChange={(v) => update('rebuildTop', v)}>
-              顶层重建
+              {form.rebuildTop ? '开启' : '关闭'}
             </Switch>
           </div>
           <div className="field">
             <label>纹理处理</label>
             <select
+              aria-label="纹理处理"
               className="select"
               value={form.textureMode}
               onChange={(e) => update('textureMode', e.target.value as TextureMode)}
@@ -368,62 +380,31 @@ export function ProcessTiles() {
             </select>
           </div>
 
-          <AdvancedBlock open={advancedOpen} onToggle={setAdvancedOpen}>
-            <div className="field">
-              <label>重建质量</label>
-              <select
-                className="select"
-                disabled={!form.rebuildTop}
-                value={form.quality}
-                onChange={(e) => {
-                  const quality = e.target.value as RebuildQuality;
-                  const preset = rebuildQualityOptions(quality, ktxOk);
-                  setForm((f) => ({
-                    ...f,
-                    quality,
-                    rebuildLevels: preset.levels,
-                  }));
-                }}
-              >
-                <option value="quality">质量优先</option>
-                <option value="balanced">均衡</option>
-                <option value="speed">性能优先</option>
-              </select>
-            </div>
-            <div className="field">
-              <label>重建层数</label>
-              <select
-                className="select"
-                disabled={!form.rebuildTop}
-                value={form.rebuildLevels}
-                onChange={(e) => update('rebuildLevels', Number(e.target.value))}
-              >
-                <option value={0}>自动到根</option>
-                <option value={1}>1</option>
-                <option value={2}>2</option>
-              </select>
-              <div className="field-hint">
-                {form.rebuildTop ? rebuildLevelsLabel(form.rebuildLevels) : '未启用顶层重建'}
-              </div>
-            </div>
-            <details>
-              <summary className="muted" style={{ cursor: 'pointer', fontSize: 13 }}>
-                任务信息
-              </summary>
-              <div className="field" style={{ marginTop: 8 }}>
-                <label>任务名</label>
-                <input
-                  className="input"
-                  placeholder="可选"
-                  value={form.name}
-                  onChange={(e) => update('name', e.target.value)}
-                />
-              </div>
-            </details>
-          </AdvancedBlock>
+          <div className="field">
+            <label>重建质量</label>
+            <select
+              aria-label="重建质量"
+              className="select"
+              disabled={!form.rebuildTop}
+              value={form.quality}
+              onChange={(e) => {
+                const quality = e.target.value as RebuildQuality;
+                const preset = rebuildQualityOptions(quality, ktxOk);
+                setForm((f) => ({
+                  ...f,
+                  quality,
+                  rebuildLevels: preset.levels,
+                }));
+              }}
+            >
+              <option value="quality">质量优先</option>
+              <option value="balanced">均衡</option>
+              <option value="speed">性能优先</option>
+            </select>
+          </div>
         </FormSection>
 
-        <FormSection title="输出">
+        <FormSection title="输出" description="新建独立成果目录。">
           <PathField
             label="成果目录（选择父目录后自动生成）"
             value={form.output}
@@ -431,11 +412,44 @@ export function ProcessTiles() {
               setOutputTouched(true);
               update('output', v);
             }}
-            onPick={
-              isTauri() ? () => void pickOutputParent() : undefined
-            }
+            onPick={isTauri() ? () => void pickOutputParent() : undefined}
           />
         </FormSection>
+
+        <Drawer title="高级设置" open={advancedOpen} onClose={() => setAdvancedOpen(false)}>
+          <div className="field">
+            <label>重建层数</label>
+            <select
+              aria-label="重建层数"
+              className="select"
+              disabled={!form.rebuildTop}
+              value={form.rebuildLevels}
+              onChange={(e) => update('rebuildLevels', Number(e.target.value))}
+            >
+              <option value={0}>自动到根</option>
+              <option value={1}>1</option>
+              <option value={2}>2</option>
+            </select>
+            <div className="field-hint">
+              {form.rebuildTop ? rebuildLevelsLabel(form.rebuildLevels) : '未启用顶层重建'}
+            </div>
+          </div>
+          <details>
+            <summary className="muted" style={{ cursor: 'pointer', fontSize: 13 }}>
+              任务信息
+            </summary>
+            <div className="field" style={{ marginTop: 8 }}>
+              <label>任务名</label>
+              <input
+                aria-label="任务名"
+                className="input"
+                placeholder="可选"
+                value={form.name}
+                onChange={(e) => update('name', e.target.value)}
+              />
+            </div>
+          </details>
+        </Drawer>
 
         <SubmitBar
           onReset={handleReset}

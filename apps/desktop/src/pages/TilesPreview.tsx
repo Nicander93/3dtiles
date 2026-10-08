@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { CaretDown } from '@phosphor-icons/react';
+import { CaretDown, X } from '@phosphor-icons/react';
 import { absolutizeLocalUrl, api, friendlyError, isTauri } from '../api/desktop';
 import type { Artifact } from '../api/types';
 import { Alert } from '../components/Alert';
 import { selectTilesetFile } from '../lib/tauri';
 import { PreviewClipPanel } from '../components/PreviewClipPanel';
+import { useMenuDismiss } from '../hooks/useMenuDismiss';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -27,6 +28,8 @@ export function TilesPreview() {
   const [canClip, setCanClip] = useState(false);
   const loadGeneration = useRef(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useMenuDismiss(menuRef, processOpen, () => setProcessOpen(false));
 
   const hasData = Boolean(tilesetUrl);
   useEffect(() => {
@@ -196,7 +199,7 @@ export function TilesPreview() {
         >
           适应视野
         </button>
-        <div className="menu">
+        <div className="menu" ref={menuRef}>
           <button
             className="btn btn-sm"
             type="button"
@@ -213,6 +216,7 @@ export function TilesPreview() {
                 范围裁剪并导出
               </button>
               <button className="menu__item" type="button" disabled={loadState !== 'ready' || !canClip} onClick={() => { setOperation('flatten'); setInfoOpen(false); setProcessOpen(false); }}>区域压平并导出</button>
+              <div className="menu__divider" />
               <Link className="menu__item" to={processLinks.rebuild} onClick={() => setProcessOpen(false)}>
                 顶层重建
               </Link>
@@ -303,8 +307,8 @@ export function TilesPreview() {
 
         {infoOpen && !operation ? (
           <aside className="info-panel">
+            <div className="inspector-head"><h2>数据信息</h2><button className="btn btn-ghost btn-sm" type="button" aria-label="关闭数据信息" onClick={() => setInfoOpen(false)}><X size={16} /></button></div>
             <div>
-              <h3>数据信息</h3>
               <div className="summary-box">
                 <dl>
                   <dt>名称</dt>

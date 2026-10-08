@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { DotsThree, MagnifyingGlass } from '@phosphor-icons/react';
 import { api, friendlyError, isTauri } from '../api/desktop';
 import type { Artifact } from '../api/types';
+import { useMenuDismiss } from '../hooks/useMenuDismiss';
 import { Alert } from '../components/Alert';
 import { EmptyState } from '../components/EmptyState';
 import { suggestOutputPath } from '../lib/formUtils';
@@ -28,6 +29,8 @@ export function Results() {
   const [copied, setCopied] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [menuId, setMenuId] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useMenuDismiss(menuRef, Boolean(menuId), () => setMenuId(null));
 
   useEffect(() => {
     void (async () => {
@@ -82,6 +85,7 @@ export function Results() {
       <div className="page-header full-width">
         <div>
           <h1>成果</h1>
+          <p>预览成果或继续处理。</p>
         </div>
         <div className="search-wrap">
           <span className="search-wrap__icon" aria-hidden>
@@ -115,7 +119,7 @@ export function Results() {
       ) : filtered.length === 0 ? (
         <p className="muted">未找到成果</p>
       ) : (
-        <div>
+        <div className="result-list">
           {filtered.map((a) => {
             const hasTiles = a.has_tileset || a.hasTileset;
             const missing = a.available === false;
@@ -123,6 +127,9 @@ export function Results() {
               <div className="result-row" key={a.id}>
                 <div className="result-row__body">
                   <h3 title={a.path}>{a.label || a.id}</h3>
+                  <div className="result-path" title={a.path}>
+                    {a.path}
+                  </div>
                   <div className="result-row__meta">
                     {missing ? (
                       <span style={{ color: 'var(--danger)' }}>文件不存在</span>
@@ -138,13 +145,24 @@ export function Results() {
                     className="btn btn-sm"
                     to={previewHref(a)}
                     aria-disabled={missing || !hasTiles}
-                    style={missing || !hasTiles ? { pointerEvents: 'none', opacity: 0.45 } : undefined}
+                    tabIndex={missing || !hasTiles ? -1 : undefined}
+                    onClick={(event) => {
+                      if (missing || !hasTiles) event.preventDefault();
+                    }}
+                    style={
+                      missing || !hasTiles ? { pointerEvents: 'none', opacity: 0.45 } : undefined
+                    }
                   >
                     预览
                   </Link>
                   <Link
                     className="btn btn-sm"
                     to={processHref(a)}
+                    aria-disabled={missing}
+                    tabIndex={missing ? -1 : undefined}
+                    onClick={(event) => {
+                      if (missing) event.preventDefault();
+                    }}
                     style={missing ? { pointerEvents: 'none', opacity: 0.45 } : undefined}
                   >
                     继续处理
@@ -159,11 +177,12 @@ export function Results() {
                       打开目录
                     </button>
                   ) : null}
-                  <div className="menu">
+                  <div className="menu" ref={menuId === a.id ? menuRef : undefined}>
                     <button
                       className="btn btn-sm btn-ghost"
                       type="button"
-                      aria-label="更多"
+                      aria-label={`更多 · ${a.label || a.id}`}
+                      aria-expanded={menuId === a.id}
                       onClick={() => setMenuId((id) => (id === a.id ? null : a.id))}
                     >
                       <DotsThree size={18} />
