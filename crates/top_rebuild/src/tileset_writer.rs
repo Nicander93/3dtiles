@@ -946,21 +946,33 @@ pub fn rebuild_tileset(
 
     let root_level = tree.levels.len() - 1;
     let root_nodes = &tree.levels[root_level];
-    if root_nodes.len() != 1 {
-        return Err(TopRebuildError::Other(format!(
-            "expected single root proxy, got {} (increase --levels to continue merging until one root, or omit --levels for full pyramid; N×N grid needs ~log2(N) merge levels)",
-            root_nodes.len()
-        )));
+    let mut roots = Vec::new();
+    let mut bounds = Vec::new();
+    let mut root_error = 0.0_f64;
+    for node in root_nodes {
+        let payload = payloads.get(&node.id)
+            .ok_or_else(|| TopRebuildError::Other("missing root payload".into()))?;
+        root_error = root_error.max(payload.geometric_error);
+        bounds.push(payload.bounds.clone());
+        roots.push(emit_node(&node.id, &Mat4d::identity(), &payloads, true)?);
     }
-    let root_id = &root_nodes[0].id;
-    let root_payload = payloads
-        .get(root_id)
-        .ok_or_else(|| TopRebuildError::Other("missing root payload".into()))?;
-
-    let root_json = emit_node(root_id, &Mat4d::identity(), &payloads, true)?;
+    let root_json = if roots.len() == 1 {
+        roots.remove(0)
+    } else if roots.is_empty() {
+        return Err(TopRebuildError::Other("missing root nodes".into()));
+    } else {
+        // A limited number of merge levels leaves several top proxies. Group them
+        // without generating another proxy or changing their world transforms.
+        json!({
+            "boundingVolume": bv_to_json(&BoundingVolume::union_all(&bounds)),
+            "geometricError": root_error,
+            "refine": "REPLACE",
+            "children": roots,
+        })
+    };
     let tileset = json!({
         "asset": { "version": "1.0", "gltfUpAxis": "Z" },
-        "geometricError": root_payload.geometric_error,
+        "geometricError": root_error,
         "root": root_json
     });
     let tileset_path = output.join("tileset.json");

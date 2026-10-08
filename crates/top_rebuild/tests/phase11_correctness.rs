@@ -132,6 +132,62 @@ fn release_missing_content_must_fail() {
 }
 
 #[test]
+fn limited_merge_levels_preserve_every_source_with_world_transforms() {
+    fn leaf_frames(node: &serde_json::Value, parent: &Mat4d, frames: &mut std::collections::BTreeMap<String, Mat4d>) {
+        let local = node.get("transform").map(|v| serde_json::from_value::<Mat4d>(v.clone()).unwrap()).unwrap_or_default();
+        let world = parent.mul(&local);
+        if let Some(uri) = node["content"]["uri"].as_str() {
+            if uri.contains("Tile_") && uri.ends_with("tileset.json") {frames.insert(uri.trim_start_matches("./").to_string(), world.clone());}
+        }
+        if let Some(children) = node["children"].as_array() {for child in children {leaf_frames(child, &world, frames);}}
+    }
+    let input = scratch("limited_levels_source");
+    copy_dir(&fixture_4x4(), &input);
+    let bytes = make_tiny_b3dm();
+    for y in 0..4 {
+        for x in 0..4 {
+            let name = format!("Tile_+{x:03}_+{y:03}");
+            for suffix in ["", "_L1"] {
+                fs::write(input.join(format!("Data/{name}/{name}{suffix}.b3dm")), &bytes).unwrap();
+            }
+        }
+    }
+    let mut source: serde_json::Value = serde_json::from_str(&fs::read_to_string(input.join("tileset.json")).unwrap()).unwrap();
+    source["root"]["transform"] = serde_json::json!([1,0,0,0,0,1,0,0,0,0,1,0,6378137,1000,2000,1]);
+    fs::write(input.join("tileset.json"), serde_json::to_vec(&source).unwrap()).unwrap();
+    let mut original_frames = std::collections::BTreeMap::new();
+    leaf_frames(&source["root"], &Mat4d::identity(), &mut original_frames);
+    assert_eq!(original_frames.len(), 16);
+    for levels in [0, 1, 2] {
+        let out = scratch(&format!("limited_levels_{levels}"));
+        let report = rebuild_tileset(&input, &out, &TreeBuildOptions {max_levels: Some(levels), ..Default::default()}, &release_opts()).unwrap();
+        assert_eq!(report.level_counts.len(), levels as usize + 1);
+        let doc: serde_json::Value = serde_json::from_str(&fs::read_to_string(&report.tileset_path).unwrap()).unwrap();
+        let root = &doc["root"];
+        let mut output_frames = std::collections::BTreeMap::new();
+        leaf_frames(root, &Mat4d::identity(), &mut output_frames);
+        assert_eq!(output_frames.len(), 16);
+        for (uri, frame) in &original_frames {assert!(frame.max_abs_diff(&output_frames[uri]) < 1e-8, "world placement changed for {uri}");}
+        if levels < 2 {
+            assert!(root.get("content").is_none());
+            assert!(root.get("transform").is_none());
+            let children = root["children"].as_array().unwrap();
+            assert_eq!(children.len(), if levels == 0 {16} else {4});
+            for child in children {
+                let transform = child["transform"].as_array().unwrap();
+                assert!(transform[12].as_f64().unwrap() >= 6378137.0);
+                assert!(transform[13].as_f64().unwrap() >= 1000.0);
+                assert!(root["geometricError"].as_f64().unwrap() >= child["geometricError"].as_f64().unwrap());
+            }
+        }
+        let probe = top_rebuild::probe_tileset_structure(&report.tileset_path).unwrap();
+        assert_eq!(probe.leaf_external, 16);
+        assert_eq!(probe.proxy_nodes, if levels == 0 {0} else if levels == 1 {4} else {5});
+        for content in walkdir_b3dm(&out) {validate_release_content(&content).unwrap();}
+    }
+}
+
+#[test]
 fn release_corrupt_b3dm_must_fail() {
     let input = fixture_with_corrupt_b3dm();
     let out = scratch("phase11_release_corrupt_out");
