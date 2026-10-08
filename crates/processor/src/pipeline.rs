@@ -138,6 +138,7 @@ fn run_convert_model(
         latitude,
         height,
     )?;
+    crate::stages::model_anchor::apply(&staged, &options.georeference, cancel)?;
     commit::write_checkpoint(&temp, commit::Checkpoint::Converted)?;
     check_cancel(cancel)?;
     commit::write_checkpoint(&temp, commit::Checkpoint::Validating)?;
@@ -188,6 +189,10 @@ fn error_code_for_message(message: &str) -> &'static str {
         || lower.contains("requires an explicit model")
     {
         "MODEL_INPUT_INVALID"
+    } else if lower.contains("unsupported osgb coordinate override") || lower.contains("unsupported osgb origin override") {
+        "OSGB_GEOREFERENCE_UNSUPPORTED"
+    } else if lower.contains("invalid osgb") {
+        "OSGB_METADATA_INVALID"
     } else if lower.contains("projected model georeference") {
         "MODEL_GEOREFERENCE_UNSUPPORTED"
     // A converter failure often echoes the input metadata path in stderr.  Use
@@ -339,6 +344,7 @@ fn run_convert_osgb(
         .unwrap_or(config.input_path())
         .to_string();
 
+    crate::geo::validate_osgb_geo(&scan_result, options)?;
     let effective = resolve_effective_geo(&scan_result, options);
     emitter.log(&format!(
         "[geo] effectiveCrs={:?} geographicExport={:?}",

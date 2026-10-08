@@ -14,6 +14,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "test": "node scripts/test-form-utils.mjs",
+    "test:coordinates": "cargo build -p processor --manifest-path ../../Cargo.toml --offline && node scripts/audit-coordinates.mjs",
     "test:e2e": "cargo build -p processor --manifest-path ../../Cargo.toml --offline && playwright test",
     "preview": "vite preview",
     "tauri": "tauri",

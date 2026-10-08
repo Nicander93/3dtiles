@@ -90,10 +90,7 @@ pub fn node_transform(node: &Value) -> Result<Matrix, String> {
     transform(Some(&serde_json::json!(m)))
 }
 pub fn ecef(lon: f64, lat: f64) -> Point {
-    let (s, c) = lat.to_radians().sin_cos();
-    let (sl, cl) = lon.to_radians().sin_cos();
-    let n = 6378137. / (1. - 6.6943799901413165e-3 * s * s).sqrt();
-    [n * c * cl, n * c * sl, n * (1. - 6.6943799901413165e-3) * s]
+    crate::geo::cartographic_to_ecef(lon, lat, 0.)
 }
 #[derive(Clone)]
 pub struct Region {

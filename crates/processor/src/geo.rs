@@ -4,6 +4,40 @@ use regex::Regex;
 use serde_json::{json, Value};
 use std::sync::OnceLock;
 
+pub fn cartographic_to_ecef(lon: f64, lat: f64, height: f64) -> [f64; 3] {
+    let (s, c) = lat.to_radians().sin_cos();
+    let (sl, cl) = lon.to_radians().sin_cos();
+    let n = 6378137. / (1. - 6.6943799901413165e-3 * s * s).sqrt();
+    [
+        (n + height) * c * cl,
+        (n + height) * c * sl,
+        (n * (1. - 6.6943799901413165e-3) + height) * s,
+    ]
+}
+pub fn enu_to_ecef(lon: f64, lat: f64, height: f64) -> [f64; 16] {
+    let (s, c) = lat.to_radians().sin_cos();
+    let (sl, cl) = lon.to_radians().sin_cos();
+    let p = cartographic_to_ecef(lon, lat, height);
+    [
+        -sl,
+        cl,
+        0.,
+        0.,
+        -s * cl,
+        -s * sl,
+        c,
+        0.,
+        c * cl,
+        c * sl,
+        s,
+        0.,
+        p[0],
+        p[1],
+        p[2],
+        1.,
+    ]
+}
+
 fn enu_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -18,8 +52,12 @@ fn epsg_re() -> &'static Regex {
 }
 
 pub fn parse_origin_xyz(value: &Value) -> Option<(f64, f64, f64)> {
+    let p = parse_origin_components(value)?;
+    [p.0, p.1, p.2].iter().all(|v| v.is_finite()).then_some(p)
+}
+fn parse_origin_components(value: &Value) -> Option<(f64, f64, f64)> {
     if let Some(arr) = value.as_array() {
-        if arr.len() >= 3 {
+        if arr.len() == 3 {
             return Some((arr[0].as_f64()?, arr[1].as_f64()?, arr[2].as_f64()?));
         }
     }
@@ -34,7 +72,7 @@ pub fn parse_origin_xyz(value: &Value) -> Option<(f64, f64, f64)> {
             .split(|c: char| c == ',' || c == ';' || c.is_whitespace())
             .filter(|s| !s.is_empty())
             .collect();
-        if parts.len() >= 3 {
+        if parts.len() == 3 {
             return Some((
                 parts[0].parse().ok()?,
                 parts[1].parse().ok()?,
@@ -48,7 +86,132 @@ pub fn parse_origin_xyz(value: &Value) -> Option<(f64, f64, f64)> {
 pub fn parse_enu_lat_lon(srs: Option<&str>) -> Option<(f64, f64)> {
     let s = srs?;
     let m = enu_re().captures(s)?;
-    Some((m[1].parse().ok()?, m[2].parse().ok()?))
+    let lat: f64 = m[1].parse().ok()?;
+    let lon: f64 = m[2].parse().ok()?;
+    (lat.is_finite() && lon.is_finite() && lat.abs() <= 90. && lon.abs() <= 180.)
+        .then_some((lat, lon))
+}
+
+/// The installed OSGB converter reads CRS/origin from metadata, not a complete override.
+/// Reject changes it cannot honor instead of reporting them as effective coordinates.
+pub fn validate_osgb_geo(scan: &Value, options: &Value) -> Result<(), String> {
+    let geo = geo_opts(options);
+    for value in [&geo, options.get("convert").unwrap_or(&Value::Null)] {
+        if ["x", "y", "offset"]
+            .iter()
+            .any(|key| value.get(key).is_some())
+        {
+            return Err("unsupported OSGB coordinate override: use metadata.xml SRS/SRSOrigin instead of x/y/offset".into());
+        }
+    }
+    if let Some(crs) = geo
+        .get("crs")
+        .or_else(|| geo.get("crsOverride"))
+        .or_else(|| options.get("crsOverride"))
+    {
+        if !crs.is_string() {
+            return Err("invalid OSGB CRS: expected a string".into());
+        }
+    }
+    let effective = resolve_effective_geo(scan, options);
+    if let Some(crs) = effective["effectiveCrs"].as_str() {
+        if crs.trim().to_uppercase().starts_with("ENU") && parse_enu_lat_lon(Some(crs)).is_none() {
+            return Err(
+                "invalid OSGB ENU coordinates: use ENU:latitude,longitude within ±90°,±180°".into(),
+            );
+        }
+    }
+    if let Some(crs) = effective["crsOverride"].as_str() {
+        let source = effective["scanSrs"].as_str().unwrap_or("").trim();
+        let same = crs == source
+            || (parse_enu_lat_lon(Some(crs)).is_some()
+                && parse_enu_lat_lon(Some(crs)) == parse_enu_lat_lon(Some(source)))
+            || (parse_epsg_code(Some(crs)).is_some()
+                && parse_epsg_code(Some(crs)) == parse_epsg_code(Some(source)));
+        if !same {
+            return Err("unsupported OSGB coordinate override: installed converter uses metadata.xml SRS; update source metadata instead".into());
+        }
+    }
+    let origin = geo
+        .get("origin")
+        .or_else(|| geo.get("originOverride"))
+        .or_else(|| options.get("originOverride"));
+    let fields = ["originX", "originY", "originZ"];
+    let has_fields = fields.iter().any(|k| geo.get(k).is_some());
+    let requested = if has_fields {
+        let a: Option<Vec<f64>> = fields
+            .iter()
+            .map(|k| geo.get(k)?.as_f64().filter(|v| v.is_finite()))
+            .collect();
+        let a = a.ok_or("invalid OSGB origin: all X/Y/Z values must be finite")?;
+        Some((a[0], a[1], a[2]))
+    } else if let Some(v) = origin {
+        Some(
+            parse_origin_xyz(v)
+                .ok_or("invalid OSGB origin: exactly three finite X/Y/Z values required")?,
+        )
+    } else {
+        None
+    };
+    if let Some(requested) = requested {
+        let source = effective["scanOrigin"]
+            .as_str()
+            .and_then(|s| parse_origin_xyz(&json!(s)));
+        if source != Some(requested) {
+            return Err("unsupported OSGB origin override: installed converter uses metadata.xml SRSOrigin; update source metadata instead".into());
+        }
+    }
+    if let Some(config) = options.pointer("/convert/config").and_then(Value::as_str) {
+        let config: Value =
+            serde_json::from_str(config).map_err(|_| "invalid converter config JSON")?;
+        if ["x", "y", "offset"].iter().any(|k| config.get(k).is_some()) {
+            return Err("unsupported OSGB coordinate override in convert.config; use metadata.xml SRS/SRSOrigin".into());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod coordinate_tests {
+    use super::*;
+    #[test]
+    fn enu_and_origin_reject_invalid_coordinates() {
+        assert_eq!(parse_enu_lat_lon(Some("ENU:-35,-73")), Some((-35., -73.)));
+        for s in ["ENU:91,0", "ENU:0,181", "ENU:NaN,0"] {
+            assert!(parse_enu_lat_lon(Some(s)).is_none());
+        }
+        for v in [json!("1,2,NaN"), json!("1,2,3,4"), json!([1, 2])] {
+            assert!(parse_origin_xyz(&v).is_none());
+        }
+    }
+    #[test]
+    fn osgb_metadata_is_used_and_unsupported_overrides_fail() {
+        let scan = json!({"metadata":{"srs":"EPSG:4547","srsOrigin":"1,2,3"}});
+        assert!(validate_osgb_geo(&scan, &json!({})).is_ok());
+        assert!(
+            validate_osgb_geo(&scan, &json!({"geo":{"crs":"epsg:4547","origin":[1,2,3]}})).is_ok()
+        );
+        for options in [
+            json!({"geo":{"crs":"EPSG:3857"}}),
+            json!({"geo":{"origin":[2,2,3]}}),
+            json!({"originX":1}),
+            json!({"convert":{"offset":5}}),
+            json!({"geo":{"crs":12}}),
+            json!({"convert":{"config":"{\"x\":117}"}}),
+        ] {
+            assert!(validate_osgb_geo(&scan, &options).is_err(), "{options}");
+        }
+    }
+    #[test]
+    fn ecef_reference_points_and_enu_axes() {
+        assert_eq!(cartographic_to_ecef(0., 0., 10.), [6378147., 0., 0.]);
+        let pole = cartographic_to_ecef(0., 90., 0.);
+        assert!(pole[0].abs() < 1e-8 && (pole[2] - 6356752.314245179).abs() < 1e-8);
+        let frame = enu_to_ecef(0., 0., 0.);
+        assert_eq!(&frame[0..3], &[0., 1., 0.]);
+        assert_eq!(&frame[4..7], &[0., 0., 1.]);
+        assert_eq!(&frame[8..11], &[1., 0., 0.]);
+    }
 }
 
 pub fn parse_epsg_code(srs: Option<&str>) -> Option<i64> {
@@ -235,62 +398,7 @@ pub fn missing_crs_message(effective: &Value) -> Option<String> {
     )
 }
 
-pub fn build_tile_config_json(effective: &Value) -> (Option<String>, Vec<String>) {
-    let mut notes = Vec::new();
-    let mut cfg = serde_json::Map::new();
-
-    let enu = effective.get("enuLatLon");
-    if let Some(enu) = enu {
-        if effective
-            .get("crsOverride")
-            .and_then(|v| v.as_str())
-            .is_some()
-        {
-            if let (Some(lon), Some(lat)) = (
-                enu.get("lon").and_then(|v| v.as_f64()),
-                enu.get("lat").and_then(|v| v.as_f64()),
-            ) {
-                cfg.insert("x".into(), json!(lon));
-                cfg.insert("y".into(), json!(lat));
-                notes.push(format!(
-                    "CLI -c x/y from CRS override ENU lon={lon}, lat={lat}"
-                ));
-            }
-        }
-    }
-
-    if let Some(origin) = effective.get("effectiveOrigin") {
-        let has_override = effective
-            .get("originOverride")
-            .map(|v| !v.is_null())
-            .unwrap_or(false);
-        if has_override {
-            if let Some(z) = origin.get("z").and_then(|v| v.as_f64()) {
-                cfg.insert("offset".into(), json!(z));
-                notes.push(format!("CLI -c offset from origin override z={z}"));
-            }
-        }
-    }
-
-    if effective
-        .get("crsOverride")
-        .and_then(|v| v.as_str())
-        .is_some()
-        && enu.is_none()
-    {
-        notes.push(
-            "CRS override stored in task options; current 3dtile CLI has no EPSG/WKT flag; \
-runtime still uses input metadata.xml SRS."
-                .into(),
-        );
-    }
-
-    if cfg.is_empty() {
-        (None, notes)
-    } else {
-        (
-            Some(serde_json::to_string(&Value::Object(cfg)).unwrap_or_default()),
-            notes,
-        )
-    }
+pub fn build_tile_config_json(_effective: &Value) -> (Option<String>, Vec<String>) {
+    // OSGB uses its metadata; matching overrides are a no-op, never extra offsets.
+    (None, Vec::new())
 }
