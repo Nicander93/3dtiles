@@ -18,21 +18,26 @@ test.beforeEach(async ({ page }) => {
   }, font);
 });
 
-async function installDesktop(page, { failSubmit = false, converterReady = true } = {}) {
+async function installDesktop(
+  page,
+  { failSubmit = false, converterReady = true, savedSettings = {} } = {},
+) {
   // Exercise the existing Tauri adapter and its exact command payload, not a
   // replacement page/API implementation. Real processor tests remain in e2e/.
   await page.addInitScript(
-    ({ failSubmit, converterReady }) => {
+    ({ failSubmit, converterReady, savedSettings }) => {
       const caps = {
         convert: { exists: converterReady, native: converterReady },
         model: { ready: converterReady, projectedGeoreference: true },
         postprocessBasisu: { available: false },
       };
+      // Without settingsVersion this mirrors a record saved when 1 was the default.
       let settings = {
         defaultOutputRoot: '',
         defaultConvertThreads: 1,
         defaultTextureCompress: false,
         execution: { resourceMode: 'auto' },
+        ...savedSettings,
       };
       const tasks = [
         {
@@ -134,7 +139,7 @@ async function installDesktop(page, { failSubmit = false, converterReady = true 
         },
       };
     },
-    { failSubmit, converterReady },
+    { failSubmit, converterReady, savedSettings },
   );
 }
 
@@ -182,6 +187,7 @@ test('OSGB common choices, modal focus and unchanged submit contract', async ({ 
   await page.getByLabel('数据目录').fill('/survey/city');
   await expect(page.getByText('已识别 OSGB 数据')).toBeVisible();
   await page.getByLabel('重建质量').selectOption('speed');
+  await expect(page.getByLabel('转换并发数')).toHaveValue('0');
   await page.getByLabel('转换并发数').selectOption('4');
   await page.getByLabel('成果目录（选择父目录后自动生成）').fill('/results/new-city');
   await screenshot(page, 'osgb');
@@ -243,6 +249,19 @@ test('OSGB common choices, modal focus and unchanged submit contract', async ({ 
     },
   });
   await expect(page.locator('.split-drawer__panel')).toContainText('新城区');
+});
+
+test('a single convert worker chosen after the default change is kept', async ({ page }) => {
+  await installDesktop(page, { savedSettings: { defaultConvertThreads: 1, settingsVersion: 2 } });
+  await page.goto('/osgb/convert');
+  await expect(page.getByLabel('转换并发数')).toHaveValue('1');
+  await page.goto('/settings');
+  await expect(
+    page
+      .locator('.field')
+      .filter({ has: page.locator('label', { hasText: /^默认转换并发数$/ }) })
+      .locator('select'),
+  ).toHaveValue('1');
 });
 
 test('failed submission keeps form and unavailable capabilities stay disabled', async ({

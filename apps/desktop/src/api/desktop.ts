@@ -60,20 +60,33 @@ export interface DesktopSettings {
   pythonServerUrl: string;
   resourceServerPort: number;
   execution?: ExecutionSettings;
+  settingsVersion?: number;
 }
+
+const SETTINGS_VERSION = 2;
 
 const settingsDefaults: DesktopSettings = {
   defaultOutputRoot: '',
   defaultRebuildTop: true,
   defaultRebuildLevels: 0,
   defaultTextureCompress: false,
-  defaultConvertThreads: 1,
+  defaultConvertThreads: 0,
   pythonServerUrl: 'http://127.0.0.1:8787',
   resourceServerPort: 0,
   execution: {
     resourceMode: 'auto',
   },
 };
+
+// Before version 2 the UI defaulted to one convert worker, so a saved 1 cannot be told apart
+// from an untouched default. Move it to the automatic default; later saves keep 1 as chosen.
+function migrateSettings(saved: Partial<DesktopSettings>): DesktopSettings {
+  const settings = { ...settingsDefaults, ...saved, settingsVersion: SETTINGS_VERSION };
+  if ((saved.settingsVersion ?? 0) < SETTINGS_VERSION && saved.defaultConvertThreads === 1) {
+    settings.defaultConvertThreads = settingsDefaults.defaultConvertThreads;
+  }
+  return settings;
+}
 
 export const desktop = {
   isTauri,
@@ -228,12 +241,12 @@ export const desktop = {
   getSettings: async (): Promise<DesktopSettings> => {
     if (isTauri()) {
       const s = await tauriInvoke<DesktopSettings>('get_settings');
-      return { ...settingsDefaults, ...s };
+      return migrateSettings(s);
     }
     try {
       const raw = localStorage.getItem('geoforge.settings');
       if (!raw) return { ...settingsDefaults };
-      return { ...settingsDefaults, ...JSON.parse(raw) };
+      return migrateSettings(JSON.parse(raw));
     } catch {
       return { ...settingsDefaults };
     }
@@ -243,8 +256,9 @@ export const desktop = {
     if (isTauri()) {
       return tauriInvoke<DesktopSettings>('update_settings', { settings });
     }
-    localStorage.setItem('geoforge.settings', JSON.stringify(settings));
-    return settings;
+    const saved = { ...settings, settingsVersion: SETTINGS_VERSION };
+    localStorage.setItem('geoforge.settings', JSON.stringify(saved));
+    return saved;
   },
 
   getResourceServerInfo: async () => {

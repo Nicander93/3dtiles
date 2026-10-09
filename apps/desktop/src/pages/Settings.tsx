@@ -17,7 +17,7 @@ const defaults: DesktopSettings = {
   defaultRebuildTop: true,
   defaultRebuildLevels: 0,
   defaultTextureCompress: false,
-  defaultConvertThreads: 1,
+  defaultConvertThreads: 0,
   pythonServerUrl: 'http://127.0.0.1:8787',
   resourceServerPort: 0,
   execution: {
@@ -159,7 +159,7 @@ export function Settings() {
             <label>默认转换并发数</label>
             <select
               className="select"
-              value={form.defaultConvertThreads ?? 1}
+              value={form.defaultConvertThreads ?? 0}
               onChange={(e) =>
                 setForm({
                   ...form,
@@ -167,12 +167,12 @@ export function Settings() {
                 })
               }
             >
-              <option value={1}>1（推荐 M1 试用版）</option>
+              <option value={0}>自动（CPU 核心数一半，最多 8）</option>
+              <option value={1}>1</option>
               <option value={2}>2</option>
               <option value={4}>4</option>
-              <option value={0}>自动（CPU 核心数一半）</option>
             </select>
-            <div className="field-hint">M1 试用版建议使用 1 worker 以确保稳定性</div>
+            <div className="field-hint">默认自动。转换、顶层重建和纹理压缩都按这个并发数运行；转换出错时可改为 1。</div>
           </div>
         </FormSection>
 
